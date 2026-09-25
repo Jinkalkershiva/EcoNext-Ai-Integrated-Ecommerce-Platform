@@ -1,3 +1,171 @@
-.neon
+# ==============================================================================
+# EcoNext Unified Root .gitignore
+# ==============================================================================
+
+# ==============================================================================
+# Environment & Secrets
+# ==============================================================================
+.env
+.env.*
 .env.local
+.env.*.local
+!.env.example
+!.env.template
+!.env.production.example
+
+# ==============================================================================
+# Java & Maven
+# ==============================================================================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+
+# Spring Boot Configuration Overrides
+application-local.yml
+application-local.yaml
+application-local.properties
+application-secret.yml
+application-secret.yaml
+application-secret.properties
+
+# ==============================================================================
+# Python & Virtual Environments
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==============================================================================
+# Django & Local Storage
+# ==============================================================================
+*.sqlite3
+db.sqlite3
+local_settings.py
+/media/
+/staticfiles/
+media/
+staticfiles/
+celerybeat-schedule
+celerybeat.pid
+
+# ==============================================================================
+# Testing & Code Coverage
+# ==============================================================================
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# ==============================================================================
+# Node, Frontend & Build Tools
+# ==============================================================================
 node_modules/
+.npm/
+.eslintcache
+.stylelintcache
+.vite/
+.next/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.neon
+
+# ==============================================================================
+# IDEs & Text Editors
+# ==============================================================================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+*.bak
+
+# ==============================================================================
+# Operating System Artifacts
+# ==============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ==============================================================================
+# Logs & Cache
+# ==============================================================================
+*.log
+logs/
+.cache/
+*.cache
+
+# ==============================================================================
+# Temporary Files
+# ==============================================================================
+*.tmp
+*.temp
+scratch/
+tmp/
+
+# ==============================================================================
+# Docker Overrides
+# ==============================================================================
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ==============================================================================
+# AI / ML Local Artifacts
+# (Preserve tracked index files in ml_engine/ while ignoring untracked dumps)
+# ==============================================================================
+*.h5
+*.pth
+*.model
+test.jpg
