@@ -1,0 +1,86 @@
+server:
+  port: ${GATEWAY_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        # 1. Auth & User Service Route (Order: 1)
+        - id: auth-service-route
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/auth/**
+          order: 1
+
+        # 2. Product Catalog, Taxonomies & Kids Route (Order: 2)
+        # Note: /api/products/trending/ is naturally routed here under /api/products/**
+        - id: product-service-route
+          uri: ${PRODUCT_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/products/**, /api/categories/**, /api/kids/**
+          order: 2
+
+        # 3. Shopping Cart Route (Order: 3)
+        - id: cart-service-route
+          uri: ${CART_SERVICE_URL:http://localhost:8083}
+          predicates:
+            - Path=/api/cart/**
+          order: 3
+
+        # 4. Order & Checkout Route (Order: 4)
+        - id: order-service-route
+          uri: ${ORDER_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/api/orders/**
+          order: 4
+
+        # 5. Future Personalization Service Route (Order: 5)
+        - id: personalization-service-route
+          uri: ${PERSONALIZATION_SERVICE_URL:http://localhost:8086}
+          predicates:
+            - Path=/api/personalization/**
+          order: 5
+
+        # 6. AI Copilot & Chatbot Route (Order: 6)
+        # Directly targets the Python AI / Copilot service
+        - id: ai-copilot-route
+          uri: ${AI_SERVICE_URL:http://localhost:8000}
+          predicates:
+            - Path=/api/copilot/**, /api/chat/**
+          order: 6
+
+        # 7. Unmigrated Django Fallback Route (Order: 10000)
+        # Highest order value ensures specific Spring routes take precedence,
+        # while all unmigrated endpoints seamlessly reach the monolithic Django backend.
+        - id: django-fallback-route
+          uri: ${DJANGO_BACKEND_URL:http://localhost:8000}
+          predicates:
+            - Path=/api/**
+          order: 10000
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+    gateway:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    org.springframework.cloud.gateway: INFO
+    com.econext.gateway: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
