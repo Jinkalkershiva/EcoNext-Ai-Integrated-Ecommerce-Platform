@@ -1,0 +1,88 @@
+/* ==========================================================================
+   Kids Mode Product Slider Styles
+   Matching the reference HTML slider with ‹ › buttons and scroll-snap
+   ========================================================================== */
+
+.kids-slider-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.kids-slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.kids-slider-head h2 {
+  font-family: var(--font-display);
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.kids-slider-head p {
+  color: var(--text-secondary);
+  margin: 6px 0 0 0;
+  font-size: 0.95rem;
+}
+
+.kids-slider-track {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 8px 4px 18px 4px;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+}
+
+.kids-slider-track::-webkit-scrollbar {
+  display: none;
+}
+
+.kids-slide-btn {
+  position: absolute;
+  top: 52%;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 2px solid var(--border-subtle);
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+  box-shadow: 0 4px 0 0 var(--border-subtle);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-fast), background-color var(--transition-fast);
+}
+
+.kids-slide-btn:hover {
+  transform: translateY(-2px);
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.kids-slide-btn.left {
+  left: -14px;
+}
+
+.kids-slide-btn.right {
+  right: -14px;
+}
+
+@media (max-width: 640px) {
+  .kids-slide-btn {
+    display: none;
+  }
+}

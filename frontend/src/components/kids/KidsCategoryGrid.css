@@ -1,0 +1,87 @@
+/* ==========================================================================
+   Kids Category Grid Styles
+   Playful rounded category cards
+   ========================================================================== */
+
+.kids-categories-wrap {
+  margin: var(--space-8) 0;
+}
+
+.kids-cat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kids-cat-head h2 {
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.kids-cat-head p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 4px 0 0 0;
+}
+
+.kids-categories-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+
+.kids-category-card {
+  background: var(--bg-surface);
+  border: 2px solid var(--border-subtle);
+  border-radius: 18px;
+  padding: var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.kids-category-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.kids-category-card.active {
+  background-color: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(255, 93, 143, 0.2);
+}
+
+.kids-cat-icon-box {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  transition: transform var(--transition-fast);
+}
+
+.kids-category-card:hover .kids-cat-icon-box {
+  transform: scale(1.1) rotate(4deg);
+}
+
+.kids-cat-name {
+  font-family: var(--font-display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}

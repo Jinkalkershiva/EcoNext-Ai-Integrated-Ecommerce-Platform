@@ -54,6 +54,10 @@
   color: #B45309;
 }
 
+.theme-toggle-btn.active.theme-kids {
+  color: #FF5D8F;
+}
+
 .theme-toggle-label {
   display: none;
 }
@@ -63,6 +67,6 @@
     display: inline;
   }
   .theme-toggle-btn {
-    padding: 4px 10px;
+    padding: 4px 9px;
   }
 }

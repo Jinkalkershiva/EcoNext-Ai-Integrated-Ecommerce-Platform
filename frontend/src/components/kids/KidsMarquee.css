@@ -1,0 +1,54 @@
+/* ==========================================================================
+   Kids Mode Marquee Styles (Purple Band from Visual Reference)
+   ========================================================================== */
+
+.kids-marquee-band {
+  background: var(--color-tertiary, #7B61FF);
+  padding: 14px 0;
+  overflow: hidden;
+  width: 100vw;
+  position: relative;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-8);
+  user-select: none;
+}
+
+.kids-marquee-track {
+  display: flex;
+  gap: 48px;
+  white-space: nowrap;
+  animation: kids-marquee-scroll 22s linear infinite;
+  width: max-content;
+}
+
+.kids-marquee-track span {
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  opacity: 0.95;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@keyframes kids-marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kids-marquee-track {
+    animation: none;
+    transform: none;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}

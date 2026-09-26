@@ -6,20 +6,26 @@ export const THEMES = {
   LIGHT: 'light',
   DARK: 'dark',
   WARM: 'warm',
+  KIDS: 'kids',
 };
 
 export const ThemeProvider = ({ children }) => {
   const [theme, setTheme] = useState(() => {
     try {
       const savedTheme = localStorage.getItem('econext_theme');
-      if (savedTheme === 'dark' || savedTheme === 'light' || savedTheme === 'warm') {
+      if (
+        savedTheme === THEMES.DARK ||
+        savedTheme === THEMES.LIGHT ||
+        savedTheme === THEMES.WARM ||
+        savedTheme === THEMES.KIDS
+      ) {
         return savedTheme;
       }
       return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
+        ? THEMES.DARK
+        : THEMES.LIGHT;
     } catch {
-      return 'light';
+      return THEMES.LIGHT;
     }
   });
 
@@ -32,12 +38,13 @@ export const ThemeProvider = ({ children }) => {
     }
   }, [theme]);
 
-  // 3-way cyclic toggle: light -> dark -> warm -> light
+  // 4-way cyclic toggle: light -> dark -> warm -> kids -> light
   const cycleTheme = () => {
     setTheme((prev) => {
-      if (prev === 'light') return 'dark';
-      if (prev === 'dark') return 'warm';
-      return 'light';
+      if (prev === THEMES.LIGHT) return THEMES.DARK;
+      if (prev === THEMES.DARK) return THEMES.WARM;
+      if (prev === THEMES.WARM) return THEMES.KIDS;
+      return THEMES.LIGHT;
     });
   };
 
@@ -49,9 +56,10 @@ export const ThemeProvider = ({ children }) => {
     setTheme,
     cycleTheme,
     toggleTheme,
-    isDark: theme === 'dark',
-    isWarm: theme === 'warm',
-    isLight: theme === 'light',
+    isDark: theme === THEMES.DARK,
+    isWarm: theme === THEMES.WARM,
+    isLight: theme === THEMES.LIGHT,
+    isKids: theme === THEMES.KIDS,
   };
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

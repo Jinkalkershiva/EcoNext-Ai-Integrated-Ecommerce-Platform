@@ -294,6 +294,118 @@
 }
 
 /* --------------------------------------------------------------------------
+   Kids Theme (Playful, Colorful & Friendly Mode)
+   -------------------------------------------------------------------------- */
+[data-theme="kids"] {
+  --theme-name: 'kids';
+
+  /* Kids Core Palette (From Visual Reference) */
+  --kids-pink: #FF5D8F;
+  --kids-orange: #FF9142;
+  --kids-teal: #0FBF9F;
+  --kids-purple: #7B61FF;
+  --kids-yellow: #FFC94A;
+  --kids-bg: #FDF8F0;
+  --kids-surface: #FFFFFF;
+  --kids-text: #1B1B1B;
+  --kids-sub: #5B5B5B;
+  --kids-border: #EDE6D8;
+
+  /* Primary Brand - Playful Pink */
+  --color-primary: #FF5D8F;
+  --color-primary-hover: #E84577;
+  --color-primary-active: #D12E60;
+  --color-primary-light: #FFE4EC;
+  --color-primary-subtle: #FFF0F4;
+  --color-primary-contrast: #FFFFFF;
+
+  /* Accent - Energy Orange */
+  --color-accent: #FF9142;
+  --color-accent-hover: #E57A2B;
+  --color-accent-light: #FFEADB;
+  --color-accent-subtle: #FFF5EE;
+  --color-accent-contrast: #FFFFFF;
+
+  /* Secondary - Fresh Teal */
+  --color-secondary: #0FBF9F;
+  --color-secondary-hover: #0DA387;
+  --color-secondary-light: #D4F7F0;
+  --color-secondary-subtle: #EAFBF7;
+
+  /* Tertiary - Creative Purple */
+  --color-tertiary: #7B61FF;
+  --color-tertiary-hover: #6449EC;
+  --color-tertiary-light: #EBE7FF;
+
+  /* Quaternary - Sunshine Yellow */
+  --color-quaternary: #FFC94A;
+  --color-quaternary-light: #FFF4D6;
+
+  /* Functional Roles */
+  --color-price: #FF5D8F;
+  --color-badge: #FF9142;
+  --color-badge-eco: #0FBF9F;
+  --color-badge-ai: #7B61FF;
+
+  /* Semantic Feedback */
+  --color-success: #0FBF9F;
+  --color-success-bg: #EAFBF7;
+  --color-success-border: #97E9D9;
+  --color-success-text: #0B8E76;
+
+  --color-warning: #FF9142;
+  --color-warning-bg: #FFF5EE;
+  --color-warning-border: #FFD2B2;
+  --color-warning-text: #B45309;
+
+  --color-danger: #FF5D8F;
+  --color-danger-hover: #E84577;
+  --color-danger-bg: #FFF0F4;
+  --color-danger-border: #FFBCD0;
+  --color-danger-text: #991B1B;
+
+  --color-info: #7B61FF;
+  --color-info-bg: #F4F1FF;
+  --color-info-border: #CDC4FF;
+  --color-info-text: #4C32D3;
+
+  /* Surfaces & Backgrounds - Warm Cream */
+  --bg-app: #FDF8F0;
+  --bg-surface: #FFFFFF;
+  --bg-surface-elevated: #FFFFFF;
+  --bg-surface-sunken: #F5EFE6;
+  --bg-surface-hover: #FAF4EB;
+  --bg-overlay: rgba(27, 27, 27, 0.65);
+
+  /* Typography Colors */
+  --text-primary: #1B1B1B;
+  --text-secondary: #5B5B5B;
+  --text-muted: #828282;
+  --text-disabled: #B4B4B4;
+  --text-inverse: #FFFFFF;
+
+  /* Borders */
+  --border-subtle: #EDE6D8;
+  --border-default: #E2D8C5;
+  --border-strong: #C4B69E;
+  --border-focus: #FF5D8F;
+
+  /* Shadows - Playful soft lift */
+  --shadow-xs: 0 1px 2px 0 rgba(27, 27, 27, 0.05);
+  --shadow-sm: 0 2px 4px 0 rgba(27, 27, 27, 0.06);
+  --shadow-md: 0 4px 8px -1px rgba(27, 27, 27, 0.08);
+  --shadow-lg: 0 10px 20px -3px rgba(123, 97, 255, 0.12), 0 4px 8px -2px rgba(255, 93, 143, 0.08);
+  --shadow-xl: 0 20px 28px -5px rgba(123, 97, 255, 0.16);
+  --shadow-card: 0 4px 12px rgba(255, 93, 143, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 14px 28px -4px rgba(255, 93, 143, 0.18), 0 4px 10px rgba(123, 97, 255, 0.1);
+
+  /* Marquee Banner Colors */
+  --marquee-bg: #7B61FF;
+  --marquee-text: #FFFFFF;
+  --marquee-accent: #FFC94A;
+}
+
+/* --------------------------------------------------------------------------
    Global Universal Scale Tokens (Inherited by all themes)
    -------------------------------------------------------------------------- */
 :root {

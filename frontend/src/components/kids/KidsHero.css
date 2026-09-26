@@ -1,0 +1,244 @@
+/* ==========================================================================
+   Kids Mode Hero Styles
+   Inspired by the colorful reference with animated blobs and video panel
+   ========================================================================== */
+
+.kids-hero-section {
+  position: relative;
+  overflow: hidden;
+  padding: var(--space-10) var(--space-4) var(--space-8);
+  border-radius: var(--radius-xl);
+  margin-bottom: var(--space-6);
+}
+
+.kids-hero-bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, var(--color-tertiary, #7B61FF), var(--color-primary, #FF5D8F) 45%, var(--color-accent, #FF9142) 100%);
+  background-size: 220% 220%;
+  animation: kids-flow 12s ease infinite;
+  opacity: 0.16;
+  z-index: 0;
+  border-radius: var(--radius-xl);
+}
+
+@keyframes kids-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.kids-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(2px);
+  opacity: 0.45;
+  animation: kids-float 7s ease-in-out infinite;
+  z-index: 0;
+  pointer-events: none;
+}
+
+@keyframes kids-float {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-20px) scale(1.06);
+  }
+}
+
+.kids-hero-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: var(--space-8);
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.kids-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--bg-surface);
+  border: 2px solid var(--border-subtle);
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  color: var(--color-tertiary);
+  box-shadow: var(--shadow-xs);
+  margin-bottom: var(--space-3);
+}
+
+.kids-hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 4.2vw, 3.25rem);
+  line-height: 1.08;
+  margin: var(--space-2) 0 var(--space-4);
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.03em;
+}
+
+.kids-hero-title em {
+  font-style: normal;
+  background: linear-gradient(90deg, var(--color-secondary), var(--color-tertiary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.kids-hero-subtext {
+  color: var(--text-secondary);
+  font-size: clamp(0.95rem, 1.2vw, 1.05rem);
+  max-width: 480px;
+  margin: 0 0 var(--space-6) 0;
+  line-height: 1.55;
+}
+
+.kids-btn-row {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.kids-btn {
+  padding: 13px 26px;
+  border-radius: 16px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  border: none;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-decoration: none;
+}
+
+.kids-btn:hover {
+  transform: translateY(-3px);
+}
+
+.kids-btn.primary {
+  background: var(--color-primary);
+  color: #ffffff;
+  box-shadow: 0 6px 0 0 rgba(190, 45, 85, 0.6);
+}
+
+.kids-btn.primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 0 0 rgba(190, 45, 85, 0.6);
+}
+
+.kids-btn.ghost {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 2px solid var(--border-subtle);
+  box-shadow: 0 4px 0 0 var(--border-subtle);
+}
+
+.kids-btn.ghost:hover {
+  border-color: var(--color-tertiary);
+}
+
+/* Kids Animated Visual Video Panel */
+.kids-video-panel {
+  position: relative;
+  z-index: 1;
+  aspect-ratio: 4 / 3;
+  border-radius: 26px;
+  overflow: hidden;
+  border: 4px solid var(--bg-surface);
+  box-shadow: 0 16px 0 0 var(--border-subtle);
+  background: linear-gradient(160deg, var(--color-secondary), var(--color-tertiary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kids-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 6px dashed rgba(255, 255, 255, 0.55);
+  animation: kids-spin 18s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes kids-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.kids-playbtn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  color: var(--color-primary);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  border: none;
+  transition: transform var(--transition-fast);
+}
+
+.kids-playbtn:hover {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.kids-tag-float {
+  position: absolute;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 0.8125rem;
+  box-shadow: 0 6px 0 0 var(--border-subtle);
+  animation: kids-float 5s ease-in-out infinite;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 860px) {
+  .kids-hero-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+  .kids-hero-title {
+    font-size: 2.25rem;
+  }
+  .kids-video-panel {
+    max-width: 440px;
+    margin: 0 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kids-hero-bg,
+  .kids-blob,
+  .kids-ring,
+  .kids-tag-float {
+    animation: none !important;
+  }
+}
