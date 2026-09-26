@@ -1,0 +1,143 @@
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ==========================================================================
+     EcoNext Color Language: Pink, Yellow, Green, Graphite/Pencil, White, Charcoal
+     ========================================================================== */
+  /* EcoNext Pink (Actions, Active States, Highlights, Notifications) */
+  --econext-pink-50: #fff1f2;
+  --econext-pink-100: #ffe4e6;
+  --econext-pink-400: #fb7185;
+  --econext-pink-500: #f43f5e;
+  --econext-pink-600: #e11d48;
+  --econext-pink-700: #be123c;
+  --econext-pink-bg: rgba(244, 63, 94, 0.10);
+  --econext-pink-border: rgba(244, 63, 94, 0.28);
+
+  /* EcoNext Yellow (Warnings, Pending Status, Attention, Lamp Light Mode) */
+  --econext-yellow-50: #fefce8;
+  --econext-yellow-100: #fef9c3;
+  --econext-yellow-400: #facc15;
+  --econext-yellow-500: #eab308;
+  --econext-yellow-600: #ca8a04;
+  --econext-yellow-bg: rgba(234, 179, 8, 0.12);
+  --econext-yellow-border: rgba(234, 179, 8, 0.30);
+  --econext-yellow-glow: rgba(234, 179, 8, 0.35);
+
+  /* EcoNext Green (Success, Completed Orders, Healthy Services, Positive Analytics) */
+  --econext-green-50: #ecfdf5;
+  --econext-green-100: #d1fae5;
+  --econext-green-400: #34d399;
+  --econext-green-500: #10b981;
+  --econext-green-600: #059669;
+  --econext-green-700: #047857;
+  --econext-green-bg: rgba(16, 185, 129, 0.10);
+  --econext-green-border: rgba(16, 185, 129, 0.28);
+
+  /* EcoNext Graphite / Pencil (Structure, Primary Text, Borders, Navigation, Icons) */
+  --econext-graphite-950: #0b0e14;
+  --econext-graphite-900: #0f141d;
+  --econext-graphite-850: #151b26;
+  --econext-graphite-800: #1c2433;
+  --econext-graphite-700: #2a354b;
+  --econext-graphite-600: #425270;
+  --econext-graphite-500: #627494;
+  --econext-graphite-400: #8899b5;
+  --econext-graphite-300: #b5c2d6;
+  --econext-graphite-200: #dce3ed;
+  --econext-graphite-100: #eef2f7;
+  --econext-graphite-50: #f7f9fc;
+
+  /* Aliased Semantic Colors */
+  --primary-color: var(--econext-pink-500);
+  --primary-hover: var(--econext-pink-600);
+  --primary-bg: var(--econext-pink-bg);
+  --primary-border: var(--econext-pink-border);
+
+  --color-success: var(--econext-green-500);
+  --color-success-bg: var(--econext-green-bg);
+  --color-success-border: var(--econext-green-border);
+
+  --color-warning: var(--econext-yellow-500);
+  --color-warning-bg: var(--econext-yellow-bg);
+  --color-warning-border: var(--econext-yellow-border);
+
+  --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.10);
+  --color-danger-border: rgba(239, 68, 68, 0.28);
+
+  --color-info: #0284c7;
+  --color-info-bg: rgba(2, 132, 199, 0.10);
+  --color-info-border: rgba(2, 132, 199, 0.28);
+
+  /* ==========================================================================
+     Dark Mode Theme (Default / Enterprise Graphite Charcoal)
+     ========================================================================== */
+  --bg-app: #0d1117;
+  --bg-surface: #151a23;
+  --bg-surface-elevated: #1c2330;
+  --bg-surface-hover: #232c3d;
+  --bg-subtle: #121720;
+  
+  --border-color: #242d3d;
+  --border-subtle: #1f2736;
+  --border-strong: #323e54;
+  --border-focus: var(--econext-pink-500);
+
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #7c8ba1;
+  --text-inverse: #0d1117;
+
+  --card-bg: var(--bg-surface);
+  --input-bg: var(--bg-surface-elevated);
+
+  /* Solid/Subtle Shadows (NO heavy glowing or glassmorphism) */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  /* Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 140ms ease;
+  --transition-normal: 220ms ease;
+  --transition-slow: 320ms ease;
+}
+
+/* ==========================================================================
+   Light Mode Theme (Clean Warm Graphite Surfaces)
+   ========================================================================== */
+[data-theme="light"] {
+  --bg-app: #f4f6f9;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #f8fafc;
+  --bg-surface-hover: #edf2f7;
+  --bg-subtle: #f9fafb;
+  
+  --border-color: #e2e8f0;
+  --border-subtle: #edf2f7;
+  --border-strong: #cbd5e1;
+  --border-focus: var(--econext-pink-600);
+
+  --text-primary: #0f172a; /* Rich pencil graphite */
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  --card-bg: #ffffff;
+  --input-bg: #ffffff;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.10);
+}

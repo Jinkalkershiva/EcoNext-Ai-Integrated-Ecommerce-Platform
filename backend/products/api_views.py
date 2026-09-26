@@ -25,6 +25,7 @@ from ml_engine.visual_search import visual_search_engine
 from ml_engine.intent_search import IntentBasedSearcher
 from accounts.models import ActivityLog
 from personalization.recommendations import RecommendationService
+from site_analytics.kafka_producer import publish_product_view_event, publish_search_event
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,13 @@ def product_detail(request, product_id):
     if request.user.is_authenticated:
         ActivityLog.objects.create(user=request.user, action='view', product=product)
 
+    # Stream real-time product view event to Big Data Kafka ingestion layer
+    publish_product_view_event(
+        user=request.user,
+        product_id=product.id,
+        category_name=product.category.name if product.category else None
+    )
+
     # A failing predictor must not take the product page down with it — the page
     # is still perfectly useful without the forecast.
     prediction_data = None
@@ -272,6 +280,14 @@ def intent_search(request):
                 }
                 for product in matches
             ]
+
+    total_results_count = sum(len(items) for items in results.values()) if results else 0
+    # Stream real-time search query clickstream event to Big Data Kafka ingestion layer
+    publish_search_event(
+        user=request.user,
+        query=query,
+        results_count=total_results_count
+    )
 
     return Response({
         'status': 'success',

@@ -31,9 +31,14 @@ from site_analytics.models import DailyStats
 
 
 class Command(BaseCommand):
-    help = "Seeds the EcoNext database with comprehensive sustainable catalog and demo data."
+    help = "Seeds the EcoNext database with demo data for development/testing only."
 
     def add_arguments(self, parser):
+        parser.add_argument(
+            '--dev',
+            action='store_true',
+            help='Explicit confirmation to run demo seeding in development mode.',
+        )
         parser.add_argument(
             '--clear',
             action='store_true',
@@ -41,7 +46,16 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        self.stdout.write(self.style.SUCCESS("[*] Starting EcoNext Data Seeding Pipeline..."))
+        if not options.get('dev'):
+            self.stderr.write(self.style.ERROR(
+                "[SECURITY] Seed data command is strictly restricted to development environments.\n"
+                "To seed demo data for local testing, explicitly pass the --dev flag:\n"
+                "  python manage.py seed_data --dev\n"
+                "In production, use the EcoNext Admin Management System to create catalog and staff records."
+            ))
+            return
+
+        self.stdout.write(self.style.SUCCESS("[*] Starting EcoNext Development Data Seeding Pipeline..."))
 
         if options.get('clear'):
             self.stdout.write("Wiping existing product and order demo records...")

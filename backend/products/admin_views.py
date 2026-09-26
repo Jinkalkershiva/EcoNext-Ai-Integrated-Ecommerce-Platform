@@ -3,6 +3,7 @@ Admin Panel REST Endpoints for EcoNext.
 Protected by Role-Based Access Control (RBAC): requires is_staff or is_superuser.
 """
 
+import os
 from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
@@ -10,7 +11,7 @@ from django.db.models import Sum, Count, Avg, Q
 from django.contrib.auth.models import User
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, BasePermission
 from rest_framework.response import Response
 
 from products.models import (
@@ -20,10 +21,24 @@ from products.models import (
 from products.serializers import ProductSerializer, CategorySerializer
 from order_service.models import Order, OrderItem
 from accounts.serializers import UserSerializer
+from site_analytics.kafka_producer import publish_order_event
+
+
+class IsAdminOrInternalService(BasePermission):
+    """
+    Grants access if the request is from an authenticated Django admin/staff user
+    OR if the request carries a valid X-Internal-Service-Key from a trusted microservice.
+    """
+    def has_permission(self, request, view):
+        internal_key = request.headers.get('X-Internal-Service-Key') or request.META.get('HTTP_X_INTERNAL_SERVICE_KEY')
+        configured_key = os.getenv('INTERNAL_SERVICE_KEY', 'econext-internal-microservice-key-2026')
+        if internal_key and internal_key == configured_key:
+            return True
+        return bool(request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser))
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAdminOrInternalService])
 def admin_dashboard_stats(request):
     """
     Returns aggregated KPI statistics, recent orders, order status distribution,
@@ -118,7 +133,7 @@ def admin_dashboard_stats(request):
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAdminOrInternalService])
 def admin_products_list_create(request):
     """
     GET: List all products with filtering, search, stock levels.
@@ -194,7 +209,7 @@ def admin_products_list_create(request):
 
 
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAdminOrInternalService])
 def admin_product_detail(request, pk):
     """
     GET, PUT, PATCH, DELETE operations for single product.
@@ -249,7 +264,7 @@ def admin_product_detail(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAdminOrInternalService])
 def admin_orders_list(request):
     """
     List all orders with detailed customer and shipping information.
@@ -300,7 +315,7 @@ def admin_orders_list(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAdminOrInternalService])
 def admin_order_status_update(request, order_id):
     """
     Update order status (e.g. pending -> confirmed -> shipped -> delivered).
@@ -317,11 +332,21 @@ def admin_order_status_update(request, order_id):
         
     order.status = new_status
     order.save()
+
+    # Stream real-time order state transition to Big Data Kafka ingestion layer
+    publish_order_event(
+        order_id=order.id,
+        user_id=order.user_id,
+        total_amount=order.total_price,
+        status=new_status,
+        items_count=order.items.count()
+    )
+
     return Response({'status': 'success', 'message': f"Order #{order.id} status updated to {new_status}", 'status_value': new_status})
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAdminOrInternalService])
 def admin_users_list(request):
     """
     List all platform users with roles and order histories.
@@ -345,7 +370,7 @@ def admin_users_list(request):
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated, IsAdminUser])
+@permission_classes([IsAdminOrInternalService])
 def admin_categories_list_create(request):
     """
     List categories with item counts or create new category.

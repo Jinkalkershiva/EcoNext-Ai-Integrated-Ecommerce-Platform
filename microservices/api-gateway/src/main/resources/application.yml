@@ -65,7 +65,35 @@ spring:
             - Path=/api/copilot/**, /api/chat/**
           order: 8
 
-        # 7. Unmigrated Django Fallback Route (Order: 10000)
+        # 9. Admin & Staff Operational Management Service (Order: 9)
+        - id: admin-staff-service-route
+          uri: ${ADMIN_SERVICE_URL:http://localhost:8085}
+          predicates:
+            - Path=/api/admin/**, /api/staff/**
+          order: 9
+
+        # 10. Catalog & Inventory Operations Service (Order: 10)
+        - id: catalog-ops-service-route
+          uri: ${CATALOG_OPS_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/catalog-ops/**, /api/inventory-ops/**
+          order: 10
+
+        # 11. Order Operations Lifecycle Service (Order: 11)
+        - id: order-ops-service-route
+          uri: ${ORDER_OPS_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/api/order-ops/**
+          order: 11
+
+        # 12. Data Import & Analysis Service (Order: 12)
+        - id: data-import-analysis-route
+          uri: ${IMPORT_ANALYSIS_SERVICE_URL:http://localhost:8086}
+          predicates:
+            - Path=/api/import/**, /api/analytics/**
+          order: 12
+
+        # 13. Unmigrated Django Fallback Route (Order: 10000)
         # Highest order value ensures specific Spring routes take precedence,
         # while all unmigrated endpoints seamlessly reach the monolithic Django backend.
         - id: django-fallback-route
@@ -76,7 +104,7 @@ spring:
 
 app:
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:3000,http://127.0.0.1:5173,http://127.0.0.1:5174}
 
 management:
   endpoints:
