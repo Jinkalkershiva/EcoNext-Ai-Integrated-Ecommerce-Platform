@@ -243,11 +243,6 @@ img, svg {
   background: var(--border-strong);
 }
 
-@media (max-width: 860px) {
-  .kids-catalog-grid-layout {
-    grid-template-columns: 1fr !important;
-  }
-}
 
 @media (max-width: 768px) {
   :root {

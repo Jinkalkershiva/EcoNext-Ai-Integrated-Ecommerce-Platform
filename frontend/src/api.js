@@ -28,6 +28,18 @@ const API_BASE_URL =
     import.meta.env.VITE_API_URL) ||
   'http://127.0.0.1:8000/api';
 
+const NOTIFICATION_API_BASE =
+  (typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    import.meta.env.VITE_NOTIFICATION_API_URL) ||
+  'http://localhost:8089/api/notifications';
+
+const PAYMENT_API_BASE =
+  (typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    import.meta.env.VITE_PAYMENT_API_URL) ||
+  'http://localhost:8087/api/payments';
+
 const ACCESS_TOKEN_KEY = 'authToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 // 'user' rather than 'authUser' so that sessions already in localStorage from
@@ -226,9 +238,14 @@ async function request(path, options = {}) {
     if (token) requestHeaders.Authorization = `Bearer ${token}`;
   }
 
+  const fullUrl =
+    typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))
+      ? path
+      : `${API_BASE_URL}${path}`;
+
   let response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(fullUrl, {
       method,
       headers: requestHeaders,
       body: payload,
@@ -553,6 +570,133 @@ export const apiService = {
 
   sendChatMessage(message, history = []) {
     return request('/chat/', { method: 'POST', body: { message, history } });
+  },
+
+  // ---------- Admin Panel (RBAC Protected) ----------
+
+  getAdminDashboard() {
+    return request('/admin/dashboard/', { auth: true });
+  },
+
+  getAdminProducts(params = {}) {
+    return request(`/admin/products/${buildQuery(params)}`, { auth: true });
+  },
+
+  createAdminProduct(productData) {
+    return request('/admin/products/', {
+      method: 'POST',
+      auth: true,
+      body: productData,
+    });
+  },
+
+  getAdminProductDetail(id) {
+    return request(`/admin/products/${id}/`, { auth: true });
+  },
+
+  updateAdminProduct(id, productData) {
+    return request(`/admin/products/${id}/`, {
+      method: 'PATCH',
+      auth: true,
+      body: productData,
+    });
+  },
+
+  deleteAdminProduct(id) {
+    return request(`/admin/products/${id}/`, {
+      method: 'DELETE',
+      auth: true,
+    });
+  },
+
+  getAdminOrders(params = {}) {
+    return request(`/admin/orders/${buildQuery(params)}`, { auth: true });
+  },
+
+  updateAdminOrderStatus(orderId, status) {
+    return request(`/admin/orders/${orderId}/status/`, {
+      method: 'PATCH',
+      auth: true,
+      body: { status },
+    });
+  },
+
+  getAdminUsers(params = {}) {
+    return request(`/admin/users/${buildQuery(params)}`, { auth: true });
+  },
+
+  getAdminCategories() {
+    return request('/admin/categories/', { auth: true });
+  },
+
+  createAdminCategory(categoryData) {
+    return request('/admin/categories/', {
+      method: 'POST',
+      auth: true,
+      body: categoryData,
+    });
+  },
+
+  // ---------- Notification Service (Spring Boot) ----------
+
+  getNotifications(params = {}) {
+    return request(`${NOTIFICATION_API_BASE}/my-notifications${buildQuery(params)}`, {
+      auth: true,
+    }).catch((err) => {
+      // Graceful fallback for local dev when notification service is inactive
+      console.warn('Notification service unavailable:', err?.message);
+      return { status: 'fallback', data: [] };
+    });
+  },
+
+  getUnreadNotificationCount() {
+    return request(`${NOTIFICATION_API_BASE}/unread-count`, {
+      auth: true,
+    }).catch(() => ({ data: 0 }));
+  },
+
+  markNotificationRead(notificationId) {
+    return request(`${NOTIFICATION_API_BASE}/${notificationId}/read`, {
+      method: 'PUT',
+      auth: true,
+    }).catch(() => null);
+  },
+
+  markAllNotificationsRead() {
+    return request(`${NOTIFICATION_API_BASE}/mark-all-read`, {
+      method: 'PUT',
+      auth: true,
+    }).catch(() => null);
+  },
+
+  // ---------- Payment Service (Spring Boot + Razorpay) ----------
+
+  createPaymentOrder(paymentData) {
+    return request(`${PAYMENT_API_BASE}/create-order`, {
+      method: 'POST',
+      auth: true,
+      body: paymentData,
+    });
+  },
+
+  verifyPayment(verificationData) {
+    return request(`${PAYMENT_API_BASE}/verify`, {
+      method: 'POST',
+      auth: true,
+      body: verificationData,
+    });
+  },
+
+  getOrderPayment(orderId) {
+    return request(`${PAYMENT_API_BASE}/order/${orderId}`, { auth: true });
+  },
+
+  getMyPayments() {
+    return request(`${PAYMENT_API_BASE}/my-payments`, { auth: true });
+  },
+
+  getAllPaymentsAdmin() {
+    return request(`${PAYMENT_API_BASE}/all`, { auth: true });
   },
 };
 

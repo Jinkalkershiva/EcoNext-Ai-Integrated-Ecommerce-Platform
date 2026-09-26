@@ -6,7 +6,6 @@ export const THEMES = {
   LIGHT: 'light',
   DARK: 'dark',
   WARM: 'warm',
-  KIDS: 'kids',
 };
 
 export const ThemeProvider = ({ children }) => {
@@ -16,8 +15,7 @@ export const ThemeProvider = ({ children }) => {
       if (
         savedTheme === THEMES.DARK ||
         savedTheme === THEMES.LIGHT ||
-        savedTheme === THEMES.WARM ||
-        savedTheme === THEMES.KIDS
+        savedTheme === THEMES.WARM
       ) {
         return savedTheme;
       }
@@ -38,12 +36,11 @@ export const ThemeProvider = ({ children }) => {
     }
   }, [theme]);
 
-  // 4-way cyclic toggle: light -> dark -> warm -> kids -> light
+  // 3-way cyclic toggle: light -> dark -> warm -> light
   const cycleTheme = () => {
     setTheme((prev) => {
       if (prev === THEMES.LIGHT) return THEMES.DARK;
       if (prev === THEMES.DARK) return THEMES.WARM;
-      if (prev === THEMES.WARM) return THEMES.KIDS;
       return THEMES.LIGHT;
     });
   };
@@ -59,7 +56,6 @@ export const ThemeProvider = ({ children }) => {
     isDark: theme === THEMES.DARK,
     isWarm: theme === THEMES.WARM,
     isLight: theme === THEMES.LIGHT,
-    isKids: theme === THEMES.KIDS,
   };
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

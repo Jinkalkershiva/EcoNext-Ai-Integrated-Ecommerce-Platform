@@ -43,13 +43,27 @@ spring:
             - Path=/api/personalization/**
           order: 5
 
-        # 6. AI Copilot & Chatbot Route (Order: 6)
+        # 6. Payment & Razorpay Route (Order: 6)
+        - id: payment-service-route
+          uri: ${PAYMENT_SERVICE_URL:http://localhost:8087}
+          predicates:
+            - Path=/api/payments/**
+          order: 6
+
+        # 7. Notification Service Route (Order: 7)
+        - id: notification-service-route
+          uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8089}
+          predicates:
+            - Path=/api/notifications/**
+          order: 7
+
+        # 8. AI Copilot & Chatbot Route (Order: 8)
         # Directly targets the Python AI / Copilot service
         - id: ai-copilot-route
           uri: ${AI_SERVICE_URL:http://localhost:8000}
           predicates:
             - Path=/api/copilot/**, /api/chat/**
-          order: 6
+          order: 8
 
         # 7. Unmigrated Django Fallback Route (Order: 10000)
         # Highest order value ensures specific Spring routes take precedence,

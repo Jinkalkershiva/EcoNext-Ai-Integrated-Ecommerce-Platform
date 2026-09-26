@@ -1,440 +1,709 @@
-from django.core.management.base import BaseCommand
-from django.utils import timezone
-from products.models import Category, Product, PriceHistory
-from ml_engine.models import PricePrediction
+"""
+Django Management Command: seed_data
+Populates the database with realistic demo data:
+- Taxonomies (AgeGroup, GenderCategory, EcoTag, Season, Occasion, SkinOrBodyFit)
+- Categories & Subcategories
+- 25+ Rich, authentic sustainable products across all segments
+- 60-day historical PriceHistory for every product (required for AI Price Prediction)
+- Demo Admin and Shopper users with secure hashed credentials
+- Demo Orders and OrderItems to populate the Admin Dashboard & Analytics
+
+Usage:
+    python manage.py seed_data
+"""
+
 import random
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
+
+from django.core.management.base import BaseCommand
+from django.contrib.auth.models import User
+from django.utils import timezone
+
+from products.models import (
+    Category, SubCategory, AgeGroup, GenderCategory,
+    EcoTag, SkinOrBodyFit, Season, Occasion, Product, PriceHistory,
+    ProductView, ProductSearch
+)
+from accounts.models import UserProfile
+from order_service.models import Order, OrderItem
+from site_analytics.models import DailyStats
+
 
 class Command(BaseCommand):
-    help = 'Seed database with sample products and data'
+    help = "Seeds the EcoNext database with comprehensive sustainable catalog and demo data."
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--clear',
+            action='store_true',
+            help='Clear existing products, price history, and sample orders before seeding.',
+        )
 
     def handle(self, *args, **options):
-        self.stdout.write("Seeding database with sample data...")
+        self.stdout.write(self.style.SUCCESS("[*] Starting EcoNext Data Seeding Pipeline..."))
 
-        # Create categories
-        categories_data = [
-            {'name': 'Electronics', 'description': 'Electronic devices and gadgets'},
-            {'name': 'Fitness', 'description': 'Sports and fitness equipment'},
-            {'name': 'Kitchen', 'description': 'Kitchen appliances and tools'},
-            {'name': 'Fashion', 'description': 'Clothing and accessories'},
-            {'name': 'Home & Garden', 'description': 'Home decor and gardening'},
+        if options.get('clear'):
+            self.stdout.write("Wiping existing product and order demo records...")
+            PriceHistory.objects.all().delete()
+            OrderItem.objects.all().delete()
+            Order.objects.all().delete()
+            Product.objects.all().delete()
+
+        # 1. Taxonomies
+        self.stdout.write("1. Provisioning taxonomies and attributes...")
+        age_groups = {
+            'Kids': AgeGroup.objects.get_or_create(name='Kids')[0],
+            'Teens': AgeGroup.objects.get_or_create(name='Teens')[0],
+            'Adults': AgeGroup.objects.get_or_create(name='Adults')[0],
+            'Seniors': AgeGroup.objects.get_or_create(name='Seniors')[0],
+        }
+
+        gender_categories = {
+            'Men': GenderCategory.objects.get_or_create(name='Men')[0],
+            'Women': GenderCategory.objects.get_or_create(name='Women')[0],
+            'Unisex': GenderCategory.objects.get_or_create(name='Unisex')[0],
+        }
+
+        eco_tags = {
+            'organic': EcoTag.objects.get_or_create(name='100% Organic Cotton')[0],
+            'recycled_plastic': EcoTag.objects.get_or_create(name='Recycled Ocean Plastic')[0],
+            'carbon_neutral': EcoTag.objects.get_or_create(name='Carbon-Neutral Certified')[0],
+            'fair_trade': EcoTag.objects.get_or_create(name='Fair Trade Certified')[0],
+            'biodegradable': EcoTag.objects.get_or_create(name='Biodegradable & Compostable')[0],
+            'vegan': EcoTag.objects.get_or_create(name='PETA-Approved Vegan')[0],
+            'zero_waste': EcoTag.objects.get_or_create(name='Zero Waste Packaging')[0],
+            'upcycled': EcoTag.objects.get_or_create(name='Upcycled Materials')[0],
+        }
+
+        seasons = {
+            'all': Season.objects.get_or_create(name='All Season')[0],
+            'summer': Season.objects.get_or_create(name='Summer')[0],
+            'winter': Season.objects.get_or_create(name='Winter')[0],
+            'spring': Season.objects.get_or_create(name='Spring')[0],
+            'monsoon': Season.objects.get_or_create(name='Monsoon')[0],
+        }
+
+        occasions = {
+            'casual': Occasion.objects.get_or_create(name='Casual')[0],
+            'formal': Occasion.objects.get_or_create(name='Formal')[0],
+            'outdoor': Occasion.objects.get_or_create(name='Outdoor & Adventure')[0],
+            'everyday': Occasion.objects.get_or_create(name='Everyday Essentials')[0],
+            'activewear': Occasion.objects.get_or_create(name='Activewear')[0],
+        }
+
+        fits = {
+            'regular': SkinOrBodyFit.objects.get_or_create(name='Regular Fit')[0],
+            'slim': SkinOrBodyFit.objects.get_or_create(name='Slim Fit')[0],
+            'relaxed': SkinOrBodyFit.objects.get_or_create(name='Relaxed Fit')[0],
+            'sensitive': SkinOrBodyFit.objects.get_or_create(name='Hypoallergenic & Sensitive Safe')[0],
+        }
+
+        # 2. Categories
+        self.stdout.write("2. Provisioning product categories...")
+        categories = {
+            'clothing': Category.objects.get_or_create(name='Apparel & Clothing', defaults={'description': 'Eco-conscious garments woven from organic cotton, hemp, and linen.'})[0],
+            'footwear': Category.objects.get_or_create(name='Sustainable Footwear', defaults={'description': 'Footwear engineered with recycled ocean plastics, natural rubber, and cork.'})[0],
+            'home': Category.objects.get_or_create(name='Home & Living', defaults={'description': 'Zero-waste home essentials, organic cotton bedding, and biodegradable utensils.'})[0],
+            'personal_care': Category.objects.get_or_create(name='Personal Care & Beauty', defaults={'description': 'Clean, cruelty-free, plant-based toiletries with plastic-free packaging.'})[0],
+            'bags': Category.objects.get_or_create(name='Bags & Travel Gear', defaults={'description': 'Durable bags crafted from upcycled canvas and recycled water bottles.'})[0],
+            'accessories': Category.objects.get_or_create(name='Eco Accessories', defaults={'description': 'Sustainable sunglasses, bamboo watches, and reusable bottles.'})[0],
+        }
+
+        # 3. Product Catalog Definitions
+        self.stdout.write("3. Seeding catalog products...")
+        catalog_items = [
+            # Men's Apparel
+            {
+                'name': 'Men Organic Hemp Overshirt',
+                'description': 'Breathable, durable casual overshirt tailored from 100% sustainably grown industrial hemp. Naturally odor-resistant with coconut shell buttons.',
+                'category': categories['clothing'],
+                'current_price': Decimal('2499.00'),
+                'image_url': 'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=800&q=80',
+                'stock': 35,
+                'sustainability_score': 9.4,
+                'popularity_score': 4.8,
+                'tags': ['hemp', 'shirt', 'men', 'organic', 'breathable', 'casual', 'sustainable'],
+                'age_groups': [age_groups['Adults']],
+                'gender': [gender_categories['Men']],
+                'eco': [eco_tags['organic'], eco_tags['carbon_neutral']],
+                'season': seasons['all'],
+                'occasion': occasions['casual'],
+                'fit': fits['relaxed'],
+            },
+            {
+                'name': 'Men Recycled Wool Minimalist Peacoat',
+                'description': 'Warm winter peacoat constructed from post-consumer recycled wool fibers. Designed for lifetime durability and circular economy recycling.',
+                'category': categories['clothing'],
+                'current_price': '5499.00',
+                'image_url': 'https://images.unsplash.com/photo-1544923246-77307dd654cb?auto=format&fit=crop&w=800&q=80',
+                'stock': 12,
+                'sustainability_score': 9.1,
+                'popularity_score': 4.9,
+                'tags': ['wool', 'peacoat', 'jacket', 'winter', 'men', 'recycled', 'warm'],
+                'age_groups': [age_groups['Adults'], age_groups['Seniors']],
+                'gender': [gender_categories['Men']],
+                'eco': [eco_tags['upcycled'], eco_tags['fair_trade']],
+                'season': seasons['winter'],
+                'occasion': occasions['formal'],
+                'fit': fits['regular'],
+            },
+            {
+                'name': 'Men Classic Organic Cotton Crewneck',
+                'description': 'Ultra-soft everyday crewneck t-shirt made with GOTS-certified 100% combed organic cotton using non-toxic natural dyes.',
+                'category': categories['clothing'],
+                'current_price': '899.00',
+                'image_url': 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=800&q=80',
+                'stock': 80,
+                'sustainability_score': 9.7,
+                'popularity_score': 4.9,
+                'tags': ['tshirt', 'crewneck', 'cotton', 'men', 'organic', 'everyday', 'white'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens']],
+                'gender': [gender_categories['Men'], gender_categories['Unisex']],
+                'eco': [eco_tags['organic'], eco_tags['zero_waste']],
+                'season': seasons['summer'],
+                'occasion': occasions['everyday'],
+                'fit': fits['regular'],
+            },
+
+            # Women's Apparel
+            {
+                'name': 'Women Pure French Linen Maxi Dress',
+                'description': 'Effortless, flowy summer maxi dress crafted from certified organic European flax. Zero chemical pesticides and 100% compostable.',
+                'category': categories['clothing'],
+                'current_price': '3299.00',
+                'image_url': 'https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=800&q=80',
+                'stock': 28,
+                'sustainability_score': 9.6,
+                'popularity_score': 4.9,
+                'tags': ['linen', 'dress', 'maxi', 'women', 'summer', 'organic', 'breathable'],
+                'age_groups': [age_groups['Adults']],
+                'gender': [gender_categories['Women']],
+                'eco': [eco_tags['organic'], eco_tags['biodegradable']],
+                'season': seasons['summer'],
+                'occasion': occasions['casual'],
+                'fit': fits['relaxed'],
+            },
+            {
+                'name': 'Women Recycled Denim Trucker Jacket',
+                'description': 'Timeless denim jacket tailored with 40% post-consumer recycled denim and 60% organic cotton, saving over 2,000 liters of water per garment.',
+                'category': categories['clothing'],
+                'current_price': '2999.00',
+                'image_url': 'https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=800&q=80',
+                'stock': 20,
+                'sustainability_score': 9.2,
+                'popularity_score': 4.7,
+                'tags': ['denim', 'jacket', 'women', 'recycled', 'blue', 'casual', 'outerwear'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens']],
+                'gender': [gender_categories['Women']],
+                'eco': [eco_tags['upcycled'], eco_tags['fair_trade']],
+                'season': seasons['all'],
+                'occasion': occasions['casual'],
+                'fit': fits['regular'],
+            },
+            {
+                'name': 'Women Bamboo Fiber Knit Cardigan',
+                'description': 'Silky soft, temperature-regulating ribbed cardigan made from sustainably harvested closed-loop bamboo viscose.',
+                'category': categories['clothing'],
+                'current_price': '2199.00',
+                'image_url': 'https://images.unsplash.com/photo-1434389677669-e08b4cac3105?auto=format&fit=crop&w=800&q=80',
+                'stock': 40,
+                'sustainability_score': 9.5,
+                'popularity_score': 4.6,
+                'tags': ['cardigan', 'bamboo', 'knitwear', 'women', 'soft', 'cozy', 'layer'],
+                'age_groups': [age_groups['Adults'], age_groups['Seniors']],
+                'gender': [gender_categories['Women']],
+                'eco': [eco_tags['vegan'], eco_tags['biodegradable']],
+                'season': seasons['spring'],
+                'occasion': occasions['casual'],
+                'fit': fits['relaxed'],
+            },
+
+            # Kids Apparel
+            {
+                'name': 'Kids Organic Cotton Dungaree Romper',
+                'description': 'Play-friendly, durable overalls crafted from chemical-free organic cotton canvas with nickel-free snaps and adjustable shoulder straps.',
+                'category': categories['clothing'],
+                'current_price': '1299.00',
+                'image_url': 'https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=800&q=80',
+                'stock': 45,
+                'sustainability_score': 9.8,
+                'popularity_score': 4.9,
+                'tags': ['kids', 'romper', 'dungaree', 'cotton', 'organic', 'children', 'toddler'],
+                'age_groups': [age_groups['Kids']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['organic'], eco_tags['zero_waste']],
+                'season': seasons['all'],
+                'occasion': occasions['everyday'],
+                'fit': fits['sensitive'],
+            },
+            {
+                'name': 'Kids Recycled Sherpa Zip Fleece',
+                'description': 'Plush, ultra-warm kids jacket made from 100% recycled plastic bottles transformed into super-soft sherpa fleece.',
+                'category': categories['clothing'],
+                'current_price': '1699.00',
+                'image_url': 'https://images.unsplash.com/photo-1503919545889-aef636e10ad4?auto=format&fit=crop&w=800&q=80',
+                'stock': 30,
+                'sustainability_score': 9.3,
+                'popularity_score': 4.7,
+                'tags': ['kids', 'fleece', 'sherpa', 'winter', 'warm', 'recycled', 'jacket'],
+                'age_groups': [age_groups['Kids']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['recycled_plastic'], eco_tags['vegan']],
+                'season': seasons['winter'],
+                'occasion': occasions['outdoor'],
+                'fit': fits['regular'],
+            },
+
+            # Teens Apparel
+            {
+                'name': 'Teens Organic Cotton Graphic Hoodie',
+                'description': 'Comfortable relaxed-fit streetwear hoodie featuring plant-based water ink illustrations on brushed heavyweight organic cotton fleece.',
+                'category': categories['clothing'],
+                'current_price': '1899.00',
+                'image_url': 'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80',
+                'stock': 25,
+                'sustainability_score': 9.4,
+                'popularity_score': 4.8,
+                'tags': ['teens', 'hoodie', 'streetwear', 'cotton', 'organic', 'graphic', 'cozy'],
+                'age_groups': [age_groups['Teens']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['organic'], eco_tags['fair_trade']],
+                'season': seasons['all'],
+                'occasion': occasions['casual'],
+                'fit': fits['relaxed'],
+            },
+            {
+                'name': 'Teens Eco Hemp Cargo Skate Pants',
+                'description': 'Rugged and flexible skateboard-inspired cargo trousers woven from hemp and organic twill with reinforced knee stitching.',
+                'category': categories['clothing'],
+                'current_price': '1999.00',
+                'image_url': 'https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=800&q=80',
+                'stock': 20,
+                'sustainability_score': 9.1,
+                'popularity_score': 4.6,
+                'tags': ['teens', 'cargo', 'pants', 'hemp', 'skate', 'green', 'trousers'],
+                'age_groups': [age_groups['Teens'], age_groups['Adults']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['organic'], eco_tags['vegan']],
+                'season': seasons['all'],
+                'occasion': occasions['casual'],
+                'fit': fits['relaxed'],
+            },
+
+            # Footwear
+            {
+                'name': 'Ocean Knit Recycled Runners',
+                'description': 'Lightweight athletic running shoes featuring a 3D-knit upper spun from intercepted marine plastic waste and natural sugarcane foam soles.',
+                'category': categories['footwear'],
+                'current_price': '3899.00',
+                'image_url': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=80',
+                'stock': 18,
+                'sustainability_score': 9.6,
+                'popularity_score': 4.9,
+                'tags': ['sneakers', 'footwear', 'running', 'recycled', 'plastic', 'sport', 'shoes'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['recycled_plastic'], eco_tags['carbon_neutral']],
+                'season': seasons['all'],
+                'occasion': occasions['activewear'],
+                'fit': fits['regular'],
+            },
+            {
+                'name': 'Natural Cork Sole Slip-On Loafers',
+                'description': 'Handmade minimalist loafers featuring breathable organic hemp uppers, harvested Portuguese cork footbeds, and natural gum soles.',
+                'category': categories['footwear'],
+                'current_price': '3499.00',
+                'image_url': 'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=800&q=80',
+                'stock': 15,
+                'sustainability_score': 9.7,
+                'popularity_score': 4.7,
+                'tags': ['loafers', 'cork', 'shoes', 'footwear', 'organic', 'handmade', 'casual'],
+                'age_groups': [age_groups['Adults'], age_groups['Seniors']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['biodegradable'], eco_tags['vegan']],
+                'season': seasons['summer'],
+                'occasion': occasions['casual'],
+                'fit': fits['regular'],
+            },
+
+            # Home & Living
+            {
+                'name': 'Handwoven Organic Waffle Blanket',
+                'description': 'Artisan-woven queen size throw blanket made with 100% GOTS-certified ring-spun organic cotton. Breathable, hypoallergenic, and machine washable.',
+                'category': categories['home'],
+                'current_price': '2299.00',
+                'image_url': 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?auto=format&fit=crop&w=800&q=80',
+                'stock': 25,
+                'sustainability_score': 9.8,
+                'popularity_score': 4.8,
+                'tags': ['blanket', 'waffle', 'home', 'cotton', 'organic', 'bedding', 'cozy'],
+                'age_groups': [age_groups['Adults'], age_groups['Seniors']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['organic'], eco_tags['fair_trade']],
+                'season': seasons['all'],
+                'occasion': occasions['everyday'],
+                'fit': fits['regular'],
+            },
+            {
+                'name': 'Zero-Waste Bamboo Cutlery Travel Kit',
+                'description': 'Portable travel set including fork, knife, spoon, chopsticks, and straw handcrafted from sustainably harvested fast-growing bamboo.',
+                'category': categories['home'],
+                'current_price': '499.00',
+                'image_url': 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=800&q=80',
+                'stock': 100,
+                'sustainability_score': 9.9,
+                'popularity_score': 4.9,
+                'tags': ['bamboo', 'cutlery', 'travel', 'zerowaste', 'kitchen', 'plasticfree', 'utensils'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens'], age_groups['Seniors']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['biodegradable'], eco_tags['zero_waste']],
+                'season': seasons['all'],
+                'occasion': occasions['outdoor'],
+                'fit': fits['regular'],
+            },
+            {
+                'name': 'Reclaimed Coconut Shell Artisan Bowls (Set of 2)',
+                'description': 'Smooth polished handmade bowls upcycled from discarded coconut shells. Finished with organic virgin coconut oil for a water-resistant sheen.',
+                'category': categories['home'],
+                'current_price': '799.00',
+                'image_url': 'https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?auto=format&fit=crop&w=800&q=80',
+                'stock': 4,
+                'sustainability_score': 9.8,
+                'popularity_score': 4.6,
+                'tags': ['coconut', 'bowl', 'kitchen', 'upcycled', 'handmade', 'tableware', 'artisan'],
+                'age_groups': [age_groups['Adults']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['upcycled'], eco_tags['biodegradable']],
+                'season': seasons['all'],
+                'occasion': occasions['everyday'],
+                'fit': fits['regular'],
+            },
+
+            # Personal Care
+            {
+                'name': 'Organic Argan & Rosemary Solid Shampoo Bar',
+                'description': 'Concentrated zero-plastic shampoo bar equivalent to 3 liquid plastic bottles. Enriched with cold-pressed Moroccan argan oil and rosemary extract.',
+                'category': categories['personal_care'],
+                'current_price': '449.00',
+                'image_url': 'https://images.unsplash.com/photo-1608248597359-009772a5a58d?auto=format&fit=crop&w=800&q=80',
+                'stock': 65,
+                'sustainability_score': 9.9,
+                'popularity_score': 4.8,
+                'tags': ['shampoo', 'soap', 'argan', 'haircare', 'plasticfree', 'vegan', 'zerowaste'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['zero_waste'], eco_tags['vegan'], eco_tags['biodegradable']],
+                'season': seasons['all'],
+                'occasion': occasions['everyday'],
+                'fit': fits['sensitive'],
+            },
+            {
+                'name': 'Biodegradable Bamboo Toothbrush Family Pack',
+                'description': 'Pack of 4 numbered charcoal-infused soft bristle toothbrushes with 100% compostable MOSO bamboo handles and plant-based packaging.',
+                'category': categories['personal_care'],
+                'current_price': '349.00',
+                'image_url': 'https://images.unsplash.com/photo-1593487568720-92097fb460fb?auto=format&fit=crop&w=800&q=80',
+                'stock': 120,
+                'sustainability_score': 9.9,
+                'popularity_score': 4.9,
+                'tags': ['toothbrush', 'bamboo', 'hygiene', 'oralcare', 'plasticfree', 'family', 'eco'],
+                'age_groups': [age_groups['Adults'], age_groups['Kids'], age_groups['Teens'], age_groups['Seniors']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['biodegradable'], eco_tags['zero_waste']],
+                'season': seasons['all'],
+                'occasion': occasions['everyday'],
+                'fit': fits['regular'],
+            },
+
+            # Bags & Travel
+            {
+                'name': 'Upcycled Heavy Canvas Weekender Duffel',
+                'description': 'Water-resistant travel duffel constructed from reclaimed military cotton canvas with reinforced recycled webbing and brass hardware.',
+                'category': categories['bags'],
+                'current_price': '3499.00',
+                'image_url': 'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=800&q=80',
+                'stock': 14,
+                'sustainability_score': 9.5,
+                'popularity_score': 4.8,
+                'tags': ['duffel', 'bag', 'travel', 'canvas', 'upcycled', 'luggage', 'weekender'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['upcycled'], eco_tags['fair_trade']],
+                'season': seasons['all'],
+                'occasion': occasions['outdoor'],
+                'fit': fits['regular'],
+            },
+            {
+                'name': 'Recycled PET Urban Commuter Laptop Backpack',
+                'description': 'Sleek, ergonomic 20L daypack made from 24 recycled plastic bottles. Features a padded 16-inch laptop compartment and hidden anti-theft pocket.',
+                'category': categories['bags'],
+                'current_price': '2799.00',
+                'image_url': 'https://images.unsplash.com/photo-1546938576-6e6a64f317cc?auto=format&fit=crop&w=800&q=80',
+                'stock': 22,
+                'sustainability_score': 9.3,
+                'popularity_score': 4.9,
+                'tags': ['backpack', 'laptop', 'bag', 'recycled', 'plastic', 'work', 'commute'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['recycled_plastic'], eco_tags['carbon_neutral']],
+                'season': seasons['all'],
+                'occasion': occasions['everyday'],
+                'fit': fits['regular'],
+            },
+
+            # Eco Accessories
+            {
+                'name': 'Handmade Bamboo Polarized Sunglasses',
+                'description': 'Floating sunglasses hand-carved from sustainable bamboo temples with UV400 polarized scratch-resistant TAC lenses.',
+                'category': categories['accessories'],
+                'current_price': '1499.00',
+                'image_url': 'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=800&q=80',
+                'stock': 40,
+                'sustainability_score': 9.4,
+                'popularity_score': 4.7,
+                'tags': ['sunglasses', 'bamboo', 'eyewear', 'polarized', 'summer', 'accessories', 'handmade'],
+                'age_groups': [age_groups['Adults'], age_groups['Teens']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['biodegradable'], eco_tags['zero_waste']],
+                'season': seasons['summer'],
+                'occasion': occasions['outdoor'],
+                'fit': fits['regular'],
+            },
+            {
+                'name': 'Insulated Stainless Steel Water Bottle (750ml)',
+                'description': 'Double-walled vacuum insulated bottle keeping drinks cold for 24h or hot for 12h. Food-grade 18/8 stainless steel with natural bamboo cap.',
+                'category': categories['accessories'],
+                'current_price': '899.00',
+                'image_url': 'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=800&q=80',
+                'stock': 50,
+                'sustainability_score': 9.8,
+                'popularity_score': 5.0,
+                'tags': ['bottle', 'stainless', 'water', 'bamboo', 'reusable', 'zerowaste', 'drinkware'],
+                'age_groups': [age_groups['Adults'], age_groups['Kids'], age_groups['Teens'], age_groups['Seniors']],
+                'gender': [gender_categories['Unisex']],
+                'eco': [eco_tags['zero_waste'], eco_tags['carbon_neutral']],
+                'season': seasons['all'],
+                'occasion': occasions['everyday'],
+                'fit': fits['regular'],
+            }
         ]
 
-        categories = {}
-        for cat_data in categories_data:
-            cat, created = Category.objects.get_or_create(
-                name=cat_data['name'],
-                defaults={'description': cat_data['description']}
-            )
-            categories[cat_data['name']] = cat
-            if created:
-                self.stdout.write(f"Created category: {cat_data['name']}")
-
-        # Sample eco-friendly products
-        products_data = [
-            # Electronics
-            {
-                'name': 'Wireless Bluetooth Speaker',
-                'category': 'Electronics',
-                'description': 'High-quality portable Bluetooth speaker with 360° sound. Solar powered option available.',
-                'price': 49.99,
-                'tags': ['speaker', 'bluetooth', 'audio', 'portable', 'eco-friendly']
-            },
-            {
-                'name': 'Solar Power Bank 20000mAh',
-                'category': 'Electronics',
-                'description': 'Eco-friendly solar powered power bank with fast charging',
-                'price': 39.99,
-                'tags': ['solar', 'power bank', 'charging', 'eco', 'renewable']
-            },
-            {
-                'name': 'Wireless Headphones',
-                'category': 'Electronics',
-                'description': 'Noise-cancelling wireless headphones with 30-hour battery, made from recycled materials',
-                'price': 129.99,
-                'tags': ['headphones', 'audio', 'wireless', 'music', 'recycled']
-            },
-            {
-                'name': 'USB-C Fast Charger',
-                'category': 'Electronics',
-                'description': '65W USB-C fast charger compatible with most devices, energy efficient',
-                'price': 39.99,
-                'tags': ['charger', 'usb-c', 'fast charging', 'energy efficient']
-            },
-            {
-                'name': 'Bamboo Phone Stand',
-                'category': 'Electronics',
-                'description': 'Eco-friendly bamboo phone and tablet stand',
-                'price': 12.99,
-                'tags': ['phone', 'stand', 'bamboo', 'desk', 'eco']
-            },
-            {
-                'name': 'LED Desk Lamp - Solar',
-                'category': 'Electronics',
-                'description': 'Energy-efficient LED desk lamp with solar charging option',
-                'price': 34.99,
-                'tags': ['lamp', 'led', 'solar', 'energy efficient', 'desk']
-            },
-            {
-                'name': 'Digital Kitchen Scale',
-                'category': 'Electronics',
-                'description': 'Precise digital scale for cooking and baking, low-power consumption',
-                'price': 19.99,
-                'tags': ['scale', 'kitchen', 'cooking', 'measure', 'energy efficient']
-            },
-            {
-                'name': 'Smart Temperature Monitor',
-                'category': 'Electronics',
-                'description': 'IoT temperature monitor to optimize energy usage in your home',
-                'price': 24.99,
-                'tags': ['smart', 'energy', 'monitor', 'iot', 'home automation']
-            },
-            {
-                'name': 'Eco Wireless Mouse',
-                'category': 'Electronics',
-                'description': 'Wireless mouse made from recycled plastic with rechargeable battery',
-                'price': 22.99,
-                'tags': ['mouse', 'wireless', 'recycled', 'computer', 'eco']
-            },
-            {
-                'name': 'USB Hub Made from Bamboo',
-                'category': 'Electronics',
-                'description': '7-port USB hub with bamboo casing and energy efficient charging',
-                'price': 29.99,
-                'tags': ['usb', 'hub', 'bamboo', 'charging', 'eco']
-            },
-            
-            # Fitness
-            {
-                'name': 'Yoga Mat Premium',
-                'category': 'Fitness',
-                'description': 'Non-slip TPE yoga mat perfect for all workout styles. Eco-friendly TPE material.',
-                'price': 29.99,
-                'tags': ['yoga', 'fitness', 'exercise', 'gym', 'eco']
-            },
-            {
-                'name': 'Stainless Steel Water Bottle',
-                'category': 'Fitness',
-                'description': 'Insulated water bottle keeps drinks cold for 24 hours. Reusable and eco-friendly.',
-                'price': 24.99,
-                'tags': ['bottle', 'water', 'sports', 'gym', 'reusable']
-            },
-            {
-                'name': 'Dumbbells Set - 20 lbs',
-                'category': 'Fitness',
-                'description': 'Adjustable dumbbell set with carrying rack, made from recycled materials',
-                'price': 89.99,
-                'tags': ['dumbbells', 'weights', 'fitness', 'gym', 'recycled']
-            },
-            {
-                'name': 'Resistance Bands Set',
-                'category': 'Fitness',
-                'description': 'Eco-friendly natural rubber resistance bands for full-body workout',
-                'price': 21.99,
-                'tags': ['bands', 'resistance', 'fitness', 'workout', 'eco']
-            },
-            {
-                'name': 'Bamboo Yoga Block Set',
-                'category': 'Fitness',
-                'description': 'Non-slip yoga blocks made from sustainable bamboo',
-                'price': 18.99,
-                'tags': ['yoga', 'block', 'bamboo', 'fitness', 'eco']
-            },
-            {
-                'name': 'Hemp Yoga Strap',
-                'category': 'Fitness',
-                'description': 'Strong hemp material yoga strap for deep stretching',
-                'price': 14.99,
-                'tags': ['yoga', 'strap', 'hemp', 'stretching', 'eco']
-            },
-            {
-                'name': 'Sustainable Jumping Rope',
-                'category': 'Fitness',
-                'description': 'Cardio jumping rope made from recycled plastic',
-                'price': 16.99,
-                'tags': ['rope', 'cardio', 'jumping', 'recycled', 'fitness']
-            },
-            {
-                'name': 'Cork Foam Roller',
-                'category': 'Fitness',
-                'description': 'Natural cork and eco-foam muscle recovery roller',
-                'price': 31.99,
-                'tags': ['roller', 'recovery', 'cork', 'eco', 'massage']
-            },
-            {
-                'name': 'Bamboo Scale',
-                'category': 'Fitness',
-                'description': 'Digital weight scale with bamboo platform',
-                'price': 26.99,
-                'tags': ['scale', 'bamboo', 'weight', 'health', 'eco']
-            },
-            {
-                'name': 'Organic Cotton Sports Top',
-                'category': 'Fitness',
-                'description': 'Breathable organic cotton sports top for workouts',
-                'price': 34.99,
-                'tags': ['sports', 'top', 'organic', 'cotton', 'fitness']
-            },
-            
-            # Kitchen
-            {
-                'name': 'Organic Bamboo Cutting Board Set',
-                'category': 'Kitchen',
-                'description': 'Set of 3 eco-friendly bamboo cutting boards, naturally antimicrobial',
-                'price': 34.99,
-                'tags': ['cutting board', 'kitchen', 'bamboo', 'eco', 'food prep']
-            },
-            {
-                'name': 'Stainless Steel Cookware Set',
-                'category': 'Kitchen',
-                'description': 'Non-toxic stainless steel cookware, durable and recyclable',
-                'price': 89.99,
-                'tags': ['cookware', 'kitchen', 'stainless steel', 'non-toxic', 'eco']
-            },
-            {
-                'name': 'Bamboo Utensil Set',
-                'category': 'Kitchen',
-                'description': 'Wooden spoon, fork, and knife set made from sustainable bamboo',
-                'price': 12.99,
-                'tags': ['utensils', 'bamboo', 'kitchen', 'cooking', 'eco']
-            },
-            {
-                'name': 'Glass Food Storage Containers',
-                'category': 'Kitchen',
-                'description': 'Set of 5 glass containers with bamboo lids, plastic-free',
-                'price': 39.99,
-                'tags': ['storage', 'glass', 'bamboo', 'eco', 'kitchen']
-            },
-            {
-                'name': 'Organic Bamboo Straws',
-                'category': 'Kitchen',
-                'description': '12-piece set of reusable bamboo drinking straws',
-                'price': 9.99,
-                'tags': ['straws', 'bamboo', 'reusable', 'eco', 'zero waste']
-            },
-            {
-                'name': 'Electric Kettle - Energy Efficient',
-                'category': 'Kitchen',
-                'description': 'Stainless steel electric kettle with auto shut-off, energy efficient',
-                'price': 29.99,
-                'tags': ['kettle', 'electric', 'energy efficient', 'kitchen']
-            },
-            {
-                'name': 'Bamboo Knife Block',
-                'category': 'Kitchen',
-                'description': 'Sustainable bamboo knife holder for kitchen counter',
-                'price': 24.99,
-                'tags': ['knife', 'block', 'bamboo', 'kitchen', 'storage']
-            },
-            {
-                'name': 'Cast Iron Pan - Eco',
-                'category': 'Kitchen',
-                'description': 'Durable cast iron cookware, long-lasting and recyclable',
-                'price': 44.99,
-                'tags': ['pan', 'cast iron', 'durable', 'cooking', 'eco']
-            },
-            {
-                'name': 'Beeswax Food Wraps',
-                'category': 'Kitchen',
-                'description': 'Natural beeswax wraps to replace plastic wrap',
-                'price': 14.99,
-                'tags': ['wraps', 'beeswax', 'eco', 'zero waste', 'food']
-            },
-            {
-                'name': 'Bamboo Colander',
-                'category': 'Kitchen',
-                'description': 'Eco-friendly bamboo colander for draining pasta and vegetables',
-                'price': 17.99,
-                'tags': ['colander', 'bamboo', 'kitchen', 'draining', 'eco']
-            },
-            
-            # Fashion
-            {
-                'name': 'Organic Cotton T-Shirt',
-                'category': 'Fashion',
-                'description': 'Comfortable 100% organic cotton t-shirt, ethically produced',
-                'price': 19.99,
-                'tags': ['shirt', 'cotton', 'clothing', 'casual', 'organic']
-            },
-            {
-                'name': 'Hemp Canvas Backpack',
-                'category': 'Fashion',
-                'description': 'Durable hemp canvas backpack with recycled plastic components',
-                'price': 59.99,
-                'tags': ['backpack', 'hemp', 'eco', 'bag', 'travel']
-            },
-            {
-                'name': 'Organic Cotton Socks',
-                'category': 'Fashion',
-                'description': 'Pack of 5 pairs of organic cotton socks, comfortable and eco-friendly',
-                'price': 21.99,
-                'tags': ['socks', 'cotton', 'organic', 'clothing', 'eco']
-            },
-            {
-                'name': 'Linen Shorts',
-                'category': 'Fashion',
-                'description': 'Natural linen shorts, biodegradable and breathable',
-                'price': 34.99,
-                'tags': ['shorts', 'linen', 'clothing', 'summer', 'eco']
-            },
-            {
-                'name': 'Recycled Plastic Trainer Shoes',
-                'category': 'Fashion',
-                'description': 'Comfortable running shoes made from recycled plastic',
-                'price': 79.99,
-                'tags': ['shoes', 'recycled', 'plastic', 'running', 'eco']
-            },
-            {
-                'name': 'Bamboo Fiber Yoga Leggings',
-                'category': 'Fashion',
-                'description': 'Breathable leggings made from sustainable bamboo fiber',
-                'price': 44.99,
-                'tags': ['leggings', 'bamboo', 'yoga', 'fitness', 'eco']
-            },
-            {
-                'name': 'Cork Leather Wallet',
-                'category': 'Fashion',
-                'description': 'Lightweight wallet made from sustainable cork material',
-                'price': 27.99,
-                'tags': ['wallet', 'cork', 'eco', 'accessories', 'vegan']
-            },
-            {
-                'name': 'Bamboo Sunglasses',
-                'category': 'Fashion',
-                'description': 'Stylish sunglasses with bamboo frames and polarized lenses',
-                'price': 49.99,
-                'tags': ['sunglasses', 'bamboo', 'eco', 'accessories', 'style']
-            },
-            {
-                'name': 'Recycled Denim Jacket',
-                'category': 'Fashion',
-                'description': 'Classic denim jacket made from upcycled denim material',
-                'price': 69.99,
-                'tags': ['jacket', 'denim', 'recycled', 'clothing', 'eco']
-            },
-            {
-                'name': 'Organic Cotton Hoodie',
-                'category': 'Fashion',
-                'description': 'Cozy hoodie made from 100% organic cotton',
-                'price': 44.99,
-                'tags': ['hoodie', 'cotton', 'organic', 'clothing', 'comfortable']
-            },
-            
-            # Home & Garden
-            {
-                'name': 'Plant Pot with Saucer',
-                'category': 'Home & Garden',
-                'description': 'Modern ceramic plant pot with drainage hole and eco-friendly finishes',
-                'price': 14.99,
-                'tags': ['plant', 'pot', 'garden', 'home decor', 'eco']
-            },
-            {
-                'name': 'Bamboo Plant Stand',
-                'category': 'Home & Garden',
-                'description': 'Multi-tier bamboo plant stand for indoor garden display',
-                'price': 49.99,
-                'tags': ['plant', 'stand', 'bamboo', 'garden', 'home']
-            },
-            {
-                'name': 'Eco-Friendly Soil',
-                'category': 'Home & Garden',
-                'description': '10L bag of organic potting soil with coconut coir and peat-free',
-                'price': 12.99,
-                'tags': ['soil', 'gardening', 'organic', 'eco', 'plants']
-            },
-            {
-                'name': 'Wooden Bird House',
-                'category': 'Home & Garden',
-                'description': 'FSC-certified wooden bird house for backyard wildlife',
-                'price': 24.99,
-                'tags': ['birdhouse', 'wood', 'wildlife', 'garden', 'eco']
-            },
-            {
-                'name': 'Bamboo Garden Tool Set',
-                'category': 'Home & Garden',
-                'description': 'Set of 3 bamboo-handled garden tools for planting and weeding',
-                'price': 31.99,
-                'tags': ['tools', 'bamboo', 'garden', 'eco', 'outdoor']
-            },
-            {
-                'name': 'Recycled Plastic Watering Can',
-                'category': 'Home & Garden',
-                'description': '2-gallon watering can made from recycled plastic',
-                'price': 14.99,
-                'tags': ['watering', 'can', 'recycled', 'garden', 'eco']
-            },
-            {
-                'name': 'Composting Bin Set',
-                'category': 'Home & Garden',
-                'description': '2-stage composting bin system made from recycled materials',
-                'price': 79.99,
-                'tags': ['compost', 'bin', 'recycled', 'eco', 'garden']
-            },
-            {
-                'name': 'Solar Garden Lights',
-                'category': 'Home & Garden',
-                'description': 'Set of 6 solar-powered garden lights for pathway illumination',
-                'price': 29.99,
-                'tags': ['lights', 'solar', 'garden', 'renewable', 'eco']
-            },
-            {
-                'name': 'Bamboo Raised Garden Bed',
-                'category': 'Home & Garden',
-                'description': '4x8 ft bamboo raised garden bed for vegetable growing',
-                'price': 99.99,
-                'tags': ['garden bed', 'bamboo', 'raised', 'vegetable', 'eco']
-            },
-            {
-                'name': 'Natural Rubber Door Mat',
-                'category': 'Home & Garden',
-                'description': 'Biodegradable rubber door mat from natural rubber trees',
-                'price': 21.99,
-                'tags': ['mat', 'rubber', 'door', 'eco', 'home']
-            },
-        ]
-
-        for prod_data in products_data:
-            product, created = Product.objects.get_or_create(
-                name=prod_data['name'],
+        created_products = []
+        for item in catalog_items:
+            product, created = Product.objects.update_or_create(
+                name=item['name'],
                 defaults={
-                    'category': categories[prod_data['category']],
-                    'description': prod_data['description'],
-                    'current_price': prod_data['price'],
-                    'stock': random.randint(5, 100),
-                    'tags': prod_data['tags'],
+                    'description': item['description'],
+                    'category': item['category'],
+                    'current_price': Decimal(str(item['current_price'])),
+                    'image_url': item['image_url'],
+                    'stock': item['stock'],
+                    'sustainability_score': item['sustainability_score'],
+                    'popularity_score': item['popularity_score'],
+                    'tags': item['tags'],
+                    'season': item.get('season'),
+                    'occasion': item.get('occasion'),
+                    'skin_or_body_fit': item.get('fit'),
                 }
             )
+            if 'age_groups' in item:
+                product.age_groups.set(item['age_groups'])
+            if 'gender' in item:
+                product.gender_categories.set(item['gender'])
+            if 'eco' in item:
+                product.eco_tags.set(item['eco'])
 
-            if created:
-                self.stdout.write(f"Created product: {prod_data['name']}")
+            created_products.append(product)
 
-                # Create price history (last 60 days)
-                current_price = prod_data['price']
-                for days_back in range(0, 60):
-                    # Simulate price fluctuations
-                    price_variation = random.uniform(-5, 5)
-                    historical_price = current_price + price_variation
-                    target_date = timezone.now().date() - timedelta(days=days_back)
-                    
-                    try:
-                        PriceHistory.objects.get_or_create(
-                            product=product,
-                            date=target_date,
-                            defaults={'price': max(5, historical_price)}
-                        )
-                    except Exception as e:
-                        # Skip if price history already exists for this date
-                        pass
+        self.stdout.write(self.style.SUCCESS(f"Successfully seeded {len(created_products)} catalog products."))
 
-                # Create price prediction
-                try:
-                    from ml_engine.price_predictor import PricePredictor
-                    predictor = PricePredictor()
-                    predictor.save_predictions(product)
-                    self.stdout.write(f"  Created price prediction for {prod_data['name']}")
-                except Exception as e:
-                    self.stdout.write(f"  Warning: Could not create prediction for {prod_data['name']}: {str(e)}")
-            else:
-                self.stdout.write(f"Product exists: {prod_data['name']}")
+        # 4. Generate 60-day historical PriceHistory for all products
+        self.stdout.write("4. Generating 60-day PriceHistory for AI 'Buy or Wait' Predictor...")
+        today = date.today()
+        price_history_records = []
 
-        self.stdout.write(self.style.SUCCESS('Database seeded successfully!'))
+        for p in created_products:
+            PriceHistory.objects.filter(product=p).delete()
+            base_price = float(p.current_price)
+            trend_direction = random.choice([-0.0015, -0.0005, 0.0, 0.0008, 0.0018])
+            sim_price = base_price * random.uniform(0.88, 1.08)
+
+            for d in range(60, 0, -1):
+                hist_date = today - timedelta(days=d)
+                fluctuation = random.gauss(trend_direction, 0.012)
+                sim_price *= (1 + fluctuation)
+                sim_price = max(sim_price, base_price * 0.55)
+                price_history_records.append(
+                    PriceHistory(
+                        product=p,
+                        price=Decimal(str(round(sim_price, 2))),
+                        date=hist_date
+                    )
+                )
+
+            # Today's price = current price
+            price_history_records.append(
+                PriceHistory(product=p, price=p.current_price, date=today)
+            )
+
+        PriceHistory.objects.bulk_create(price_history_records, ignore_conflicts=True)
+        self.stdout.write(self.style.SUCCESS(f"Created {len(price_history_records)} historical price data points."))
+
+        # 5. Create Demo Accounts
+        self.stdout.write("5. Provisioning staff, admin, and demo users...")
+        users_to_create = [
+            {
+                'username': 'admin',
+                'email': 'admin@econext.org',
+                'first_name': 'EcoNext',
+                'last_name': 'Admin',
+                'password': 'adminpassword123',
+                'is_staff': True,
+                'is_superuser': True,
+            },
+            {
+                'username': 'manager',
+                'email': 'manager@econext.org',
+                'first_name': 'Store',
+                'last_name': 'Manager',
+                'password': 'managerpassword123',
+                'is_staff': True,
+                'is_superuser': False,
+            },
+            {
+                'username': 'demouser',
+                'email': 'demouser@econext.org',
+                'first_name': 'Aarav',
+                'last_name': 'Patel',
+                'password': 'demopassword123',
+                'is_staff': False,
+                'is_superuser': False,
+            }
+        ]
+
+        created_users = []
+        for u_data in users_to_create:
+            user = User.objects.filter(username=u_data['username']).first()
+            if not user:
+                user = User.objects.create_user(
+                    username=u_data['username'],
+                    email=u_data['email'],
+                    password=u_data['password'],
+                    first_name=u_data['first_name'],
+                    last_name=u_data['last_name']
+                )
+            user.is_staff = u_data['is_staff']
+            user.is_superuser = u_data['is_superuser']
+            user.save()
+            UserProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    'phone': '+91 98765 43210',
+                    'address': 'Flat 402, Green Meadows, Eco Residency',
+                    'city': 'Mumbai',
+                    'state': 'Maharashtra',
+                    'zipcode': '400001',
+                    'country': 'India'
+                }
+            )
+            created_users.append(user)
+
+        # Ensure existing user Shiva has staff access
+        shiva = User.objects.filter(username='Jinkalker_Shiva').first()
+        if shiva:
+            shiva.is_staff = True
+            shiva.is_superuser = True
+            shiva.save()
+            created_users.append(shiva)
+
+        # 6. Sample Demo Orders for Analytics & Dashboard
+        self.stdout.write("6. Creating realistic demo orders for Admin Dashboard...")
+        demo_customer = User.objects.filter(username='demouser').first() or created_users[0]
+        
+        orders_data = [
+            {
+                'status': 'delivered',
+                'days_ago': 6,
+                'items': [(created_products[0], 1), (created_products[14], 2)],
+                'city': 'Mumbai',
+            },
+            {
+                'status': 'delivered',
+                'days_ago': 4,
+                'items': [(created_products[3], 1), (created_products[10], 1)],
+                'city': 'Bengaluru',
+            },
+            {
+                'status': 'shipped',
+                'days_ago': 2,
+                'items': [(created_products[17], 1), (created_products[18], 1)],
+                'city': 'Delhi',
+            },
+            {
+                'status': 'confirmed',
+                'days_ago': 1,
+                'items': [(created_products[2], 2), (created_products[15], 1)],
+                'city': 'Hyderabad',
+            },
+            {
+                'status': 'pending',
+                'days_ago': 0,
+                'items': [(created_products[6], 1), (created_products[7], 1)],
+                'city': 'Pune',
+            },
+        ]
+
+        for o_info in orders_data:
+            order_total = sum(p.current_price * qty for p, qty in o_info['items'])
+            order_date = timezone.now() - timedelta(days=o_info['days_ago'])
+            
+            order = Order.objects.create(
+                user=demo_customer,
+                status=o_info['status'],
+                total_price=order_total,
+                shipping_address="42 Green Avenue, Sustainable Colony",
+                city=o_info['city'],
+                state="Maharashtra",
+                zipcode="400050",
+                country="India",
+            )
+            # Update created_at timestamp
+            Order.objects.filter(pk=order.pk).update(created_at=order_date)
+
+            for prod, qty in o_info['items']:
+                OrderItem.objects.create(
+                    order=order,
+                    product=prod,
+                    quantity=qty,
+                    price_at_purchase=prod.current_price
+                )
+
+        # 7. Daily Stats for Analytics
+        DailyStats.objects.update_or_create(
+            date=today,
+            defaults={
+                'active_users_count': 42,
+                'total_views': 310,
+                'total_searches': 185,
+                'total_sales': Decimal('14995.00'),
+                'trending_products': [{'product_id': p.id, 'count': random.randint(10, 50)} for p in created_products[:5]]
+            }
+        )
+
+        self.stdout.write(self.style.SUCCESS("\n========================================================"))
+        self.stdout.write(self.style.SUCCESS("[OK] EcoNext Demo Data Seeding Completed Successfully!"))
+        self.stdout.write(self.style.SUCCESS("========================================================"))
+        self.stdout.write(f"- Catalog Products: {Product.objects.count()}")
+        self.stdout.write(f"- Price Histories: {PriceHistory.objects.count()} (60-day trend per product)")
+        self.stdout.write(f"- Categories: {Category.objects.count()}")
+        self.stdout.write(f"- Platform Users: {User.objects.count()}")
+        self.stdout.write(f"- Demo Orders: {Order.objects.count()}")
+        self.stdout.write("\nAdmin Login Credentials:")
+        self.stdout.write("  Username: admin")
+        self.stdout.write("  Password: adminpassword123")
+        self.stdout.write("  Email:    admin@econext.org")
+        self.stdout.write("\nCustomer Login Credentials:")
+        self.stdout.write("  Username: demouser")
+        self.stdout.write("  Password: demopassword123")
+        self.stdout.write("========================================================\n")

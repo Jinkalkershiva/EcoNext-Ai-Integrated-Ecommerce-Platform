@@ -5,10 +5,17 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import UserProfile
 
 class UserSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name')
-        read_only_fields = ('id',)
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser', 'role', 'date_joined')
+        read_only_fields = ('id', 'date_joined')
+
+    def get_role(self, obj):
+        if obj.is_superuser or obj.is_staff:
+            return 'admin'
+        return 'user'
 
 class UserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -36,9 +43,6 @@ class SignUpSerializer(serializers.ModelSerializer):
         if User.objects.filter(email__iexact=data['email']).exists():
             raise serializers.ValidationError({'email': 'Email already exists'})
 
-        # AUTH_PASSWORD_VALIDATORS was configured in settings but never actually
-        # run, because create_user() bypasses it. Enforce it here so minimum
-        # length, common-password and numeric-only rules apply at signup.
         try:
             validate_password(data['password'])
         except DjangoValidationError as exc:

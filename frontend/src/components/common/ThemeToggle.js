@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sun, Moon, Sparkles, Palette } from 'lucide-react';
+import { Sun, Moon, Sparkles } from 'lucide-react';
 import { useTheme, THEMES } from '../../context/ThemeContext';
 import { motion } from 'framer-motion';
 import './ThemeToggle.css';
@@ -11,7 +11,6 @@ export const ThemeToggle = ({ className = '' }) => {
     { id: THEMES.LIGHT, label: 'Light', icon: <Sun size={14} strokeWidth={2.2} /> },
     { id: THEMES.DARK, label: 'Dark', icon: <Moon size={14} strokeWidth={2.2} /> },
     { id: THEMES.WARM, label: 'Warm', icon: <Sparkles size={14} strokeWidth={2.2} /> },
-    { id: THEMES.KIDS, label: 'Kids', icon: <Palette size={14} strokeWidth={2.2} /> },
   ];
 
   return (

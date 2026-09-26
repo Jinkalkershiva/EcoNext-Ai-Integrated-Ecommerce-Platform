@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Leaf, Search, Camera, ShoppingBag, User, LogOut, Menu, X, Sparkles, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { Leaf, Search, Camera, ShoppingBag, User, LogOut, Menu, X, Sparkles, SlidersHorizontal, ChevronDown, LayoutDashboard } from 'lucide-react';
 import { useNavigation } from '../../context/NavigationContext';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import ThemeToggle from '../common/ThemeToggle';
+import NotificationDrawer from '../notifications/NotificationDrawer';
 import { motion, AnimatePresence } from 'framer-motion';
 import './Navbar.css';
 
@@ -109,11 +110,23 @@ export const Navbar = () => {
                 <Sparkles size={14} style={{ color: 'var(--color-accent)' }} /> Snap & Shop
               </span>
             </li>
+            {isAuthenticated && (user?.role === 'admin' || user?.is_staff || user?.is_superuser) && (
+              <li>
+                <span
+                  className={`nav-link ${page === 'admin' ? 'active' : ''}`}
+                  onClick={() => navigateTo('admin')}
+                  style={{ color: 'var(--color-primary)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <LayoutDashboard size={14} /> Admin
+                </span>
+              </li>
+            )}
           </ul>
 
           {/* Right Action Icons */}
           <div className="navbar-actions">
             <ThemeToggle />
+            <NotificationDrawer />
 
             {/* Cart Button */}
             <motion.button
@@ -165,7 +178,7 @@ export const Navbar = () => {
                         position: 'absolute',
                         right: 0,
                         top: 'calc(100% + 8px)',
-                        width: '190px',
+                        width: '210px',
                         backgroundColor: 'var(--bg-surface)',
                         border: '1px solid var(--border-default)',
                         borderRadius: 'var(--radius-md)',
@@ -196,6 +209,19 @@ export const Navbar = () => {
                       >
                         <SlidersHorizontal size={15} /> Eco Preferences
                       </button>
+                      {(user.role === 'admin' || user.is_staff || user.is_superuser) && (
+                        <button
+                          type="button"
+                          className="nav-link"
+                          style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--color-primary)', fontWeight: 600 }}
+                          onClick={() => {
+                            setUserDropdownOpen(false);
+                            navigateTo('admin');
+                          }}
+                        >
+                          <LayoutDashboard size={15} /> Admin Console
+                        </button>
+                      )}
                       <div style={{ borderTop: '1px solid var(--border-subtle)', margin: '0.35rem 0' }} />
                       <button
                         type="button"
@@ -406,6 +432,16 @@ export const Navbar = () => {
                     >
                       <User size={16} /> Account Profile
                     </button>
+                    {(user.role === 'admin' || user.is_staff || user.is_superuser) && (
+                      <button
+                        type="button"
+                        className="nav-link"
+                        style={{ justifyContent: 'flex-start', color: 'var(--color-primary)', fontWeight: 600 }}
+                        onClick={() => { navigateTo('admin'); setMobileMenuOpen(false); }}
+                      >
+                        <LayoutDashboard size={16} /> Admin Console
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="nav-link"

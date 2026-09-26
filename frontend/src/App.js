@@ -22,6 +22,7 @@ import ProfilePage from './pages/ProfilePage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import PreferencePage from './pages/PreferencePage';
+import AdminPage from './pages/AdminPage';
 
 // Import Design System & Global Styles
 import './styles/tokens.css';
@@ -85,6 +86,9 @@ const AppContent = () => {
 
       case 'preferences':
         return <PreferencePage />;
+
+      case 'admin':
+        return <AdminPage />;
 
       default:
         if (page && (page.startsWith('product-') || page.startsWith('product/'))) {

@@ -23,6 +23,7 @@ from shop_cart import api_views as cart_views
 from personalization.views import UserPreferenceViewSet
 from kids_products.views import KidsProductViewSet
 from copilot.views import ChatAPIView
+from products import admin_views
 
 urlpatterns = [
     path('', welcome, name='welcome'),
@@ -66,6 +67,15 @@ urlpatterns = [
     path('api/orders/', cart_views.order_list, name='order_list'),
     path('api/orders/<int:order_id>/', cart_views.order_detail, name='order_detail'),
     path('api/orders/<int:order_id>/status/', cart_views.update_order_status, name='update_order_status'),
+
+    # Admin Panel REST APIs (RBAC Protected)
+    path('api/admin/dashboard/', admin_views.admin_dashboard_stats, name='admin_dashboard_stats'),
+    path('api/admin/products/', admin_views.admin_products_list_create, name='admin_products_list_create'),
+    path('api/admin/products/<int:pk>/', admin_views.admin_product_detail, name='admin_product_detail'),
+    path('api/admin/orders/', admin_views.admin_orders_list, name='admin_orders_list'),
+    path('api/admin/orders/<int:order_id>/status/', admin_views.admin_order_status_update, name='admin_order_status_update'),
+    path('api/admin/users/', admin_views.admin_users_list, name='admin_users_list'),
+    path('api/admin/categories/', admin_views.admin_categories_list_create, name='admin_categories_list_create'),
 ]
 
 # Serve uploaded media (visual-search images) from the dev server. In production

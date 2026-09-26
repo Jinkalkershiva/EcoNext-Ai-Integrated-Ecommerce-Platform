@@ -23,13 +23,3 @@ export { PricePredictorCard } from './ai/PricePredictorCard';
 export { ChatAssistant } from './ai/ChatAssistant';
 export { RecommendationWidget } from './ai/RecommendationWidget';
 export { SearchBar } from './search/SearchBar';
-
-// Kids Mode Components (Inspired by Reference HTML)
-export {
-  KidsHero,
-  KidsMarquee,
-  KidsProductCard,
-  KidsProductSlider,
-  KidsCategoryGrid,
-  KidsFeatureGrid,
-} from './kids';

@@ -1,0 +1,59 @@
+server:
+  port: ${PAYMENT_SERVICE_PORT:8087}
+
+spring:
+  application:
+    name: payment-service
+
+  datasource:
+    url: ${PAYMENT_DB_URL:jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${PAYMENT_DB_NAME:econext_payment_db}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:shivaJ@123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 30000
+      pool-name: PaymentServiceHikariPool
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+  kafka:
+    enabled: ${KAFKA_ENABLED:true}
+  razorpay:
+    key-id: ${RAZORPAY_KEY_ID:rzp_test_econext_placeholder_key}
+    key-secret: ${RAZORPAY_KEY_SECRET:econext_placeholder_secret_key}
+    company-name: EcoNext Sustainable Retail
+    currency: INR
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: INFO
+    com.econext.payment: DEBUG
