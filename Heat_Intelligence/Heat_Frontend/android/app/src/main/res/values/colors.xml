@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- FCM notification accent color: deep orange/red matching the heat alert theme -->
-    <color name="notification_color">#E53935</color>
-</resources>

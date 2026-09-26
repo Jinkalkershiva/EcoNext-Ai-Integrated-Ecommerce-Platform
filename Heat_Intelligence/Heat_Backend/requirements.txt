@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-pydantic
-httpx
-SQLAlchemy
-APScheduler
-psycopg2-binary
-firebase-admin
-slowapi
