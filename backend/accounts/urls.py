@@ -9,6 +9,11 @@ urlpatterns = [
     path('auth/current-user/', auth_views.current_user_view, name='current-user'),
     path('auth/profile/update/', auth_views.update_profile_view, name='update-profile'),
 
+    # Redis OTP Authentication & Password Reset
+    path('auth/otp/send/', auth_views.send_otp_view, name='send-otp'),
+    path('auth/otp/verify/', auth_views.verify_otp_view, name='verify-otp'),
+    path('auth/otp/reset-password/', auth_views.reset_password_with_otp_view, name='reset-password-otp'),
+
     # Access tokens live 24h and refresh tokens 7 days, but there was no way to
     # exchange one for the other — every session silently died after a day.
     path('auth/refresh/', TokenRefreshView.as_view(), name='token-refresh'),

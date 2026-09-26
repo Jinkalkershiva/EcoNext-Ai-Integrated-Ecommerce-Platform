@@ -400,6 +400,30 @@ export const apiService = {
     });
   },
 
+  sendOtp(email, purpose = 'login') {
+    return request('/auth/otp/send/', {
+      method: 'POST',
+      body: { email, purpose },
+    });
+  },
+
+  async verifyOtp(email, otp, purpose = 'login') {
+    const data = await request('/auth/otp/verify/', {
+      method: 'POST',
+      body: { email, otp, purpose },
+    });
+    if (data?.tokens) tokenStore.set(data.tokens);
+    if (data?.user) tokenStore.setUser(data.user);
+    return data;
+  },
+
+  resetPasswordWithOtp(email, otp, newPassword) {
+    return request('/auth/otp/reset-password/', {
+      method: 'POST',
+      body: { email, otp, new_password: newPassword },
+    });
+  },
+
   // ---------- Products ----------
 
   /**

@@ -328,6 +328,20 @@ export const ProfilePage = () => {
                 const badgeVariant =
                   status === 'delivered' ? 'success' : status === 'shipped' ? 'accent' : 'warning';
 
+                const getStatusStep = (st) => {
+                  switch (st) {
+                    case 'pending': return 1;
+                    case 'confirmed':
+                    case 'processing': return 2;
+                    case 'shipped': return 3;
+                    case 'delivered': return 4;
+                    default: return 1;
+                  }
+                };
+
+                const currentStep = getStatusStep(status);
+                const isCancelled = status === 'cancelled';
+
                 return (
                   <div key={order.id} className="order-history-card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -346,9 +360,45 @@ export const ProfilePage = () => {
                       </span>
                     </div>
 
+                    {/* Live Order Tracker Timeline */}
+                    {!isCancelled ? (
+                      <div className="order-tracker-timeline">
+                        <div className="order-tracker-line">
+                          <div
+                            className="order-tracker-line-fill"
+                            style={{ width: `${((currentStep - 1) / 3) * 100}%` }}
+                          />
+                        </div>
+
+                        <div className={`order-tracker-step ${currentStep >= 1 ? 'completed' : ''}`}>
+                          <div className="order-tracker-dot">✓</div>
+                          <span>Placed</span>
+                        </div>
+
+                        <div className={`order-tracker-step ${currentStep >= 2 ? (currentStep === 2 ? 'active' : 'completed') : ''}`}>
+                          <div className="order-tracker-dot">{currentStep >= 2 ? '✓' : '2'}</div>
+                          <span>Processing</span>
+                        </div>
+
+                        <div className={`order-tracker-step ${currentStep >= 3 ? (currentStep === 3 ? 'active' : 'completed') : ''}`}>
+                          <div className="order-tracker-dot">{currentStep >= 3 ? '✓' : '3'}</div>
+                          <span>Shipped</span>
+                        </div>
+
+                        <div className={`order-tracker-step ${currentStep >= 4 ? 'completed' : ''}`}>
+                          <div className="order-tracker-dot">{currentStep >= 4 ? '✓' : '4'}</div>
+                          <span>Delivered</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-danger)', fontWeight: 600 }}>
+                        ⚠️ Order was cancelled.
+                      </div>
+                    )}
+
                     {order.items && order.items.length > 0 && (
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem' }}>
-                        {order.items.length} item{order.items.length > 1 ? 's' : ''} in package
+                        {order.items.length} item{order.items.length > 1 ? 's' : ''} in package • Carbon-Neutral Delivery
                       </div>
                     )}
                   </div>

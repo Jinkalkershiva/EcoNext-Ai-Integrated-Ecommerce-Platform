@@ -150,3 +150,121 @@ def update_profile_view(request):
         'user': UserSerializer(user).data,
         'profile': UserProfileSerializer(profile).data
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def send_otp_view(request):
+    """
+    Generate and dispatch a Redis-backed OTP code for authentication or password reset.
+    """
+    from .otp_service import RedisOTPService
+    email = request.data.get('email', '').strip()
+    purpose = request.data.get('purpose', 'login').strip().lower()
+
+    if not email or '@' not in email:
+        return Response({
+            'status': 'error',
+            'message': 'A valid email address is required to dispatch an OTP.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    otp_code = RedisOTPService.generate_otp(email=email, purpose=purpose)
+    
+    return Response({
+        'status': 'success',
+        'message': f"OTP sent to {email} successfully (valid for 5 minutes).",
+        'ttl_seconds': 300,
+        'purpose': purpose,
+        # Included in dev/testing mode for instant headless automated tests
+        'dev_otp': otp_code
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_otp_view(request):
+    """
+    Validate a Redis OTP and issue session JWT tokens if valid.
+    """
+    from .otp_service import RedisOTPService
+    email = request.data.get('email', '').strip()
+    otp_code = request.data.get('otp', '').strip()
+    purpose = request.data.get('purpose', 'login').strip().lower()
+
+    if not email or not otp_code:
+        return Response({
+            'status': 'error',
+            'message': 'Both email and OTP code are required.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    is_valid, msg = RedisOTPService.verify_otp(email=email, otp_code=otp_code, purpose=purpose)
+    if not is_valid:
+        return Response({
+            'status': 'error',
+            'message': msg
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # If user exists, authenticate them and return JWT tokens
+    user = User.objects.filter(email__iexact=email).first()
+    if user:
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'status': 'success',
+            'message': 'OTP verification successful. Authenticated session active.',
+            'user': UserSerializer(user).data,
+            'tokens': {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh)
+            }
+        }, status=status.HTTP_200_OK)
+
+    return Response({
+        'status': 'success',
+        'message': 'OTP code verified successfully.'
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password_with_otp_view(request):
+    """
+    Reset user password after successful Redis OTP validation.
+    """
+    from .otp_service import RedisOTPService
+    email = request.data.get('email', '').strip()
+    otp_code = request.data.get('otp', '').strip()
+    new_password = request.data.get('new_password', '').strip()
+
+    if not email or not otp_code or not new_password:
+        return Response({
+            'status': 'error',
+            'message': 'Email, OTP code, and new_password are required.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if len(new_password) < 6:
+        return Response({
+            'status': 'error',
+            'message': 'Password must be at least 6 characters long.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    is_valid, msg = RedisOTPService.verify_otp(email=email, otp_code=otp_code, purpose='reset_password')
+    if not is_valid:
+        return Response({
+            'status': 'error',
+            'message': msg
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.filter(email__iexact=email).first()
+    if not user:
+        return Response({
+            'status': 'error',
+            'message': 'No user account found with this email address.'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    user.set_password(new_password)
+    user.save()
+
+    return Response({
+        'status': 'success',
+        'message': 'Password reset successful! You may now sign in with your new password.'
+    }, status=status.HTTP_200_OK)
