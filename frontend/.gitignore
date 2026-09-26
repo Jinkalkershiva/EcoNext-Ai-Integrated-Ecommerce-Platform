@@ -10,6 +10,8 @@
 
 # production
 /build
+/dist
+/dist-ssr
 
 # misc
 .DS_Store
@@ -24,4 +26,5 @@ yarn-error.log*
 
 node_modules/
 build/
+dist/
 .env

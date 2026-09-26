@@ -1,0 +1,83 @@
+/* ==========================================================================
+   ProductSlider Component Styles
+   Horizontal scroll-snap carousel with directional navigation
+   ========================================================================== */
+
+.product-slider-container {
+  position: relative;
+  width: 100%;
+}
+
+.product-slider-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.product-slider-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: all var(--transition-fast);
+}
+
+.product-slider-nav-btn:hover:not(:disabled) {
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  transform: scale(1.05);
+}
+
+.product-slider-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.product-slider-track {
+  display: flex;
+  gap: var(--space-4);
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  padding: var(--space-2) 0 var(--space-4) 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+}
+
+.product-slider-track::-webkit-scrollbar {
+  height: 6px;
+}
+
+.product-slider-track::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.product-slider-track::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+}
+
+.product-slider-item {
+  flex: 0 0 280px;
+  scroll-snap-align: start;
+}
+
+@media (min-width: 640px) {
+  .product-slider-item {
+    flex: 0 0 300px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .product-slider-item {
+    flex: 0 0 320px;
+  }
+}

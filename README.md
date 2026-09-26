@@ -6,6 +6,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Django](https://img.shields.io/badge/Django-5.1-darkgreen.svg)](https://www.djangoproject.com/)
 [![React](https://img.shields.io/badge/React-19-cyan.svg)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-6.2-646CFF.svg)](https://vitejs.dev/)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0-blue.svg)](https://www.mysql.com/)
 [![Kafka](https://img.shields.io/badge/Apache%20Kafka-KRaft%20Mode-black.svg)](https://kafka.apache.org/)
 [![Redis](https://img.shields.io/badge/Redis-7-red.svg)](https://redis.io/)
@@ -63,8 +64,8 @@ The platform operates in an incremental **Strangler Fig coexistence state**: ide
 
 ```
                              ┌────────────────────────┐
-                             │ React 19 Frontend      │
-                             │ (Port 3000 / 5173)     │
+                             │ Vite + React 19 App    │
+                             │ (Port 5173 / 3000)     │
                              └───────────┬────────────┘
                                          │ HTTP REST / JSON
                                          ▼
@@ -145,7 +146,7 @@ The backend migration avoids a high-risk "big bang" rewrite by implementing the 
 | **Cart Microservice** | Spring Boot, Spring Data JPA | 3.3.4 | Shopping cart lifecycle, subtotal calculation, item mutations |
 | **Java Platform** | OpenJDK | 21 LTS | Runtime for Spring Boot microservices |
 | **Monolith Backend** | Django / Django REST Framework | 5.1 / 3.15 | Legacy catalog, order fulfillment, ML/AI engine |
-| **Frontend** | React, React Router | 19.x | Single-page application user interface |
+| **Frontend** | React 19, Vite, Framer Motion, Lucide React | 19.x / 6.x | Single-page app with 3-theme design system (Light/Dark/Warm) |
 | **Relational Database**| MySQL Community Server | 8.0.x | Dedicated schema per bounded context (`econext_auth_db`, `econext_cart_db`, `econext`) |
 | **Event Streaming** | Apache Kafka (KRaft mode) | 7.6.0 | Distributed event streaming for asynchronous domain telemetry |
 | **In-Memory Cache** | Redis | 7.x | Caching price predictions, session tokens, and TF-IDF index |
@@ -194,6 +195,17 @@ EcoNext/
 │   └── cart-service/                    # Spring Boot Cart Service (Port 8083)
 │       ├── pom.xml
 │       └── src/main/java/com/econext/cart/
+├── frontend/                            # Vite + React 19 Frontend
+│   ├── src/                             # Modular components, contexts, and pages
+│   │   ├── components/                  # UI Components (Hero, Navbar, Slider, ThemeToggle)
+│   │   ├── context/                     # ThemeContext (3-way), AuthContext, CartContext
+│   │   ├── pages/                       # Route pages (HomePage, ProductsPage, etc.)
+│   │   ├── styles/                      # Design tokens (tokens.css) & global styles
+│   │   ├── api.js                       # Centralized API service & token store
+│   │   └── main.jsx                     # Application entry point
+│   ├── index.html                       # Vite root HTML template
+│   ├── vite.config.js                   # Vite configuration (React & JSX loader)
+│   └── package.json                     # Frontend dependencies & scripts
 ├── docs/                                # System & service documentation
 │   ├── AUTH_SERVICE.md
 │   ├── CART_SERVICE.md
@@ -440,6 +452,14 @@ pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver 127.0.0.1:8000
 ```
+
+### 4. Run Vite Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+The React 19 single-page app will start on `http://localhost:5173/`.
 
 ---
 
