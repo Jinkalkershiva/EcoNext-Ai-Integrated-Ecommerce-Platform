@@ -14,9 +14,11 @@ import lombok.NoArgsConstructor;
 @Builder
 public class VerifyPaymentRequest {
 
-    @NotNull(message = "Order ID is required")
     @JsonProperty("order_id")
     private Long orderId;
+
+    @JsonProperty("checkout_reference")
+    private String checkoutReference;
 
     @NotBlank(message = "Razorpay Order ID is required")
     @JsonProperty("razorpay_order_id")

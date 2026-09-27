@@ -16,9 +16,11 @@ import java.math.BigDecimal;
 @Builder
 public class CreatePaymentRequest {
 
-    @NotNull(message = "Order ID is required")
     @JsonProperty("order_id")
     private Long orderId;
+
+    @JsonProperty("checkout_reference")
+    private String checkoutReference;
 
     @NotNull(message = "Amount is required")
     @DecimalMin(value = "1.00", message = "Amount must be at least ₹1.00")

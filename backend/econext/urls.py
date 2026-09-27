@@ -25,6 +25,7 @@ from kids_products.views import KidsProductViewSet
 from copilot.views import ChatAPIView
 from products import admin_views
 from accounts import auth_views
+from shop_cart import payment_views
 
 urlpatterns = [
     path('', welcome, name='welcome'),
@@ -68,6 +69,13 @@ urlpatterns = [
     path('api/orders/', cart_views.order_list, name='order_list'),
     path('api/orders/<int:order_id>/', cart_views.order_detail, name='order_detail'),
     path('api/orders/<int:order_id>/status/', cart_views.update_order_status, name='update_order_status'),
+    # Payment & Razorpay endpoints
+    path('api/payments/create-order/', payment_views.create_razorpay_order_view, name='create_razorpay_order'),
+    path('api/payments/create-order', payment_views.create_razorpay_order_view, name='create_razorpay_order_noslash'),
+    path('api/payments/verify/', payment_views.verify_razorpay_payment_view, name='verify_razorpay_payment'),
+    path('api/payments/verify', payment_views.verify_razorpay_payment_view, name='verify_razorpay_payment_noslash'),
+    path('api/payments/razorpay/webhook/', payment_views.razorpay_webhook_view, name='razorpay_webhook'),
+    path('api/payments/razorpay/webhook', payment_views.razorpay_webhook_view, name='razorpay_webhook_noslash'),
 
     # Admin Panel REST APIs (RBAC Protected) - Dual route support for trailing and non-trailing slashes
     path('api/admin/auth/login/', auth_views.admin_login_view, name='admin_login'),

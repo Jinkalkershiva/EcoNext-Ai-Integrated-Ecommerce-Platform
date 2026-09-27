@@ -56,6 +56,21 @@ export const CheckoutPage = ({ onOrderSuccess }) => {
 
   const [paymentInfo, setPaymentInfo] = useState(null);
 
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -63,109 +78,130 @@ export const CheckoutPage = ({ onOrderSuccess }) => {
     setLoading(true);
     setErrors({});
 
-    try {
-      const shippingData = {
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        email: formData.email,
-        phone: formData.phone,
-        address: formData.address,
-        city: formData.city,
-        state: formData.state,
-        zipcode: formData.zipcode,
-        country: formData.country,
-        payment_method: formData.paymentMethod === 'razorpay' ? 'razorpay' : 'cod'
-      };
+    const shippingData = {
+      first_name: formData.firstName,
+      last_name: formData.lastName,
+      email: formData.email,
+      phone: formData.phone,
+      address: formData.address,
+      city: formData.city,
+      state: formData.state,
+      zipcode: formData.zipcode,
+      country: formData.country,
+      payment_method: formData.paymentMethod === 'razorpay' ? 'razorpay' : 'cod',
+    };
 
-      if (formData.paymentMethod === 'razorpay') {
-        // Step 1: Create Order in Monolith
-        const response = await apiService.createOrder(shippingData);
-        if (!response || response.status !== 'success') {
-          throw new Error(response?.message || 'Failed to initialize order record.');
+    if (formData.paymentMethod === 'razorpay') {
+      try {
+        const isLoaded = await loadRazorpayScript();
+        if (!isLoaded || typeof window.Razorpay === 'undefined') {
+          throw new Error('Could not load Razorpay gateway. Please check your network or choose Cash on Delivery.');
         }
-        const orderData = response.order;
 
-        // Step 2: Initialize Razorpay order with Payment Service
-        try {
-          const payOrderRes = await apiService.createPaymentOrder({
-            orderId: orderData.id,
-            amount: cartTotal,
-            currency: 'INR'
+        // Step 1: Initialize server-side Razorpay payment order
+        const payOrderRes = await apiService.createPaymentOrder({
+          amount: cartTotal,
+          currency: 'INR',
+          phone: formData.phone,
+        });
+
+        const payData = payOrderRes?.data || payOrderRes;
+        const razorpayOrderId = payData.razorpayOrderId || payData.order_id;
+        const keyId = payData.keyId || payData.key_id || 'rzp_test_1DP5mmOlF5G5ag';
+        const amountInPaise = payData.amountInPaise || payData.amount || Math.round(cartTotal * 100);
+
+        if (!razorpayOrderId) {
+          throw new Error(payOrderRes?.message || 'Failed to initialize payment gateway.');
+        }
+
+        const options = {
+          key: keyId,
+          amount: amountInPaise,
+          currency: payData.currency || 'INR',
+          name: 'EcoNext Platform',
+          description: 'Eco-Certified Goods Purchase',
+          order_id: razorpayOrderId,
+          prefill: {
+            name: `${formData.firstName} ${formData.lastName}`.trim(),
+            email: formData.email,
+            contact: formData.phone,
+          },
+          theme: {
+            color: '#16a34a',
+          },
+          modal: {
+            ondismiss: function () {
+              setLoading(false);
+              setErrors({ submit: 'Payment was cancelled. Your order has not been placed.' });
+            },
+          },
+          handler: async function (rzpResponse) {
+            try {
+              setLoading(true);
+              // Step 2: Finalize EcoNext Order ONLY after verified Razorpay checkout
+              const orderResponse = await apiService.createOrder({
+                ...shippingData,
+                payment_method: 'razorpay',
+                razorpay_order_id: rzpResponse.razorpay_order_id,
+                razorpay_payment_id: rzpResponse.razorpay_payment_id,
+                razorpay_signature: rzpResponse.razorpay_signature,
+              });
+
+              if (orderResponse && orderResponse.status === 'success') {
+                const orderData = orderResponse.order;
+                setPaymentInfo({
+                  status: 'PAID',
+                  transactionId: rzpResponse.razorpay_payment_id,
+                  orderId: rzpResponse.razorpay_order_id,
+                });
+                setPlacedOrder(orderData);
+                clearCart();
+                if (onOrderSuccess) onOrderSuccess(orderData);
+              } else {
+                setErrors({ submit: orderResponse?.message || 'Payment received, but failed to confirm order. Please contact customer support.' });
+              }
+            } catch (vErr) {
+              setErrors({ submit: vErr.message || 'Payment verification failed. Your order could not be placed.' });
+            } finally {
+              setLoading(false);
+            }
+          },
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (response) {
+          setLoading(false);
+          setErrors({
+            submit: `Payment failed: ${response?.error?.description || 'Transaction declined'}. Your order has not been placed.`,
           });
+        });
 
-          // Check if Razorpay JS SDK is loaded on window
-          if (typeof window !== 'undefined' && window.Razorpay && payOrderRes?.data?.razorpayOrderId) {
-            const options = {
-              key: payOrderRes.data.keyId || 'rzp_test_placeholder',
-              amount: payOrderRes.data.amountInPaise,
-              currency: 'INR',
-              name: 'EcoNext Platform',
-              description: `Order #${orderData.id} Eco-Certified Goods`,
-              order_id: payOrderRes.data.razorpayOrderId,
-              prefill: {
-                name: `${formData.firstName} ${formData.lastName}`,
-                email: formData.email,
-                contact: formData.phone,
-              },
-              theme: {
-                color: '#16a34a',
-              },
-              handler: async function (rzpResponse) {
-                try {
-                  const verifyRes = await apiService.verifyPayment({
-                    orderId: orderData.id,
-                    razorpayOrderId: rzpResponse.razorpay_order_id,
-                    razorpayPaymentId: rzpResponse.razorpay_payment_id,
-                    razorpaySignature: rzpResponse.razorpay_signature,
-                  });
-                  setPaymentInfo(verifyRes?.data || { status: 'SUCCESS', transactionId: rzpResponse.razorpay_payment_id });
-                  setPlacedOrder(orderData);
-                  clearCart();
-                  if (onOrderSuccess) onOrderSuccess(orderData);
-                } catch (vErr) {
-                  setErrors({ submit: 'Payment verification failed: ' + vErr.message });
-                }
-              },
-            };
-            const rzp = new window.Razorpay(options);
-            rzp.open();
-            return;
-          } else {
-            // Verified sandbox payment simulation (Spring Boot Payment Service verified)
-            const verifyRes = await apiService.verifyPayment({
-              orderId: orderData.id,
-              razorpayOrderId: payOrderRes?.data?.razorpayOrderId || `order_sim_${Date.now()}`,
-              razorpayPaymentId: `pay_sim_${Date.now()}`,
-              razorpaySignature: 'simulated_valid_signature_token',
-            });
-            setPaymentInfo(verifyRes?.data || { status: 'SUCCESS' });
-            setPlacedOrder(orderData);
-            clearCart();
-            if (onOrderSuccess) onOrderSuccess(orderData);
-          }
-        } catch (payErr) {
-          console.warn('Payment service direct integration fallback:', payErr);
-          setPlacedOrder(orderData);
-          clearCart();
-          if (onOrderSuccess) onOrderSuccess(orderData);
-        }
-      } else {
-        // Cash on delivery
+        rzp.open();
+        setLoading(false);
+      } catch (payErr) {
+        console.error('Payment initialization error:', payErr);
+        setErrors({ submit: payErr.message || 'Could not initiate Razorpay payment.' });
+        setLoading(false);
+      }
+    } else {
+      // Cash on Delivery
+      try {
         const response = await apiService.createOrder(shippingData);
         if (response && response.status === 'success') {
           const orderData = response.order || { id: Math.floor(100000 + Math.random() * 900000) };
+          setPaymentInfo({ status: 'PENDING', method: 'Cash on Delivery' });
           setPlacedOrder(orderData);
           clearCart();
           if (onOrderSuccess) onOrderSuccess(orderData);
         } else {
           setErrors({ submit: response?.error || response?.message || 'Failed to place order.' });
         }
+      } catch (err) {
+        console.error('Order creation error:', err);
+        setErrors({ submit: err.message || 'Could not complete order. Please check backend connection.' });
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error('Order creation error:', err);
-      setErrors({ submit: err.message || 'Could not complete order. Please check backend connection.' });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -523,7 +559,11 @@ export const CheckoutPage = ({ onOrderSuccess }) => {
             loading={loading}
             icon={<Lock size={16} />}
           >
-            {loading ? 'Securing Order...' : 'Complete & Place Order'}
+            {loading
+              ? 'Processing...'
+              : formData.paymentMethod === 'razorpay'
+              ? `🔒 Pay ₹${cartTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} & Place Order`
+              : `Place Order with COD (₹${cartTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })})`}
           </Button>
 
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.75rem' }}>

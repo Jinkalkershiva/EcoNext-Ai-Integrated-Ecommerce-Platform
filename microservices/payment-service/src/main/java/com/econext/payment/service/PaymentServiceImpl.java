@@ -32,8 +32,10 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentResponse createPaymentOrder(CreatePaymentRequest request, Long userId) {
         log.info("Initiating payment for orderId {} by userId {}, amount: {}", request.getOrderId(), userId, request.getAmount());
 
-        // Check if transaction already exists for this order
-        PaymentTransaction transaction = paymentRepository.findByOrderId(request.getOrderId())
+        // Check if transaction already exists for this order or checkout attempt
+        PaymentTransaction transaction = (request.getOrderId() != null
+                ? paymentRepository.findByOrderId(request.getOrderId())
+                : java.util.Optional.<PaymentTransaction>empty())
                 .orElseGet(() -> PaymentTransaction.builder()
                         .orderId(request.getOrderId())
                         .userId(userId)
@@ -45,7 +47,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         // Generate Razorpay Order
         String rzpOrderId = razorpayService.createRazorpayOrder(
-                request.getOrderId(),
+                request.getOrderId() != null ? request.getOrderId() : System.currentTimeMillis(),
                 request.getAmount(),
                 request.getCurrency()
         );
@@ -60,12 +62,23 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional
     public PaymentResponse verifyPayment(VerifyPaymentRequest request, Long userId) {
-        log.info("Verifying Razorpay payment for orderId: {}, paymentId: {}", request.getOrderId(), request.getRazorpayPaymentId());
+        log.info("Verifying Razorpay payment for orderId: {}, razorpayOrderId: {}, paymentId: {}",
+                request.getOrderId(), request.getRazorpayOrderId(), request.getRazorpayPaymentId());
 
-        PaymentTransaction transaction = paymentRepository.findByOrderId(request.getOrderId())
-                .orElseThrow(() -> new ResourceNotFoundException("No payment transaction found for order ID: " + request.getOrderId()));
+        PaymentTransaction transaction = (request.getOrderId() != null
+                ? paymentRepository.findByOrderId(request.getOrderId())
+                : java.util.Optional.<PaymentTransaction>empty())
+                .or(() -> paymentRepository.findByRazorpayOrderId(request.getRazorpayOrderId()))
+                .orElseGet(() -> PaymentTransaction.builder()
+                        .orderId(request.getOrderId())
+                        .userId(userId)
+                        .razorpayOrderId(request.getRazorpayOrderId())
+                        .status("PENDING")
+                        .currency("INR")
+                        .paymentMethod("RAZORPAY")
+                        .build());
 
-        if (!transaction.getUserId().equals(userId)) {
+        if (transaction.getUserId() != null && !transaction.getUserId().equals(userId)) {
             throw new BadRequestException("Unauthorized attempt to verify payment for another user's order");
         }
 

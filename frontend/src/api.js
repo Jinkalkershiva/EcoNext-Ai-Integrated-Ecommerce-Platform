@@ -695,20 +695,36 @@ export const apiService = {
 
   // ---------- Payment Service (Spring Boot + Razorpay) ----------
 
-  createPaymentOrder(paymentData) {
-    return request(`${PAYMENT_API_BASE}/create-order`, {
-      method: 'POST',
-      auth: true,
-      body: paymentData,
-    });
+  async createPaymentOrder(paymentData = {}) {
+    try {
+      return await request('/payments/create-order/', {
+        method: 'POST',
+        auth: true,
+        body: paymentData,
+      });
+    } catch (err) {
+      return await request(`${PAYMENT_API_BASE}/create-order`, {
+        method: 'POST',
+        auth: true,
+        body: paymentData,
+      });
+    }
   },
 
-  verifyPayment(verificationData) {
-    return request(`${PAYMENT_API_BASE}/verify`, {
-      method: 'POST',
-      auth: true,
-      body: verificationData,
-    });
+  async verifyPayment(verificationData) {
+    try {
+      return await request('/payments/verify/', {
+        method: 'POST',
+        auth: true,
+        body: verificationData,
+      });
+    } catch (err) {
+      return await request(`${PAYMENT_API_BASE}/verify`, {
+        method: 'POST',
+        auth: true,
+        body: verificationData,
+      });
+    }
   },
 
   getOrderPayment(orderId) {

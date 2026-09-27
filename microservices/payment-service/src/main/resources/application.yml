@@ -39,8 +39,9 @@ app:
   kafka:
     enabled: ${KAFKA_ENABLED:true}
   razorpay:
-    key-id: ${RAZORPAY_KEY_ID:rzp_test_econext_placeholder_key}
-    key-secret: ${RAZORPAY_KEY_SECRET:econext_placeholder_secret_key}
+    key-id: ${RAZORPAY_KEY_ID:rzp_test_1DP5mmOlF5G5ag}
+    key-secret: ${RAZORPAY_KEY_SECRET:s6mK5wU4e2r7g9X1y3z8a4b2}
+    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:econext_rzp_webhook_secret_2026}
     company-name: EcoNext Sustainable Retail
     currency: INR
 

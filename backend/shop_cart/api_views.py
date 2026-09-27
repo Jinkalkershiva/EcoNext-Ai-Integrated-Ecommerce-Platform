@@ -280,19 +280,32 @@ def create_order(request):
     phone = shipping.get('phone') or ''
     email = shipping.get('email') or request.user.email or ''
 
-    razorpay_order_id = shipping.get('razorpay_order_id')
-    razorpay_payment_id = shipping.get('razorpay_payment_id')
-    razorpay_signature = shipping.get('razorpay_signature')
+    razorpay_order_id = shipping.get('razorpay_order_id') or request.data.get('razorpay_order_id') or request.data.get('razorpayOrderId')
+    razorpay_payment_id = shipping.get('razorpay_payment_id') or request.data.get('razorpay_payment_id') or request.data.get('razorpayPaymentId')
+    razorpay_signature = shipping.get('razorpay_signature') or request.data.get('razorpay_signature') or request.data.get('razorpaySignature')
 
-    if payment_method in ['razorpay', 'upi'] and razorpay_payment_id:
-        payment_status = 'VERIFIED'
-        initial_status = 'payment_confirmed'
-    elif payment_method in ['razorpay', 'upi']:
-        payment_status = 'PENDING'
-        initial_status = 'pending'
+    if payment_method in ['razorpay', 'upi']:
+        if not razorpay_payment_id or not razorpay_order_id or not razorpay_signature:
+            return bad_request('Razorpay payment has not been completed. Verified payment details are required to place an online order.')
+
+        from .payment_views import verify_signature
+        if not verify_signature(razorpay_order_id, razorpay_payment_id, razorpay_signature):
+            return bad_request('Invalid Razorpay payment signature. Payment verification failed.')
+
+        # Idempotency check: prevent duplicate order creation for the same payment
+        existing_order = Order.objects.filter(razorpay_payment_id=razorpay_payment_id).first()
+        if existing_order:
+            return Response({
+                'status': 'success',
+                'message': 'Order already processed.',
+                'order': OrderSerializer(order_queryset(request.user).get(pk=existing_order.pk)).data,
+            }, status=status.HTTP_200_OK)
+
+        payment_status = 'PAID'
+        initial_status = 'ORDER_PLACED'
     else:
         payment_status = 'PENDING'
-        initial_status = 'pending'
+        initial_status = 'ORDER_PLACED'
 
     with transaction.atomic():
         cart = get_or_create_cart(request.user)
@@ -347,7 +360,7 @@ def create_order(request):
             to_status=order.canonical_status,
             changed_by=request.user,
             changed_by_name=f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
-            note='Order successfully placed via checkout'
+            note='Order successfully placed via checkout (Cash on Delivery)' if payment_method == 'cod' else 'Order placed and payment verified via Razorpay online gateway'
         )
 
         ActivityLog.objects.bulk_create([
@@ -361,6 +374,19 @@ def create_order(request):
         ])
 
         cart.items.all().delete()
+
+    # Stream real-time order state transition to Big Data Kafka ingestion layer
+    try:
+        from site_analytics.kafka_producer import publish_order_event
+        publish_order_event(
+            order_id=order.id,
+            user_id=order.user_id,
+            total_amount=order.total_price,
+            status=order.canonical_status,
+            items_count=order.items.count()
+        )
+    except Exception:
+        pass
 
     # Trigger customer Email / SMS notification
     notify_order_status_change(order, '', order.status)
