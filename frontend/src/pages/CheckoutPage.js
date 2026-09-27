@@ -106,13 +106,14 @@ export const CheckoutPage = ({ onOrderSuccess }) => {
         });
 
         const payData = payOrderRes?.data || payOrderRes;
-        const razorpayOrderId = payData.razorpayOrderId || payData.order_id;
-        const keyId = payData.keyId || payData.key_id || 'rzp_test_1DP5mmOlF5G5ag';
-        const amountInPaise = payData.amountInPaise || payData.amount || Math.round(cartTotal * 100);
+        const razorpayOrderId = payData.razorpay_order_id || payData.razorpayOrderId || payData.order_id;
+        const keyId = payData.razorpay_key_id || payData.razorpayKeyId || payData.keyId || payData.key_id;
+        const amountInPaise = payData.amount_in_paise || payData.amountInPaise || Math.round((payData.amount || cartTotal) * 100);
 
         if (!razorpayOrderId) {
           throw new Error(payOrderRes?.message || 'Failed to initialize payment gateway.');
         }
+
 
         const options = {
           key: keyId,

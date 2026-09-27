@@ -21,11 +21,15 @@ public class PaymentEventProducer {
             return;
         }
 
-        try {
-            log.info("Publishing payment event to topic {}: orderId={}, status={}", TOPIC_PAYMENT_EVENTS, event.getOrderId(), event.getStatus());
-            kafkaTemplate.send(TOPIC_PAYMENT_EVENTS, String.valueOf(event.getOrderId()), event);
-        } catch (Exception ex) {
-            log.warn("Failed to publish payment event to Kafka (proceeding gracefully): {}", ex.getMessage());
-        }
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                log.info("Publishing payment event to topic {}: orderId={}, status={}", TOPIC_PAYMENT_EVENTS, event.getOrderId(), event.getStatus());
+                kafkaTemplate.send(TOPIC_PAYMENT_EVENTS, String.valueOf(event.getOrderId()), event);
+            } catch (Exception ex) {
+                log.warn("Failed to publish payment event to Kafka: {}", ex.getMessage());
+            }
+        });
     }
+
 }
+

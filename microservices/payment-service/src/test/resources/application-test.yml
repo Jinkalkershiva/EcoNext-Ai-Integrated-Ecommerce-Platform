@@ -26,7 +26,13 @@ app:
   kafka:
     enabled: false
   razorpay:
-    key-id: rzp_test_sample_key
-    key-secret: sample_secret_key_12345
+    key-id: ${RAZORPAY_KEY_ID:rzp_test_sample_key}
+    key-secret: ${RAZORPAY_KEY_SECRET:sample_secret_key_12345}
     company-name: EcoNext Test
     currency: INR
+
+razorpay:
+  key-id: ${RAZORPAY_KEY_ID:rzp_test_sample_key}
+  key-secret: ${RAZORPAY_KEY_SECRET:sample_secret_key_12345}
+  currency: INR
+

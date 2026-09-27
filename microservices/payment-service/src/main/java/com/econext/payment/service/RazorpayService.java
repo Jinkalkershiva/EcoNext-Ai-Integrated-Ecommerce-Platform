@@ -23,40 +23,71 @@ public class RazorpayService {
 
     private final RazorpayConfig razorpayConfig;
 
+    private RazorpayClient razorpayClient;
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        String keyId = razorpayConfig.getKeyId();
+        String keySecret = razorpayConfig.getKeySecret();
+        boolean keyPresent = keyId != null && !keyId.trim().isEmpty();
+        boolean secretPresent = keySecret != null && !keySecret.trim().isEmpty();
+        String prefix = keyPresent && keyId.length() >= 9 ? keyId.substring(0, 9) : (keyPresent ? keyId : "none");
+        int secretLength = secretPresent ? keySecret.length() : 0;
+
+        log.info("Razorpay Configuration Diagnostics:");
+        log.info("RAZORPAY_KEY_ID present: {}", keyPresent);
+        log.info("RAZORPAY_KEY_ID prefix: {}", prefix);
+        log.info("RAZORPAY_KEY_SECRET present: {}", secretPresent);
+        log.info("RAZORPAY_KEY_SECRET length: {}", secretLength);
+        log.info("currency: {}", razorpayConfig.getCurrency());
+
+        if (keyPresent && secretPresent) {
+            try {
+                this.razorpayClient = new RazorpayClient(keyId, keySecret);
+                log.info("RazorpayClient successfully initialized in TEST mode with Key ID prefix: {}", prefix);
+            } catch (Exception ex) {
+                log.error("Failed to initialize RazorpayClient: {}", ex.getMessage());
+            }
+        } else {
+            log.error("CRITICAL: Razorpay credentials are missing from environment variables!");
+        }
+    }
+
     /**
-     * Creates an order with Razorpay API or returns a simulated order in test environments.
+     * Creates an order with Razorpay API.
      */
     public String createRazorpayOrder(Long orderId, BigDecimal amount, String currency) {
         long amountInPaise = amount.multiply(new BigDecimal(100)).longValue();
-        String cur = currency != null ? currency : razorpayConfig.getCurrency();
+        String cur = (currency != null && !currency.trim().isEmpty()) ? currency : razorpayConfig.getCurrency();
 
         try {
-            // Check if live/test API key is provided
-            if (razorpayConfig.getKeyId() != null && !razorpayConfig.getKeyId().contains("placeholder")) {
-                RazorpayClient client = new RazorpayClient(razorpayConfig.getKeyId(), razorpayConfig.getKeySecret());
-                JSONObject orderReq = new JSONObject();
-                orderReq.put("amount", amountInPaise);
-                orderReq.put("currency", cur);
-                orderReq.put("receipt", "econext_rcpt_" + orderId);
-                JSONObject notes = new JSONObject();
-                notes.put("order_id", String.valueOf(orderId));
-                orderReq.put("notes", notes);
-
-                Order order = client.orders.create(orderReq);
-                String rzpOrderId = order.get("id");
-                log.info("Created Razorpay order ID {} for order {}", rzpOrderId, orderId);
-                return rzpOrderId;
+            if (razorpayClient == null) {
+                if (razorpayConfig.getKeyId() != null && razorpayConfig.getKeySecret() != null) {
+                    razorpayClient = new RazorpayClient(razorpayConfig.getKeyId(), razorpayConfig.getKeySecret());
+                } else {
+                    throw new IllegalStateException("Razorpay credentials (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) are missing.");
+                }
             }
-        } catch (RazorpayException ex) {
-            log.warn("Razorpay API call failed, falling back to simulated test order ID: {}", ex.getMessage());
-        } catch (Exception ex) {
-            log.warn("Razorpay client initialization failed ({}), using simulated test order ID", ex.getMessage());
-        }
 
-        // Sandbox/Test Simulation Fallback
-        String simOrderId = "order_sim_" + UUID.randomUUID().toString().replace("-", "").substring(0, 14);
-        log.info("Generated simulation Razorpay order ID {} for order {}", simOrderId, orderId);
-        return simOrderId;
+            JSONObject orderReq = new JSONObject();
+            orderReq.put("amount", amountInPaise);
+            orderReq.put("currency", cur);
+            orderReq.put("receipt", "econext_rcpt_" + orderId);
+            JSONObject notes = new JSONObject();
+            notes.put("order_id", String.valueOf(orderId));
+            orderReq.put("notes", notes);
+
+            Order order = razorpayClient.orders.create(orderReq);
+            String rzpOrderId = order.get("id");
+            log.info("Successfully created REAL Razorpay order ID {} for order {}", rzpOrderId, orderId);
+            return rzpOrderId;
+        } catch (RazorpayException ex) {
+            log.error("Razorpay API call failed: {}", ex.getMessage());
+            throw new RuntimeException("Razorpay API error: " + ex.getMessage(), ex);
+        } catch (Exception ex) {
+            log.error("Payment order generation failed: {}", ex.getMessage());
+            throw new RuntimeException("Payment order generation failed: " + ex.getMessage(), ex);
+        }
     }
 
     /**
@@ -68,15 +99,14 @@ public class RazorpayService {
             return false;
         }
 
-        // Accept simulated signature for test/demo environments
-        if (signature.startsWith("sim_sig_") || signature.equals("test_signature_valid")) {
-            log.info("Verified simulated signature for test payment");
-            return true;
-        }
-
         try {
             String data = razorpayOrderId + "|" + razorpayPaymentId;
             String secret = razorpayConfig.getKeySecret();
+            if (secret == null || secret.trim().isEmpty()) {
+                log.error("RAZORPAY_KEY_SECRET is missing. Cannot verify signature.");
+                return false;
+            }
+
 
             Mac mac = Mac.getInstance("HmacSHA256");
             SecretKeySpec secretKeySpec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");

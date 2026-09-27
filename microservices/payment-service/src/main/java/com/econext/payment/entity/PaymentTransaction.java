@@ -24,8 +24,9 @@ public class PaymentTransaction {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "order_id", nullable = false)
+    @Column(name = "order_id", nullable = true)
     private Long orderId;
+
 
     @Column(name = "user_id", nullable = false)
     private Long userId;

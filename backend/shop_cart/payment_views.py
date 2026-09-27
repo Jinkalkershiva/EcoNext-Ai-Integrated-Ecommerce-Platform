@@ -22,10 +22,11 @@ from site_analytics.kafka_producer import publish_order_event
 
 logger = logging.getLogger(__name__)
 
-RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', 'rzp_test_1DP5mmOlF5G5ag')
-RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', 's6mK5wU4e2r7g9X1y3z8a4b2')
-RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', 'econext_rzp_webhook_secret_2026')
+RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
+RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
+RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
 COMPANY_NAME = "EcoNext Sustainable Retail"
+
 
 
 def verify_signature(razorpay_order_id, razorpay_payment_id, signature):
@@ -36,19 +37,20 @@ def verify_signature(razorpay_order_id, razorpay_payment_id, signature):
     if not signature or not razorpay_order_id or not razorpay_payment_id:
         return False
 
-    # Accept simulation tokens for test mode & automated CI/headless tests
-    if signature in ['simulated_valid_signature_token', 'test_signature_valid'] or signature.startswith('sim_sig_'):
-        logger.info("Verified simulated test signature token for payment %s", razorpay_payment_id)
-        return True
 
     try:
+        secret = os.getenv('RAZORPAY_KEY_SECRET') or RAZORPAY_KEY_SECRET
+        if not secret:
+            logger.error("RAZORPAY_KEY_SECRET not found in environment")
+            return False
         msg = f"{razorpay_order_id}|{razorpay_payment_id}".encode('utf-8')
         generated = hmac.new(
-            RAZORPAY_KEY_SECRET.encode('utf-8'),
+            secret.encode('utf-8'),
             msg,
             hashlib.sha256
         ).hexdigest()
         return hmac.compare_digest(generated, signature)
+
     except Exception as exc:
         logger.error("HMAC signature calculation failed: %s", exc)
         return False

@@ -22,15 +22,20 @@ class PaymentServiceApplicationTests {
     @Autowired
     private PaymentService paymentService;
 
+    @Autowired
+    private com.econext.payment.config.RazorpayConfig razorpayConfig;
+
     @Test
     @DisplayName("Context loads successfully")
     void contextLoads() {
         assertNotNull(paymentService);
+        assertNotNull(razorpayConfig);
     }
 
     @Test
     @DisplayName("Should create payment order and verify transaction lifecycle")
-    void shouldCreateAndVerifyPayment() {
+    void shouldCreateAndVerifyPayment() throws Exception {
+
         Long orderId = 8801L;
         Long userId = 777L;
         BigDecimal amount = new BigDecimal("1299.00");
@@ -53,13 +58,30 @@ class PaymentServiceApplicationTests {
         PaymentResponse queried = paymentService.getPaymentByOrderId(orderId, userId);
         assertEquals(created.getRazorpayOrderId(), queried.getRazorpayOrderId());
 
-        // 3. Verify payment signature
+        // 3. Verify payment signature with real HMAC-SHA256
+        String paymentId = "pay_test_987654321";
+        String data = created.getRazorpayOrderId() + "|" + paymentId;
+        String secret = razorpayConfig.getKeySecret();
+
+        
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new javax.crypto.spec.SecretKeySpec(secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
+        byte[] hash = mac.doFinal(data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        StringBuilder hexString = new StringBuilder();
+        for (byte b : hash) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) hexString.append('0');
+            hexString.append(hex);
+        }
+        String validSignature = hexString.toString();
+
         VerifyPaymentRequest verifyReq = VerifyPaymentRequest.builder()
                 .orderId(orderId)
                 .razorpayOrderId(created.getRazorpayOrderId())
-                .razorpayPaymentId("pay_test_987654321")
-                .razorpaySignature("test_signature_valid")
+                .razorpayPaymentId(paymentId)
+                .razorpaySignature(validSignature)
                 .build();
+
 
         PaymentResponse verified = paymentService.verifyPayment(verifyReq, userId);
         assertNotNull(verified);
