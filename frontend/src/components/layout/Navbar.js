@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Leaf, Search, Camera, ShoppingBag, User, LogOut, Menu, X, Sparkles, SlidersHorizontal, ChevronDown, LayoutDashboard } from 'lucide-react';
+import { Leaf, Search, Camera, ShoppingBag, User, LogOut, Menu, X, Sparkles, SlidersHorizontal, ChevronDown, LayoutDashboard, Truck } from 'lucide-react';
 import { useNavigation } from '../../context/NavigationContext';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
@@ -110,6 +110,14 @@ export const Navbar = () => {
                 <Sparkles size={14} style={{ color: 'var(--color-accent)' }} /> Snap & Shop
               </span>
             </li>
+            <li>
+              <span
+                className={`nav-link ${page === 'order-tracking' ? 'active' : ''}`}
+                onClick={() => navigateTo('order-tracking')}
+              >
+                <Truck size={14} /> Track Orders
+              </span>
+            </li>
             {isAuthenticated && (user?.role === 'admin' || user?.is_staff || user?.is_superuser) && (
               <li>
                 <span
@@ -193,10 +201,21 @@ export const Navbar = () => {
                         style={{ width: '100%', justifyContent: 'flex-start' }}
                         onClick={() => {
                           setUserDropdownOpen(false);
+                          navigateTo('order-tracking');
+                        }}
+                      >
+                        <Truck size={15} /> Track My Orders
+                      </button>
+                      <button
+                        type="button"
+                        className="nav-link"
+                        style={{ width: '100%', justifyContent: 'flex-start' }}
+                        onClick={() => {
+                          setUserDropdownOpen(false);
                           navigateTo('profile');
                         }}
                       >
-                        <User size={15} /> My Profile & Orders
+                        <User size={15} /> My Profile & Account
                       </button>
                       <button
                         type="button"

@@ -1,4 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Scale,
+  AlertTriangle,
+  CheckCircle2,
+  X,
+  RefreshCw,
+  SlidersHorizontal,
+  Package
+} from 'lucide-react';
 import { inventoryOpsApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
@@ -91,7 +100,7 @@ export const InventoryPage = () => {
       key: 'name',
       render: (row) => (
         <div>
-          <div className="font-semibold">{row.name}</div>
+          <div className="font-semibold text-sm">{row.name}</div>
           <div className="mono-text text-muted text-xs">SKU: {row.sku}</div>
         </div>
       )
@@ -104,7 +113,7 @@ export const InventoryPage = () => {
         const isOut = row.stockQuantity <= 0;
         return (
           <div className="stock-level-cell">
-            <span className={`stock-number ${isOut ? 'text-danger font-bold' : isLow ? 'text-warning font-bold' : 'text-success'}`}>
+            <span className={`stock-number font-semibold ${isOut ? 'text-danger font-bold' : isLow ? 'text-warning font-bold' : 'text-success'}`}>
               {row.stockQuantity} units
             </span>
           </div>
@@ -114,7 +123,7 @@ export const InventoryPage = () => {
     {
       header: 'Safety Threshold',
       key: 'lowStockThreshold',
-      render: (row) => <span className="text-muted">{row.lowStockThreshold || 10} units</span>
+      render: (row) => <span className="text-muted text-sm">{row.lowStockThreshold || 10} units</span>
     },
     {
       header: 'Inventory Health',
@@ -132,8 +141,9 @@ export const InventoryPage = () => {
       render: (row) => (
         <div className="action-buttons-group">
           {canAdjust && (
-            <button className="btn btn-secondary btn-xs" onClick={() => openAdjustModal(row)}>
-              ⚖️ Adjust Stock
+            <button className="btn btn-secondary btn-xs flex items-center gap-1" onClick={() => openAdjustModal(row)}>
+              <SlidersHorizontal size={12} />
+              <span>Adjust Stock</span>
             </button>
           )}
         </div>
@@ -144,20 +154,43 @@ export const InventoryPage = () => {
   return (
     <div className="inventory-page">
       {error && (
-        <div className="alert alert-danger mb-4">
-          <span>⚠️ {error}</span>
-          <button className="btn-close" onClick={() => setError('')}>✕</button>
+        <div className="alert alert-danger mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <button className="btn-close" onClick={() => setError('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
       {success && (
-        <div className="alert alert-success mb-4">
-          <span>✅ {success}</span>
-          <button className="btn-close" onClick={() => setSuccess('')}>✕</button>
+        <div className="alert alert-success mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={18} />
+            <span>{success}</span>
+          </div>
+          <button className="btn-close" onClick={() => setSuccess('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
 
+      {/* Header */}
+      <div className="page-header-flex mb-4">
+        <div>
+          <h2 className="page-title flex items-center gap-2">
+            <Scale size={24} className="text-primary" />
+            <span>Warehouse Inventory & Stock Ledger</span>
+          </h2>
+          <p className="page-subtitle">
+            Audit product stock levels, safety thresholds, and log stock adjustments.
+          </p>
+        </div>
+      </div>
+
       <div className="inventory-filter-bar mb-4">
-        <div className="btn-group">
+        <div className="btn-group flex gap-2">
           <button
             className={`btn btn-sm ${!filterLowStockOnly ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilterLowStockOnly(false)}
@@ -165,10 +198,11 @@ export const InventoryPage = () => {
             All Inventory Items
           </button>
           <button
-            className={`btn btn-sm ${filterLowStockOnly ? 'btn-danger' : 'btn-secondary'}`}
+            className={`btn btn-sm flex items-center gap-1.5 ${filterLowStockOnly ? 'btn-danger' : 'btn-secondary'}`}
             onClick={() => setFilterLowStockOnly(true)}
           >
-            ⚠️ Low Stock Alerts Only
+            <AlertTriangle size={14} />
+            <span>Low Stock Alerts Only</span>
           </button>
         </div>
       </div>
@@ -189,13 +223,13 @@ export const InventoryPage = () => {
         title={`Adjust Stock: ${selectedProduct?.name}`}
       >
         <form onSubmit={handleAdjustStock}>
-          <div className="current-stock-info mb-3">
-            <span>Current Stock Level: </span>
-            <strong>{selectedProduct?.stockQuantity} units</strong> (SKU: {selectedProduct?.sku})
+          <div className="current-stock-info p-3 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] text-xs mb-3">
+            <span className="text-muted">Current Stock Level: </span>
+            <strong className="text-primary">{selectedProduct?.stockQuantity} units</strong> (SKU: {selectedProduct?.sku})
           </div>
 
           <div className="form-group">
-            <label className="form-label">Adjustment Type *</label>
+            <label className="form-label text-xs font-semibold">Adjustment Type *</label>
             <select
               className="input"
               value={adjustForm.adjustmentType}
@@ -210,7 +244,7 @@ export const InventoryPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Quantity Units *</label>
+            <label className="form-label text-xs font-semibold">Quantity Units *</label>
             <input
               type="number"
               className="input"
@@ -222,7 +256,7 @@ export const InventoryPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Reference PO / Receipt ID</label>
+            <label className="form-label text-xs font-semibold">Reference PO / Receipt ID</label>
             <input
               type="text"
               className="input"
@@ -233,7 +267,7 @@ export const InventoryPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Audit Reason / Justification *</label>
+            <label className="form-label text-xs font-semibold">Audit Reason / Justification *</label>
             <textarea
               className="input"
               rows="2"
@@ -245,10 +279,10 @@ export const InventoryPage = () => {
           </div>
 
           <div className="modal-actions-right mt-4">
-            <button type="button" className="btn btn-secondary" onClick={() => setShowAdjustModal(false)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAdjustModal(false)}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary btn-sm">
               Record Stock Adjustment
             </button>
           </div>

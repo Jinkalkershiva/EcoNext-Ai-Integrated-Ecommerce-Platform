@@ -1,4 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import {
+  ShieldCheck,
+  Plus,
+  AlertTriangle,
+  CheckCircle2,
+  X,
+  Key,
+  Lock,
+  RefreshCw
+} from 'lucide-react';
 import { roleApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
@@ -79,7 +89,8 @@ export const RolesPermissionsPage = () => {
     },
     {
       header: 'Description',
-      key: 'description'
+      key: 'description',
+      render: (row) => <span className="text-muted text-sm">{row.description}</span>
     },
     {
       header: 'Assigned Permissions',
@@ -103,17 +114,40 @@ export const RolesPermissionsPage = () => {
   return (
     <div className="roles-permissions-page">
       {error && (
-        <div className="alert alert-danger mb-4">
-          <span>⚠️ {error}</span>
-          <button className="btn-close" onClick={() => setError('')}>✕</button>
+        <div className="alert alert-danger mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <button className="btn-close" onClick={() => setError('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
       {success && (
-        <div className="alert alert-success mb-4">
-          <span>✅ {success}</span>
-          <button className="btn-close" onClick={() => setSuccess('')}>✕</button>
+        <div className="alert alert-success mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={18} />
+            <span>{success}</span>
+          </div>
+          <button className="btn-close" onClick={() => setSuccess('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
+
+      {/* Header */}
+      <div className="page-header-flex mb-4">
+        <div>
+          <h2 className="page-title flex items-center gap-2">
+            <ShieldCheck size={24} className="text-primary" />
+            <span>RBAC & PBAC Policy Engine</span>
+          </h2>
+          <p className="page-subtitle">
+            Configure system and custom security roles with granular permissions.
+          </p>
+        </div>
+      </div>
 
       <div className="card">
         <DataTable
@@ -122,8 +156,9 @@ export const RolesPermissionsPage = () => {
           loading={loading}
           searchPlaceholder="Search roles..."
           actions={
-            <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModal(true)}>
-              ➕ Define Custom Operational Role
+            <button className="btn btn-primary btn-sm flex items-center gap-1.5" onClick={() => setShowCreateModal(true)}>
+              <Plus size={14} />
+              <span>Define Custom Operational Role</span>
             </button>
           }
         />
@@ -138,7 +173,7 @@ export const RolesPermissionsPage = () => {
       >
         <form onSubmit={handleCreateRole}>
           <div className="form-group">
-            <label className="form-label">Role Identifier (e.g. SUSTAINABILITY_AUDITOR)</label>
+            <label className="form-label text-xs font-semibold">Role Identifier (e.g. SUSTAINABILITY_AUDITOR)</label>
             <input
               type="text"
               className="input mono-text"
@@ -150,7 +185,7 @@ export const RolesPermissionsPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Role Description</label>
+            <label className="form-label text-xs font-semibold">Role Description</label>
             <input
               type="text"
               className="input"
@@ -162,14 +197,15 @@ export const RolesPermissionsPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Grant Granular Permissions</label>
-            <div className="permission-grid">
+            <label className="form-label text-xs font-semibold">Grant Granular Permissions</label>
+            <div className="permission-grid grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
               {ALL_PERMISSIONS.map((perm) => {
                 const isSelected = newRole.permissions.includes(perm.key);
                 return (
-                  <label key={perm.key} className="permission-checkbox-card">
+                  <label key={perm.key} className="permission-checkbox-card p-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] flex items-start gap-2.5 cursor-pointer">
                     <input
                       type="checkbox"
+                      className="mt-1"
                       checked={isSelected}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -186,8 +222,8 @@ export const RolesPermissionsPage = () => {
                       }}
                     />
                     <div>
-                      <div className="perm-label">{perm.label}</div>
-                      <div className="mono-text text-xs text-muted">{perm.key}</div>
+                      <div className="perm-label font-medium text-xs">{perm.label}</div>
+                      <div className="mono-text text-[11px] text-muted">{perm.key}</div>
                     </div>
                   </label>
                 );
@@ -196,10 +232,10 @@ export const RolesPermissionsPage = () => {
           </div>
 
           <div className="modal-actions-right mt-4">
-            <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCreateModal(false)}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary btn-sm">
               Register Role Policy
             </button>
           </div>

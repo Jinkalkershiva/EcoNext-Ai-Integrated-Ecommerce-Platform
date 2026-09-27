@@ -396,11 +396,18 @@ export const ProfilePage = () => {
                       </div>
                     )}
 
-                    {order.items && order.items.length > 0 && (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem' }}>
-                        {order.items.length} item{order.items.length > 1 ? 's' : ''} in package • Carbon-Neutral Delivery
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {order.items?.length || 1} item(s) • Carbon-Neutral Delivery
+                      </span>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => navigateTo('order-tracking', { orderId: order.id, id: order.id })}
+                      >
+                        Track Full Order →
+                      </Button>
+                    </div>
                   </div>
                 );
               })}

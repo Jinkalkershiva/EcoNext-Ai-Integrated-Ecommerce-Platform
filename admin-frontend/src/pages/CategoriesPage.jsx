@@ -1,4 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Layers,
+  Plus,
+  Edit,
+  AlertTriangle,
+  CheckCircle2,
+  X,
+  RefreshCw
+} from 'lucide-react';
 import { catalogOpsApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
@@ -88,14 +97,15 @@ export const CategoriesPage = () => {
       key: 'name',
       render: (row) => (
         <div>
-          <span className="font-semibold">{row.name}</span>
+          <span className="font-semibold text-sm">{row.name}</span>
           <div className="mono-text text-muted text-xs">/{row.slug}</div>
         </div>
       )
     },
     {
       header: 'Description',
-      key: 'description'
+      key: 'description',
+      render: (row) => <span className="text-muted text-sm">{row.description || 'No description provided'}</span>
     },
     {
       header: 'Status',
@@ -109,8 +119,9 @@ export const CategoriesPage = () => {
       render: (row) => (
         <div className="action-buttons-group">
           {canManage && (
-            <button className="btn btn-secondary btn-xs" onClick={() => openEditModal(row)}>
-              Edit
+            <button className="btn btn-secondary btn-xs flex items-center gap-1" onClick={() => openEditModal(row)}>
+              <Edit size={12} />
+              <span>Edit</span>
             </button>
           )}
         </div>
@@ -121,17 +132,40 @@ export const CategoriesPage = () => {
   return (
     <div className="categories-page">
       {error && (
-        <div className="alert alert-danger mb-4">
-          <span>⚠️ {error}</span>
-          <button className="btn-close" onClick={() => setError('')}>✕</button>
+        <div className="alert alert-danger mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <button className="btn-close" onClick={() => setError('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
       {success && (
-        <div className="alert alert-success mb-4">
-          <span>✅ {success}</span>
-          <button className="btn-close" onClick={() => setSuccess('')}>✕</button>
+        <div className="alert alert-success mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={18} />
+            <span>{success}</span>
+          </div>
+          <button className="btn-close" onClick={() => setSuccess('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
+
+      {/* Header */}
+      <div className="page-header-flex mb-4">
+        <div>
+          <h2 className="page-title flex items-center gap-2">
+            <Layers size={24} className="text-primary" />
+            <span>Category Taxonomy</span>
+          </h2>
+          <p className="page-subtitle">
+            Organize catalog classifications, slug hierarchies, and storefront visibility.
+          </p>
+        </div>
+      </div>
 
       <div className="card">
         <DataTable
@@ -141,8 +175,9 @@ export const CategoriesPage = () => {
           searchPlaceholder="Search categories..."
           actions={
             canManage && (
-              <button className="btn btn-primary btn-sm" onClick={openCreateModal}>
-                ➕ Create Category
+              <button className="btn btn-primary btn-sm flex items-center gap-1.5" onClick={openCreateModal}>
+                <Plus size={14} />
+                <span>Create Category</span>
               </button>
             )
           }
@@ -156,7 +191,7 @@ export const CategoriesPage = () => {
       >
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Category Name *</label>
+            <label className="form-label text-xs font-semibold">Category Name *</label>
             <input
               type="text"
               className="input"
@@ -168,7 +203,7 @@ export const CategoriesPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">URL Slug *</label>
+            <label className="form-label text-xs font-semibold">URL Slug *</label>
             <input
               type="text"
               className="input mono-text"
@@ -180,7 +215,7 @@ export const CategoriesPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Description</label>
+            <label className="form-label text-xs font-semibold">Description</label>
             <textarea
               className="input"
               rows="3"
@@ -202,10 +237,10 @@ export const CategoriesPage = () => {
           </div>
 
           <div className="modal-actions-right mt-4">
-            <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowModal(false)}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary btn-sm">
               {selectedCategory ? 'Update Category' : 'Create Category'}
             </button>
           </div>

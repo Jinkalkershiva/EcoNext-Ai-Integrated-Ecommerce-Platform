@@ -1,44 +1,37 @@
 import React from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { Palette, Moon, Flame } from 'lucide-react';
 
 export const ThemeLampToggle = ({ className = '', size = 'md' }) => {
   const { theme, toggleTheme } = useTheme();
-  const isLight = theme === 'light';
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      toggleTheme();
+  const getThemeInfo = () => {
+    switch (theme) {
+      case 'dark':
+        return { icon: Moon, label: 'Dark Mode', color: '#818cf8', next: 'Warm Mode' };
+      case 'warm':
+        return { icon: Flame, label: 'Warm Mode', color: '#f59e0b', next: 'Colorful Mode' };
+      case 'colorful':
+      default:
+        return { icon: Palette, label: 'Colorful Mode', color: '#10b981', next: 'Dark Mode' };
     }
   };
+
+  const current = getThemeInfo();
+  const Icon = current.icon;
 
   return (
     <button
       type="button"
-      className={`theme-lamp-btn ${isLight ? 'lamp-on' : 'lamp-off'} size-${size} ${className}`}
+      className={`theme-lamp-btn theme-mode-${theme} size-${size} ${className}`}
       onClick={toggleTheme}
-      onKeyDown={handleKeyDown}
-      aria-label={`Toggle theme: currently ${isLight ? 'Light Mode (Lamp On)' : 'Dark Mode (Lamp Off)'}`}
-      title={`Switch to ${isLight ? 'Dark' : 'Light'} Mode`}
+      aria-label={`Current theme: ${current.label}. Click to switch to ${current.next}`}
+      title={`Current: ${current.label} • Click to switch to ${current.next}`}
     >
-      <div className="lamp-graphic">
-        {/* Lamp Base & Stem */}
-        <div className="lamp-mount"></div>
-        <div className="lamp-cord"></div>
-        
-        {/* Lamp Shade */}
-        <div className="lamp-shade">
-          {/* Internal Bulb / Filament */}
-          <div className="lamp-bulb"></div>
-        </div>
-
-        {/* Warm Light Beam / Glow Area (Light Mode) */}
-        <div className="lamp-light-beam"></div>
+      <div className="theme-toggle-icon-wrap" style={{ color: current.color }}>
+        <Icon size={16} />
       </div>
-
-      <span className="lamp-label">
-        {isLight ? 'Light Mode' : 'Dark Mode'}
-      </span>
+      <span className="lamp-label">{current.label}</span>
     </button>
   );
 };

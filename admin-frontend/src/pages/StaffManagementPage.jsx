@@ -1,4 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Users,
+  UserPlus,
+  Shield,
+  KeyRound,
+  AlertTriangle,
+  CheckCircle2,
+  X,
+  RefreshCw,
+  Mail,
+  UserCheck
+} from 'lucide-react';
 import { staffApi, roleApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
@@ -112,14 +124,15 @@ export const StaffManagementPage = () => {
       key: 'fullName',
       render: (row) => (
         <div>
-          <div className="font-medium">{row.fullName}</div>
-          <div className="mono-text text-muted">@{row.username}</div>
+          <div className="font-semibold text-sm">{row.fullName}</div>
+          <div className="mono-text text-muted text-xs">@{row.username}</div>
         </div>
       )
     },
     {
       header: 'Email',
-      key: 'email'
+      key: 'email',
+      render: (row) => <span className="text-sm">{row.email}</span>
     },
     {
       header: 'Roles',
@@ -140,32 +153,38 @@ export const StaffManagementPage = () => {
     {
       header: 'Last Login',
       key: 'lastLoginAt',
-      render: (row) => row.lastLoginAt ? new Date(row.lastLoginAt).toLocaleString() : 'Never'
+      render: (row) => (
+        <span className="text-xs text-muted">
+          {row.lastLoginAt ? new Date(row.lastLoginAt).toLocaleString() : 'Never'}
+        </span>
+      )
     },
     {
       header: 'Actions',
       key: 'actions',
       sortable: false,
       render: (row) => (
-        <div className="action-buttons-group">
+        <div className="action-buttons-group flex items-center gap-1">
           <button
-            className="btn btn-secondary btn-xs"
+            className="btn btn-secondary btn-xs flex items-center gap-1"
             onClick={() => {
               setSelectedStaff(row);
               setEditRoles(row.roles || []);
               setShowRoleModal(true);
             }}
           >
-            Assign Roles
+            <Shield size={11} />
+            <span>Assign Roles</span>
           </button>
           <button
-            className="btn btn-secondary btn-xs"
+            className="btn btn-secondary btn-xs flex items-center gap-1"
             onClick={() => {
               setSelectedStaff(row);
               setShowPasswordModal(true);
             }}
           >
-            Reset Pwd
+            <KeyRound size={11} />
+            <span>Reset Pwd</span>
           </button>
           <button
             className={`btn ${row.status === 'ACTIVE' ? 'btn-danger' : 'btn-success'} btn-xs`}
@@ -182,17 +201,40 @@ export const StaffManagementPage = () => {
   return (
     <div className="staff-management-page">
       {error && (
-        <div className="alert alert-danger mb-4">
-          <span>⚠️ {error}</span>
-          <button className="btn-close" onClick={() => setError('')}>✕</button>
+        <div className="alert alert-danger mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <button className="btn-close" onClick={() => setError('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
       {success && (
-        <div className="alert alert-success mb-4">
-          <span>✅ {success}</span>
-          <button className="btn-close" onClick={() => setSuccess('')}>✕</button>
+        <div className="alert alert-success mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={18} />
+            <span>{success}</span>
+          </div>
+          <button className="btn-close" onClick={() => setSuccess('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
+
+      {/* Header */}
+      <div className="page-header-flex mb-4">
+        <div>
+          <h2 className="page-title flex items-center gap-2">
+            <Users size={24} className="text-primary" />
+            <span>Staff Administration & Operations Team</span>
+          </h2>
+          <p className="page-subtitle">
+            Provision staff operators, manage role assignments, and oversee access credentials.
+          </p>
+        </div>
+      </div>
 
       <div className="card">
         <DataTable
@@ -201,8 +243,9 @@ export const StaffManagementPage = () => {
           loading={loading}
           searchPlaceholder="Search staff by name, username, or email..."
           actions={
-            <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModal(true)}>
-              ➕ Provision Staff Account
+            <button className="btn btn-primary btn-sm flex items-center gap-1.5" onClick={() => setShowCreateModal(true)}>
+              <UserPlus size={14} />
+              <span>Provision Staff Account</span>
             </button>
           }
         />
@@ -216,7 +259,7 @@ export const StaffManagementPage = () => {
       >
         <form onSubmit={handleCreateStaff}>
           <div className="form-group">
-            <label className="form-label">Full Name</label>
+            <label className="form-label text-xs font-semibold">Full Name</label>
             <input
               type="text"
               className="input"
@@ -228,7 +271,7 @@ export const StaffManagementPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Username</label>
+            <label className="form-label text-xs font-semibold">Username</label>
             <input
               type="text"
               className="input"
@@ -240,7 +283,7 @@ export const StaffManagementPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Corporate Email</label>
+            <label className="form-label text-xs font-semibold">Corporate Email</label>
             <input
               type="email"
               className="input"
@@ -252,7 +295,7 @@ export const StaffManagementPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Temporary Password</label>
+            <label className="form-label text-xs font-semibold">Temporary Password</label>
             <input
               type="password"
               className="input"
@@ -264,7 +307,7 @@ export const StaffManagementPage = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Assign Initial Role</label>
+            <label className="form-label text-xs font-semibold">Assign Initial Role</label>
             <select
               className="input"
               value={newStaff.roles[0] || 'INVENTORY_MANAGER'}
@@ -278,11 +321,11 @@ export const StaffManagementPage = () => {
             </select>
           </div>
 
-          <div className="modal-actions-right">
-            <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>
+          <div className="modal-actions-right mt-4">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCreateModal(false)}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary btn-sm">
               Create Account
             </button>
           </div>
@@ -295,14 +338,15 @@ export const StaffManagementPage = () => {
         onClose={() => setShowRoleModal(false)}
         title={`Assign Roles for ${selectedStaff?.fullName || selectedStaff?.username}`}
       >
-        <p className="text-muted mb-3">Select one or more operational roles to grant policy permissions:</p>
-        <div className="roles-checklist">
+        <p className="text-muted text-xs mb-3">Select one or more operational roles to grant policy permissions:</p>
+        <div className="roles-checklist space-y-2">
           {availableRoles.map((role) => {
             const isChecked = editRoles.includes(role.roleName);
             return (
-              <label key={role.id} className="role-checkbox-item">
+              <label key={role.id} className="role-checkbox-item p-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
+                  className="mt-1"
                   checked={isChecked}
                   onChange={(e) => {
                     if (e.target.checked) {
@@ -313,7 +357,7 @@ export const StaffManagementPage = () => {
                   }}
                 />
                 <div className="role-info">
-                  <div className="font-medium">{role.roleName}</div>
+                  <div className="font-semibold text-sm">{role.roleName}</div>
                   <div className="text-xs text-muted">{role.description}</div>
                 </div>
               </label>
@@ -321,10 +365,10 @@ export const StaffManagementPage = () => {
           })}
         </div>
         <div className="modal-actions-right mt-4">
-          <button className="btn btn-secondary" onClick={() => setShowRoleModal(false)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowRoleModal(false)}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleUpdateRoles}>
+          <button className="btn btn-primary btn-sm" onClick={handleUpdateRoles}>
             Save Role Permissions
           </button>
         </div>
@@ -337,7 +381,7 @@ export const StaffManagementPage = () => {
         title={`Reset Password for ${selectedStaff?.username}`}
       >
         <div className="form-group">
-          <label className="form-label">New Password</label>
+          <label className="form-label text-xs font-semibold">New Password</label>
           <input
             type="password"
             className="input"
@@ -347,10 +391,10 @@ export const StaffManagementPage = () => {
           />
         </div>
         <div className="modal-actions-right mt-4">
-          <button className="btn btn-secondary" onClick={() => setShowPasswordModal(false)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowPasswordModal(false)}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleResetPassword} disabled={!newPassword}>
+          <button className="btn btn-primary btn-sm" onClick={handleResetPassword} disabled={!newPassword}>
             Update Password
           </button>
         </div>

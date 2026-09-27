@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export const DataTable = ({
   columns,
@@ -66,7 +67,8 @@ export const DataTable = ({
       {(searchable || actions) && (
         <div className="table-toolbar">
           {searchable && (
-            <div className="search-box">
+            <div className="search-box" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search size={15} style={{ position: 'absolute', left: '10px', color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 placeholder={searchPlaceholder}
@@ -76,6 +78,7 @@ export const DataTable = ({
                   setCurrentPage(1);
                 }}
                 className="input input-search"
+                style={{ paddingLeft: '32px' }}
               />
             </div>
           )}
@@ -94,11 +97,15 @@ export const DataTable = ({
                   className={col.sortable !== false ? 'sortable' : ''}
                   style={col.style || {}}
                 >
-                  <div className="th-content">
+                  <div className="th-content" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <span>{col.header}</span>
-                    {sortColumn === col.key && (
-                      <span className="sort-arrow">
-                        {sortDirection === 'asc' ? ' ↑' : ' ↓'}
+                    {col.sortable !== false && (
+                      <span className="sort-arrow" style={{ opacity: sortColumn === col.key ? 1 : 0.4 }}>
+                        {sortColumn === col.key ? (
+                          sortDirection === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />
+                        ) : (
+                          <ArrowUpDown size={12} />
+                        )}
                       </span>
                     )}
                   </div>
@@ -141,13 +148,13 @@ export const DataTable = ({
             Showing {(currentPage - 1) * pageSize + 1} to{' '}
             {Math.min(currentPage * pageSize, sortedData.length)} of {sortedData.length} records
           </span>
-          <div className="pagination-controls">
+          <div className="pagination-controls" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <button
               className="btn btn-secondary btn-sm"
               disabled={currentPage === 1}
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             >
-              Previous
+              <ChevronLeft size={14} /> Previous
             </button>
             <span className="page-current">
               Page {currentPage} of {totalPages}
@@ -157,7 +164,7 @@ export const DataTable = ({
               disabled={currentPage === totalPages}
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             >
-              Next
+              Next <ChevronRight size={14} />
             </button>
           </div>
         </div>
@@ -165,3 +172,5 @@ export const DataTable = ({
     </div>
   );
 };
+
+export default DataTable;

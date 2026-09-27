@@ -20,6 +20,18 @@ export const NavigationProvider = ({ children }) => {
       return { page: 'search', params: { q: params.get('q') || '' } };
     }
 
+    if (hash.startsWith('order-tracking') || hash.startsWith('order/')) {
+      const queryPart = hash.includes('?') ? hash.split('?')[1] : '';
+      const params = new URLSearchParams(queryPart);
+      const idFromPath = hash.replace(/^order-tracking\/?/, '').replace(/^order\//, '');
+      const orderId = params.get('id') || (idFromPath && !idFromPath.includes('?') ? idFromPath : '');
+      return { page: 'order-tracking', params: { orderId, id: orderId } };
+    }
+
+    if (hash.startsWith('orders')) {
+      return { page: 'order-tracking', params: {} };
+    }
+
     if (['kids', 'teens', 'men', 'women', 'unisex'].includes(hash.toLowerCase())) {
       return { page: 'segment', params: { segment: hash.toLowerCase() } };
     }
@@ -39,6 +51,8 @@ export const NavigationProvider = ({ children }) => {
       hashString = route.params.q ? `search?q=${encodeURIComponent(route.params.q)}` : 'search';
     } else if (route.page === 'segment') {
       hashString = route.params.segment;
+    } else if (route.page === 'order-tracking') {
+      hashString = (route.params.orderId || route.params.id) ? `order-tracking?id=${route.params.orderId || route.params.id}` : 'order-tracking';
     }
     window.history.pushState(route, '', `#${hashString}`);
   };

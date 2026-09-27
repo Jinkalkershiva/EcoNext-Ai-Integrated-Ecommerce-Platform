@@ -1,5 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  UploadCloud,
+  Download,
+  Check,
+  CheckCircle2,
+  AlertTriangle,
+  FileText,
+  ArrowRight,
+  ArrowLeft,
+  X,
+  Sparkles,
+  RefreshCw,
+  FolderOpen
+} from 'lucide-react';
 import { dataImportApi } from '../api/operationsApis';
 import { StatusBadge } from '../components/Badge';
 
@@ -147,22 +161,22 @@ export const ImportWizardPage = () => {
       {/* Wizard Step Indicator */}
       <div className="wizard-stepper mb-4">
         <div className={`wizard-step ${step >= 1 ? 'active' : ''} ${step > 1 ? 'done' : ''}`}>
-          <div className="step-num">{step > 1 ? '✓' : '1'}</div>
+          <div className="step-num">{step > 1 ? <Check size={14} /> : '1'}</div>
           <span>Upload File</span>
         </div>
         <div className="step-line"></div>
         <div className={`wizard-step ${step >= 2 ? 'active' : ''} ${step > 2 ? 'done' : ''}`}>
-          <div className="step-num">{step > 2 ? '✓' : '2'}</div>
+          <div className="step-num">{step > 2 ? <Check size={14} /> : '2'}</div>
           <span>Map Columns</span>
         </div>
         <div className="step-line"></div>
         <div className={`wizard-step ${step >= 3 ? 'active' : ''} ${step > 3 ? 'done' : ''}`}>
-          <div className="step-num">{step > 3 ? '✓' : '3'}</div>
+          <div className="step-num">{step > 3 ? <Check size={14} /> : '3'}</div>
           <span>Validate Preview</span>
         </div>
         <div className="step-line"></div>
         <div className={`wizard-step ${step >= 4 ? 'active' : ''} ${step > 4 ? 'done' : ''}`}>
-          <div className="step-num">{step > 4 ? '✓' : '4'}</div>
+          <div className="step-num">{step > 4 ? <Check size={14} /> : '4'}</div>
           <span>Execute Import</span>
         </div>
         <div className="step-line"></div>
@@ -173,9 +187,14 @@ export const ImportWizardPage = () => {
       </div>
 
       {error && (
-        <div className="alert alert-danger mb-4">
-          <span>⚠️ {error}</span>
-          <button className="btn-close" onClick={() => setError('')}>✕</button>
+        <div className="alert alert-danger mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <button className="btn-close" onClick={() => setError('')}>
+            <X size={16} />
+          </button>
         </div>
       )}
 
@@ -183,15 +202,19 @@ export const ImportWizardPage = () => {
       {step === 1 && (
         <div className="card max-w-2xl mx-auto">
           <div className="card-header-flex">
-            <h3 className="section-title">Step 1: Upload CSV or Excel Dataset</h3>
-            <button className="btn btn-secondary btn-xs" onClick={downloadSampleTemplate}>
-              📥 Download Sample CSV
+            <h3 className="section-title flex items-center gap-2">
+              <UploadCloud size={20} className="text-primary" />
+              <span>Step 1: Upload CSV or Excel Dataset</span>
+            </h3>
+            <button className="btn btn-secondary btn-xs flex items-center gap-1" onClick={downloadSampleTemplate}>
+              <Download size={12} />
+              <span>Download Sample CSV</span>
             </button>
           </div>
 
           <form onSubmit={handleFileUpload} className="mt-4">
             <div className="form-group">
-              <label className="form-label">Select Operational Target</label>
+              <label className="form-label text-xs font-semibold">Select Operational Target</label>
               <select
                 className="input"
                 value={targetType}
@@ -204,9 +227,11 @@ export const ImportWizardPage = () => {
             </div>
 
             <div className="file-dropzone-box">
-              <div className="dropzone-icon">📁</div>
+              <div className="dropzone-icon text-primary flex justify-center mb-2">
+                <FolderOpen size={40} />
+              </div>
               <p className="dropzone-title">Drag & drop your .csv, .xlsx, or .xls file here</p>
-              <p className="dropzone-subtitle">Supported formats: OpenCSV & Apache POI Multi-sheet Excel</p>
+              <p className="dropzone-subtitle text-xs text-muted">Supported formats: OpenCSV & Apache POI Multi-sheet Excel</p>
               <input
                 type="file"
                 accept=".csv,.xlsx,.xls"
@@ -222,10 +247,11 @@ export const ImportWizardPage = () => {
             <div className="modal-actions-right mt-4">
               <button
                 type="submit"
-                className="btn btn-primary"
+                className="btn btn-primary flex items-center gap-1.5"
                 disabled={!file || uploadLoading}
               >
-                {uploadLoading ? 'Inspecting Headers...' : 'Upload & Analyze Headers →'}
+                <span>{uploadLoading ? 'Inspecting Headers...' : 'Upload & Analyze Headers'}</span>
+                <ArrowRight size={14} />
               </button>
             </div>
           </form>
@@ -242,23 +268,26 @@ export const ImportWizardPage = () => {
                 File: <strong>{fileMetadata?.originalFilename}</strong> ({fileMetadata?.totalRows} rows detected)
               </p>
             </div>
-            <button className="btn btn-secondary btn-xs" onClick={() => setStep(1)}>
-              ← Choose Different File
+            <button className="btn btn-secondary btn-xs flex items-center gap-1" onClick={() => setStep(1)}>
+              <ArrowLeft size={12} />
+              <span>Choose Different File</span>
             </button>
           </div>
 
           <div className="mapping-grid mt-4">
             {EXPECTED_PRODUCT_FIELDS.map((field) => (
-              <div key={field.key} className="mapping-row">
-                <div className="field-meta">
-                  <span className="field-name font-medium">{field.label}</span>
+              <div key={field.key} className="mapping-row flex items-center gap-3 py-2 border-b border-[var(--border-subtle)]">
+                <div className="field-meta w-1/3">
+                  <span className="field-name font-medium text-sm">{field.label}</span>
                   {field.required && <span className="text-danger ml-1">*</span>}
                   <span className="mono-text text-muted text-xs block">{field.key}</span>
                 </div>
-                <div className="mapping-arrow">➔</div>
-                <div className="mapping-select">
+                <div className="mapping-arrow text-muted">
+                  <ArrowRight size={16} />
+                </div>
+                <div className="mapping-select flex-1">
                   <select
-                    className="input"
+                    className="input input-sm"
                     value={columnMapping[field.key] || ''}
                     onChange={(e) =>
                       setColumnMapping({
@@ -279,12 +308,13 @@ export const ImportWizardPage = () => {
             ))}
           </div>
 
-          <div className="modal-actions-right mt-4">
-            <button className="btn btn-secondary" onClick={() => setStep(1)}>
+          <div className="modal-actions-right mt-4 flex items-center gap-2">
+            <button className="btn btn-secondary btn-sm" onClick={() => setStep(1)}>
               Back
             </button>
-            <button className="btn btn-primary" onClick={handleProceedToValidation}>
-              Validate & Preview Rows →
+            <button className="btn btn-primary btn-sm flex items-center gap-1.5" onClick={handleProceedToValidation}>
+              <span>Validate & Preview Rows</span>
+              <ArrowRight size={14} />
             </button>
           </div>
         </div>
@@ -296,7 +326,7 @@ export const ImportWizardPage = () => {
           <div className="card-header-flex">
             <div>
               <h3 className="section-title">Step 3: Validation & Anomaly Inspection</h3>
-              <div className="validation-pill-row mt-1">
+              <div className="validation-pill-row mt-1 flex items-center gap-2">
                 <span className="badge badge-neutral">Total: {validationStats.total}</span>
                 <span className="badge badge-success">Valid: {validationStats.valid}</span>
                 {validationStats.invalid > 0 && (
@@ -305,15 +335,17 @@ export const ImportWizardPage = () => {
               </div>
             </div>
             <div className="flex gap-2">
-              <button className="btn btn-secondary btn-xs" onClick={() => setStep(2)}>
-                ← Adjust Mapping
+              <button className="btn btn-secondary btn-xs flex items-center gap-1" onClick={() => setStep(2)}>
+                <ArrowLeft size={12} />
+                <span>Adjust Mapping</span>
               </button>
               <button
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary btn-sm flex items-center gap-1.5"
                 onClick={handleExecuteImport}
                 disabled={validationStats.valid === 0}
               >
-                Execute Import ({validationStats.valid} Valid Rows) →
+                <span>Execute Import ({validationStats.valid} Valid Rows)</span>
+                <ArrowRight size={14} />
               </button>
             </div>
           </div>
@@ -336,16 +368,22 @@ export const ImportWizardPage = () => {
                   <tr key={idx} className={row.isValid ? '' : 'row-invalid'}>
                     <td>
                       {row.isValid ? (
-                        <span className="badge badge-success badge-xs">✓ VALID</span>
+                        <span className="badge badge-success badge-xs flex items-center gap-1">
+                          <Check size={10} />
+                          <span>VALID</span>
+                        </span>
                       ) : (
-                        <span className="badge badge-danger badge-xs">⚠️ ERROR</span>
+                        <span className="badge badge-danger badge-xs flex items-center gap-1">
+                          <AlertTriangle size={10} />
+                          <span>ERROR</span>
+                        </span>
                       )}
                     </td>
-                    <td className="mono-text">{row.rowNumber || idx + 1}</td>
-                    <td>{row.data?.name || '-'}</td>
-                    <td className="mono-text">{row.data?.sku || '-'}</td>
-                    <td>₹{row.data?.price || '-'}</td>
-                    <td>{row.data?.stockQuantity || '-'}</td>
+                    <td className="mono-text text-xs">{row.rowNumber || idx + 1}</td>
+                    <td className="font-medium text-sm">{row.data?.name || '-'}</td>
+                    <td className="mono-text text-xs">{row.data?.sku || '-'}</td>
+                    <td className="font-semibold text-xs">₹{row.data?.price || '-'}</td>
+                    <td className="text-xs">{row.data?.stockQuantity || '-'}</td>
                     <td>
                       {row.errors && row.errors.length > 0 ? (
                         <span className="text-danger text-xs">{row.errors.join('; ')}</span>
@@ -365,16 +403,17 @@ export const ImportWizardPage = () => {
             </p>
           )}
 
-          <div className="modal-actions-right mt-4">
-            <button className="btn btn-secondary" onClick={() => setStep(2)}>
+          <div className="modal-actions-right mt-4 flex items-center gap-2">
+            <button className="btn btn-secondary btn-sm" onClick={() => setStep(2)}>
               Back to Mapping
             </button>
             <button
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm flex items-center gap-1.5"
               onClick={handleExecuteImport}
               disabled={validationStats.valid === 0}
             >
-              Start Ingestion Pipeline
+              <span>Start Ingestion Pipeline</span>
+              <ArrowRight size={14} />
             </button>
           </div>
         </div>
@@ -384,8 +423,8 @@ export const ImportWizardPage = () => {
       {step === 4 && (
         <div className="card text-center py-8">
           <div className="spinner-large mx-auto mb-4"></div>
-          <h3>Executing Batch Data Ingestion</h3>
-          <p className="text-muted max-w-md mx-auto mt-2">
+          <h3 className="font-bold text-lg">Executing Batch Data Ingestion</h3>
+          <p className="text-muted max-w-md mx-auto mt-2 text-sm">
             Parsing structured records, verifying catalog constraints, updating database entities, and syncing to downstream operational repositories...
           </p>
         </div>
@@ -395,9 +434,11 @@ export const ImportWizardPage = () => {
       {step === 5 && (
         <div className="card">
           <div className="success-banner text-center py-4">
-            <div className="success-icon mb-2">🎉</div>
-            <h3>Data Ingestion Pipeline Complete</h3>
-            <p className="text-muted">Job ID: <span className="mono-text">{jobId || 'BATCH-RUN-1'}</span></p>
+            <div className="success-icon mb-2 flex justify-center text-primary">
+              <Sparkles size={36} />
+            </div>
+            <h3 className="font-bold text-lg">Data Ingestion Pipeline Complete</h3>
+            <p className="text-muted text-xs">Job ID: <span className="mono-text">{jobId || 'BATCH-RUN-1'}</span></p>
           </div>
 
           <div className="stats-grid my-4">
@@ -415,12 +456,13 @@ export const ImportWizardPage = () => {
             </div>
           </div>
 
-          <div className="modal-actions-right mt-4">
-            <button className="btn btn-secondary" onClick={handleReset}>
+          <div className="modal-actions-right mt-4 flex items-center gap-2">
+            <button className="btn btn-secondary btn-sm" onClick={handleReset}>
               Import Another File
             </button>
-            <button className="btn btn-primary" onClick={() => navigate('/products')}>
-              View Updated Product Catalog →
+            <button className="btn btn-primary btn-sm flex items-center gap-1.5" onClick={() => navigate('/products')}>
+              <span>View Updated Product Catalog</span>
+              <ArrowRight size={14} />
             </button>
           </div>
         </div>

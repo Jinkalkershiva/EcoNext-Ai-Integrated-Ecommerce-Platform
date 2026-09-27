@@ -1,4 +1,23 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Activity,
+  Zap,
+  TrendingUp,
+  Package,
+  Database,
+  Search,
+  Bot,
+  Sparkles,
+  RefreshCw,
+  AlertTriangle,
+  Leaf,
+  Lightbulb,
+  ArrowUpRight,
+  ArrowDownRight,
+  ArrowRight,
+  HardDrive,
+  Waves
+} from 'lucide-react';
 import { bigDataApi } from '../api/operationsApis';
 import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
@@ -48,21 +67,26 @@ export default function BigDataAnalyticsPage() {
     <div className="page-container" style={{ padding: '24px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Big Data & Hadoop Analytics</h1>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Activity className="text-primary" size={24} />
+            <span>Big Data & Hadoop Analytics</span>
+          </h1>
           <p style={{ color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
             Real-time Kafka streaming telemetry, Apache Spark structured pipelines, and HDFS Data Lake storage.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <button className="btn btn-secondary" onClick={loadData} disabled={loading}>
-            🔄 Refresh Metrics
+          <button className="btn btn-secondary flex items-center gap-1.5" onClick={loadData} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span>Refresh Metrics</span>
           </button>
         </div>
       </div>
 
       {error && (
-        <div style={{ padding: '12px 16px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', marginBottom: '16px' }}>
-          ⚠️ {error}
+        <div style={{ padding: '12px 16px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={16} />
+          <span>{error}</span>
         </div>
       )}
 
@@ -72,57 +96,68 @@ export default function BigDataAnalyticsPage() {
           title="Kafka Cluster"
           value={overview?.kafkaClusterStatus || 'CONNECTED'}
           subtitle={overview?.kafkaBootstrapServers || 'localhost:9092'}
-          icon="⚡"
+          icon={Zap}
           trend="up"
+          color="amber"
         />
         <StatCard
           title="Live Throughput"
           value={`${overview?.currentIngestionThroughputPerSec || 0} ev/s`}
           subtitle="Real-time ingestion"
-          icon="📈"
+          icon={TrendingUp}
           trend="up"
+          color="emerald"
         />
         <StatCard
           title="24h Total Events"
           value={(overview?.totalEventsProcessed24h || 0).toLocaleString()}
           subtitle="Streamed & partitioned"
-          icon="📦"
+          icon={Package}
           trend="up"
+          color="cyan"
         />
         <StatCard
           title="HDFS Lake Storage"
           value={`${hdfsMetrics?.usedCapacityGb || 4.28} GB`}
           subtitle={`${hdfsMetrics?.lakeUsagePercentage || 0.86}% of cluster pool`}
-          icon="🌊"
+          icon={Waves}
           trend="neutral"
+          color="indigo"
         />
       </div>
 
       {/* Navigation Tabs */}
       <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-color)', marginBottom: '20px' }}>
         {[
-          { id: 'overview', label: '📊 Streaming Overview & AI Forecast' },
-          { id: 'search', label: '🔍 Search Intelligence & Demand' },
-          { id: 'hdfs', label: '🗄️ HDFS Data Lake Partitions' },
-          { id: 'spark', label: '⚡ Spark Structured Pipelines' }
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '10px 16px',
-              fontWeight: 600,
-              fontSize: '14px',
-              border: 'none',
-              background: 'transparent',
-              borderBottom: activeTab === tab.id ? '2px solid var(--primary-color)' : '2px solid transparent',
-              color: activeTab === tab.id ? 'var(--primary-color)' : 'var(--text-muted)',
-              cursor: 'pointer'
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+          { id: 'overview', label: 'Streaming Overview & AI Forecast', icon: Zap },
+          { id: 'search', label: 'Search Intelligence & Demand', icon: Search },
+          { id: 'hdfs', label: 'HDFS Data Lake Partitions', icon: HardDrive },
+          { id: 'spark', label: 'Spark Structured Pipelines', icon: Activity }
+        ].map((tab) => {
+          const TabIcon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '10px 16px',
+                fontWeight: 600,
+                fontSize: '14px',
+                border: 'none',
+                background: 'transparent',
+                borderBottom: activeTab === tab.id ? '2px solid var(--primary-color)' : '2px solid transparent',
+                color: activeTab === tab.id ? 'var(--primary-color)' : 'var(--text-muted)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <TabIcon size={14} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* TAB 1: Streaming Overview & AI Demand Forecast */}
@@ -176,7 +211,10 @@ export default function BigDataAnalyticsPage() {
 
           {/* AI Demand Forecasting & Insights */}
           <div className="card" style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '20px' }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: 600 }}>🤖 AI Demand & Eco Forecasting</h3>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Bot size={16} className="text-primary" />
+              <span>AI Demand & Eco Forecasting</span>
+            </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {overview?.aiForecastingInsights?.map((item, idx) => (
                 <div
@@ -192,11 +230,13 @@ export default function BigDataAnalyticsPage() {
                     <span style={{ fontWeight: 600 }}>{item.categoryName}</span>
                     <Badge variant="success">+{item.predictedGrowthPercentage}% Demand</Badge>
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--primary-color)', margin: '4px 0', fontWeight: 500 }}>
-                    🌿 {item.sustainabilityLift}
+                  <div style={{ fontSize: '12px', color: 'var(--primary-color)', margin: '4px 0', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Leaf size={12} />
+                    <span>{item.sustainabilityLift}</span>
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    💡 {item.recommendedAction}
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Lightbulb size={12} />
+                    <span>{item.recommendedAction}</span>
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', textAlign: 'right' }}>
                     Confidence: {(item.confidenceScore * 100).toFixed(0)}%
@@ -235,7 +275,7 @@ export default function BigDataAnalyticsPage() {
                     <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--primary-color)' }}>{q.conversionRate}%</td>
                     <td style={{ padding: '12px 16px' }}>
                       <Badge variant={q.trend === 'UP' ? 'success' : q.trend === 'DOWN' ? 'warning' : 'neutral'}>
-                        {q.trend === 'UP' ? '↗ Rising' : q.trend === 'DOWN' ? '↘ Falling' : '→ Stable'}
+                        {q.trend === 'UP' ? 'Rising' : q.trend === 'DOWN' ? 'Falling' : 'Stable'}
                       </Badge>
                     </td>
                   </tr>
@@ -247,7 +287,10 @@ export default function BigDataAnalyticsPage() {
           {/* Zero-Result Queries (Untapped Product Demand) */}
           <div className="card" style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>⚠️ Zero-Result Queries (Untapped Sustainable Product Demand)</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertTriangle size={16} className="text-amber-500" />
+                <span>Zero-Result Queries (Untapped Sustainable Product Demand)</span>
+              </h3>
               <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
                 Products searched for by customers that currently return 0 catalog results. Use for catalog expansion.
               </p>

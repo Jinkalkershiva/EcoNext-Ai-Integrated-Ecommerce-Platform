@@ -228,9 +228,19 @@ export const CheckoutPage = ({ onOrderSuccess }) => {
             A confirmation receipt and tracking updates have been dispatched to <strong>{formData.email}</strong>.
           </p>
 
-          <Button variant="primary" size="lg" onClick={() => navigateTo('home')}>
-            Return to Homepage
-          </Button>
+          <div style={{ display: 'flex', gap: '0.75rem', width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={() => navigateTo('order-tracking', { orderId: placedOrder.id, id: placedOrder.id })}
+              icon={<Truck size={18} />}
+            >
+              Track Your Order Live
+            </Button>
+            <Button variant="secondary" size="lg" onClick={() => navigateTo('home')}>
+              Return to Homepage
+            </Button>
+          </div>
         </motion.div>
       </div>
     );

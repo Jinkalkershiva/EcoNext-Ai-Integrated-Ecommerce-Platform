@@ -268,3 +268,125 @@ def reset_password_with_otp_view(request):
         'status': 'success',
         'message': 'Password reset successful! You may now sign in with your new password.'
     }, status=status.HTTP_200_OK)
+
+
+ALL_ADMIN_PERMISSIONS = [
+    'DASHBOARD_VIEW', 'CATALOG_VIEW', 'CATALOG_EDIT', 'INVENTORY_VIEW',
+    'INVENTORY_MANAGE', 'ORDER_VIEW', 'ORDER_STATUS_UPDATE', 'STAFF_VIEW',
+    'STAFF_MANAGE', 'CUSTOMER_VIEW', 'PAYMENT_VIEW', 'ANALYTICS_VIEW',
+    'AUDIT_VIEW', 'SYSTEM_CONFIG', 'LIVE_SOURCES_MANAGE', 'BIG_DATA_VIEW'
+]
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def admin_login_view(request):
+    """
+    Dedicated Admin & Staff login endpoint returning JWT tokens and RBAC permissions.
+    """
+    username = request.data.get('username', '').strip()
+    password = request.data.get('password', '').strip()
+    
+    if not username or not password:
+        return Response({
+            'status': 'error',
+            'message': 'Username and password are required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+        
+    user = authenticate(username=username, password=password)
+    if not user:
+        # Check by email as username fallback
+        user_by_email = User.objects.filter(email__iexact=username).first()
+        if user_by_email:
+            user = authenticate(username=user_by_email.username, password=password)
+
+    if not user:
+        return Response({
+            'status': 'error',
+            'message': 'Invalid staff credentials'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+        
+    refresh = RefreshToken.for_user(user)
+    full_name = f"{user.first_name} {user.last_name}".strip() or user.username
+    is_admin = user.is_staff or user.is_superuser
+    role = 'ROLE_ADMIN' if is_admin else 'ROLE_STAFF'
+    roles = ['ROLE_ADMIN', 'ROLE_STAFF'] if is_admin else ['ROLE_STAFF']
+    
+    data = {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'fullName': full_name,
+        'name': full_name,
+        'role': role,
+        'roles': roles,
+        'permissions': ALL_ADMIN_PERMISSIONS if is_admin else ['ORDER_VIEW', 'ORDER_STATUS_UPDATE', 'CATALOG_VIEW'],
+        'accessToken': str(refresh.access_token),
+        'refreshToken': str(refresh),
+        'tokens': {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh)
+        }
+    }
+    return Response({
+        'status': 'success',
+        'message': 'Staff authentication successful',
+        'data': data
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_me_view(request):
+    """
+    Returns the authenticated staff member's profile and RBAC permissions.
+    """
+    user = request.user
+    full_name = f"{user.first_name} {user.last_name}".strip() or user.username
+    is_admin = user.is_staff or user.is_superuser
+    role = 'ROLE_ADMIN' if is_admin else 'ROLE_STAFF'
+    roles = ['ROLE_ADMIN', 'ROLE_STAFF'] if is_admin else ['ROLE_STAFF']
+    
+    data = {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'fullName': full_name,
+        'name': full_name,
+        'role': role,
+        'roles': roles,
+        'permissions': ALL_ADMIN_PERMISSIONS if is_admin else ['ORDER_VIEW', 'ORDER_STATUS_UPDATE', 'CATALOG_VIEW']
+    }
+    return Response({
+        'status': 'success',
+        'data': data
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def admin_refresh_view(request):
+    """
+    Refreshes staff access token using refresh token.
+    """
+    refresh_token = request.data.get('refreshToken') or request.data.get('refresh')
+    if not refresh_token:
+        return Response({
+            'status': 'error',
+            'message': 'Refresh token is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+        
+    try:
+        token = RefreshToken(refresh_token)
+        return Response({
+            'status': 'success',
+            'data': {
+                'accessToken': str(token.access_token)
+            }
+        }, status=status.HTTP_200_OK)
+    except Exception:
+        return Response({
+            'status': 'error',
+            'message': 'Invalid or expired refresh token'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+

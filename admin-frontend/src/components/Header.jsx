@@ -1,12 +1,17 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ThemeLampToggle } from './ThemeLampToggle';
+import { ThemeSelector } from './ThemeSelector';
+import { Menu, ChevronDown, LogOut, User, Settings, ShieldCheck, Activity } from 'lucide-react';
 
 export const Header = ({ title, subtitle, onToggleSidebar }) => {
   const { staff, logout } = useAuth();
+  const navigate = useNavigate();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
-  const staffInitial = staff?.fullName ? staff.fullName.charAt(0).toUpperCase() : (staff?.username ? staff.username.charAt(0).toUpperCase() : 'A');
+  const staffInitial = staff?.fullName
+    ? staff.fullName.charAt(0).toUpperCase()
+    : (staff?.username ? staff.username.charAt(0).toUpperCase() : 'A');
 
   return (
     <header className="admin-header">
@@ -16,7 +21,7 @@ export const Header = ({ title, subtitle, onToggleSidebar }) => {
           onClick={onToggleSidebar}
           aria-label="Toggle navigation"
         >
-          ☰
+          <Menu size={18} />
         </button>
         <div className="header-page-info">
           <h1 className="header-title">{title || 'Operational Dashboard'}</h1>
@@ -31,8 +36,8 @@ export const Header = ({ title, subtitle, onToggleSidebar }) => {
           <span className="status-label">Operational Core Online</span>
         </div>
 
-        {/* Theme Lamp Animation Toggle */}
-        <ThemeLampToggle size="sm" />
+        {/* 3-Mode Theme Selector */}
+        <ThemeSelector size="sm" />
 
         {/* Staff Profile Dropdown */}
         <div className="profile-menu-container">
@@ -46,7 +51,7 @@ export const Header = ({ title, subtitle, onToggleSidebar }) => {
               {staffInitial}
             </div>
             <span className="profile-name">{staff?.fullName || staff?.username || 'Staff Member'}</span>
-            <span className="chevron">▾</span>
+            <ChevronDown size={14} className="chevron" />
           </button>
 
           {showProfileMenu && (
@@ -59,7 +64,7 @@ export const Header = ({ title, subtitle, onToggleSidebar }) => {
                 <p className="dropdown-user-email">{staff?.email || `${staff?.username}@econext.internal`}</p>
                 <div className="dropdown-roles">
                   {staff?.roles?.map((r) => (
-                    <span key={r} className="badge badge-pink badge-xs">
+                    <span key={r} className="badge badge-emerald badge-xs">
                       {r.replace('ROLE_', '')}
                     </span>
                   ))}
@@ -67,10 +72,16 @@ export const Header = ({ title, subtitle, onToggleSidebar }) => {
               </div>
               <div className="dropdown-divider"></div>
               <button
+                className="dropdown-item"
+                onClick={() => navigate('/settings')}
+              >
+                <Settings size={15} /> Operational Settings
+              </button>
+              <button
                 className="dropdown-item text-danger"
                 onClick={logout}
               >
-                <span>🚪</span> Sign Out
+                <LogOut size={15} /> Sign Out
               </button>
             </div>
           )}

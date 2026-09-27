@@ -1,5 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  Package,
+  AlertTriangle,
+  Truck,
+  IndianRupee,
+  Users,
+  Plus,
+  Scale,
+  UploadCloud,
+  RefreshCw,
+  ArrowRight,
+  ShieldCheck,
+  CheckCircle2,
+  TrendingUp,
+  Sparkles,
+  Check,
+  X
+} from 'lucide-react';
 import { StatCard } from '../components/StatCard';
 import { StatusBadge, RoleBadge } from '../components/Badge';
 import { catalogOpsApi, inventoryOpsApi, orderOpsApi, analyticsApi, auditApi, staffApi } from '../api/operationsApis';
@@ -26,7 +44,6 @@ export const DashboardPage = () => {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      // Parallel fetch with resilient error handling
       const [
         productsRes,
         lowStockRes,
@@ -82,15 +99,19 @@ export const DashboardPage = () => {
       {/* Welcome Banner */}
       <div className="welcome-banner">
         <div className="welcome-text">
-          <h2>Welcome back, {staff?.fullName || staff?.username}! 👋</h2>
+          <h2 className="flex items-center gap-2">
+            <span>Welcome back, {staff?.fullName || staff?.username}!</span>
+            <Sparkles size={20} className="text-amber-400" />
+          </h2>
           <p>
             EcoNext operational telemetry and fulfillment pipeline status. Current system profile: 
-            <span className="badge badge-primary badge-sm ml-2">Spring Boot Microservices Active</span>
+            <span className="badge badge-primary badge-sm ml-2">Spring Boot & Django Active</span>
           </p>
         </div>
         <div className="welcome-actions">
-          <button className="btn btn-secondary btn-sm" onClick={loadDashboardData} disabled={loading}>
-            🔄 Refresh Metrics
+          <button className="btn btn-secondary btn-sm flex items-center gap-1.5" onClick={loadDashboardData} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span>Refresh Metrics</span>
           </button>
         </div>
       </div>
@@ -101,38 +122,38 @@ export const DashboardPage = () => {
           title="Active Catalog Items"
           value={loading ? '...' : stats.totalProducts}
           subtitle="Eco-certified catalog"
-          icon="📦"
+          icon={Package}
           color="emerald"
         />
         <StatCard
           title="Low Stock Alerts"
           value={loading ? '...' : stats.lowStockCount}
-          subtitle={stats.lowStockCount > 0 ? 'Requires immediate restock' : 'Inventory healthy'}
+          subtitle={stats.lowStockCount > 0 ? 'Requires restock attention' : 'Inventory healthy'}
           trend={stats.lowStockCount > 0 ? 'down' : 'up'}
-          icon="⚠️"
+          icon={AlertTriangle}
           color={stats.lowStockCount > 0 ? 'amber' : 'emerald'}
         />
         <StatCard
           title="Total Orders"
           value={loading ? '...' : stats.totalOrders}
-          subtitle={`${stats.pendingFulfillment} awaiting packing/shipment`}
-          icon="🚚"
+          subtitle={`${stats.pendingFulfillment} in fulfillment pipeline`}
+          icon={Truck}
           color="pink"
         />
         <StatCard
           title="Operational Revenue"
           value={loading ? '...' : stats.totalRevenue}
-          subtitle="Across all channels"
+          subtitle="All channels combined"
           trend="up"
           change="+12.4%"
-          icon="₹"
+          icon={IndianRupee}
           color="emerald"
         />
         <StatCard
-          title="Active Staff Personnel"
+          title="Active Staff"
           value={loading ? '...' : stats.activeStaffCount}
           subtitle="RBAC/PBAC governed"
-          icon="👥"
+          icon={Users}
           color="graphite"
         />
       </div>
@@ -142,24 +163,24 @@ export const DashboardPage = () => {
         <h3 className="section-title">Operational Quick Shortcuts</h3>
         <div className="quick-actions-grid">
           <button className="quick-action-btn" onClick={() => navigate('/products')}>
-            <span className="action-icon">➕</span>
+            <span className="action-icon"><Plus size={18} /></span>
             <span className="action-text">Manage Products</span>
           </button>
           <button className="quick-action-btn" onClick={() => navigate('/inventory')}>
-            <span className="action-icon">⚖️</span>
+            <span className="action-icon"><Scale size={18} /></span>
             <span className="action-text">Stock Ledger</span>
           </button>
           <button className="quick-action-btn" onClick={() => navigate('/orders')}>
-            <span className="action-icon">🚚</span>
+            <span className="action-icon"><Truck size={18} /></span>
             <span className="action-text">Order Transitions</span>
           </button>
           <button className="quick-action-btn" onClick={() => navigate('/import')}>
-            <span className="action-icon">📥</span>
+            <span className="action-icon"><UploadCloud size={18} /></span>
             <span className="action-text">Bulk CSV Import</span>
           </button>
           {isAdmin() && (
             <button className="quick-action-btn" onClick={() => navigate('/staff')}>
-              <span className="action-icon">👥</span>
+              <span className="action-icon"><Users size={18} /></span>
               <span className="action-text">Manage Staff</span>
             </button>
           )}
@@ -172,8 +193,9 @@ export const DashboardPage = () => {
         <div className="card">
           <div className="card-header-flex">
             <h3 className="section-title">Recent Customer Orders</h3>
-            <button className="btn btn-link btn-sm" onClick={() => navigate('/orders')}>
-              View All Orders →
+            <button className="btn btn-link btn-sm flex items-center gap-1" onClick={() => navigate('/orders')}>
+              <span>View All Orders</span>
+              <ArrowRight size={13} />
             </button>
           </div>
           <div className="table-responsive">
@@ -189,16 +211,16 @@ export const DashboardPage = () => {
               <tbody>
                 {recentOrders.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="table-empty-cell">
+                    <td colSpan="4" className="table-empty-cell text-muted">
                       No customer orders recorded yet.
                     </td>
                   </tr>
                 ) : (
                   recentOrders.map((o) => (
                     <tr key={o.id} className="cursor-pointer" onClick={() => navigate('/orders')}>
-                      <td><span className="mono-text">#{o.orderReferenceNumber || o.id}</span></td>
-                      <td>{o.customerName || o.customerUsername}</td>
-                      <td>₹{o.totalAmount}</td>
+                      <td><span className="mono-text font-bold">#{o.orderReferenceNumber || o.id}</span></td>
+                      <td>{o.customerName || o.customerUsername || 'Customer'}</td>
+                      <td className="font-semibold text-success">₹{Number(o.totalAmount || 0).toFixed(2)}</td>
                       <td><StatusBadge status={o.currentStatus} /></td>
                     </tr>
                   ))
@@ -212,8 +234,9 @@ export const DashboardPage = () => {
         <div className="card">
           <div className="card-header-flex">
             <h3 className="section-title">Critical Inventory Alerts</h3>
-            <button className="btn btn-link btn-sm" onClick={() => navigate('/inventory')}>
-              Adjust Stock →
+            <button className="btn btn-link btn-sm flex items-center gap-1" onClick={() => navigate('/inventory')}>
+              <span>Adjust Stock</span>
+              <ArrowRight size={13} />
             </button>
           </div>
           <div className="table-responsive">
@@ -229,8 +252,11 @@ export const DashboardPage = () => {
               <tbody>
                 {lowStockProducts.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="table-empty-cell">
-                      ✅ All inventory items are above safety threshold.
+                    <td colSpan="4" className="table-empty-cell text-success font-medium">
+                      <div className="flex items-center justify-center gap-1.5 py-2">
+                        <CheckCircle2 size={16} />
+                        <span>All inventory items are above safety threshold.</span>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -238,7 +264,7 @@ export const DashboardPage = () => {
                     <tr key={p.id}>
                       <td>
                         <div className="font-medium">{p.name}</div>
-                        <span className="mono-text text-muted">{p.sku}</span>
+                        <span className="mono-text text-muted text-xs">{p.sku}</span>
                       </td>
                       <td className="text-danger font-bold">{p.stockQuantity}</td>
                       <td>{p.lowStockThreshold}</td>
@@ -256,17 +282,20 @@ export const DashboardPage = () => {
       <div className="card mt-4">
         <div className="card-header-flex">
           <h3 className="section-title">Operational Audit Activity Stream</h3>
-          <button className="btn btn-link btn-sm" onClick={() => navigate('/audit-logs')}>
-            View Full Audit Trail →
+          <button className="btn btn-link btn-sm flex items-center gap-1" onClick={() => navigate('/audit-logs')}>
+            <span>View Full Audit Trail</span>
+            <ArrowRight size={13} />
           </button>
         </div>
         <div className="audit-feed">
           {recentAudits.length === 0 ? (
-            <p className="text-muted p-4">No recent operational audit entries found.</p>
+            <p className="text-muted p-4 text-sm">No recent operational audit entries found.</p>
           ) : (
             recentAudits.map((a) => (
               <div key={a.id} className="audit-item">
-                <div className="audit-icon">🛡️</div>
+                <div className="audit-icon text-primary">
+                  <ShieldCheck size={18} />
+                </div>
                 <div className="audit-body">
                   <div className="audit-header-line">
                     <span className="audit-user">{a.staffUsername || 'SYSTEM'}</span>

@@ -23,6 +23,7 @@ import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import PreferencePage from './pages/PreferencePage';
 import AdminPage from './pages/AdminPage';
+import OrderTrackingPage from './pages/OrderTrackingPage';
 
 // Import Design System & Global Styles
 import './styles/tokens.css';
@@ -86,6 +87,11 @@ const AppContent = () => {
 
       case 'preferences':
         return <PreferencePage />;
+
+      case 'order-tracking':
+      case 'orders':
+      case 'tracking':
+        return <OrderTrackingPage />;
 
       case 'admin':
         return <AdminPage />;

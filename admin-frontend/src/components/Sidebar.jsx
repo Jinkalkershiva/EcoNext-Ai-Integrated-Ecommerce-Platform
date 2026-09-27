@@ -1,6 +1,27 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import {
+  LayoutDashboard,
+  Package,
+  Tag,
+  Layers,
+  Truck,
+  UploadCloud,
+  Radio,
+  Database,
+  Users,
+  UserCheck,
+  CreditCard,
+  Bell,
+  ShieldCheck,
+  BarChart3,
+  FileText,
+  Settings,
+  Leaf,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react';
 
 export const Sidebar = ({ isCollapsed, onToggle }) => {
   const { staff, hasPermission, isAdmin } = useAuth();
@@ -9,7 +30,7 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     {
       label: 'Dashboard',
       path: '/dashboard',
-      icon: '📊',
+      icon: LayoutDashboard,
       visible: true
     },
     {
@@ -18,19 +39,19 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     {
       label: 'Products',
       path: '/products',
-      icon: '📦',
+      icon: Package,
       visible: isAdmin() || hasPermission('CATALOG_VIEW')
     },
     {
       label: 'Categories',
       path: '/categories',
-      icon: '🏷️',
+      icon: Tag,
       visible: isAdmin() || hasPermission('CATALOG_VIEW')
     },
     {
       label: 'Inventory Control',
       path: '/inventory',
-      icon: '📈',
+      icon: Layers,
       visible: isAdmin() || hasPermission('INVENTORY_VIEW')
     },
     {
@@ -39,19 +60,37 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     {
       label: 'Order Lifecycle',
       path: '/orders',
-      icon: '🚚',
+      icon: Truck,
+      visible: isAdmin() || hasPermission('ORDER_VIEW')
+    },
+    {
+      label: 'Customers',
+      path: '/customers',
+      icon: UserCheck,
+      visible: isAdmin() || hasPermission('STAFF_VIEW')
+    },
+    {
+      label: 'Payments',
+      path: '/payments',
+      icon: CreditCard,
+      visible: isAdmin() || hasPermission('ANALYTICS_VIEW')
+    },
+    {
+      label: 'Notifications',
+      path: '/notifications',
+      icon: Bell,
       visible: isAdmin() || hasPermission('ORDER_VIEW')
     },
     {
       label: 'Bulk Import Wizard',
       path: '/import',
-      icon: '📥',
+      icon: UploadCloud,
       visible: isAdmin() || hasPermission('IMPORT_RUN')
     },
     {
       label: 'Live Ingestion Sources',
       path: '/sources',
-      icon: '⚡',
+      icon: Radio,
       visible: isAdmin() || hasPermission('IMPORT_RUN') || hasPermission('ANALYTICS_VIEW')
     },
     {
@@ -60,32 +99,38 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     {
       label: 'Big Data & Hadoop',
       path: '/big-data',
-      icon: '🌊',
+      icon: Database,
       visible: isAdmin() || hasPermission('ANALYTICS_VIEW')
     },
     {
       label: 'Staff Directory',
       path: '/staff',
-      icon: '👥',
+      icon: Users,
       visible: isAdmin() || hasPermission('STAFF_VIEW')
     },
     {
       label: 'Roles & Security',
       path: '/roles',
-      icon: '🛡️',
+      icon: ShieldCheck,
       visible: isAdmin() || hasPermission('STAFF_MANAGE')
     },
     {
       label: 'Analytics & KPIs',
       path: '/analytics',
-      icon: '📈',
+      icon: BarChart3,
       visible: isAdmin() || hasPermission('ANALYTICS_VIEW')
     },
     {
       label: 'Audit Trail',
       path: '/audit-logs',
-      icon: '📝',
+      icon: FileText,
       visible: isAdmin() || hasPermission('AUDIT_VIEW')
+    },
+    {
+      label: 'Settings & Theme',
+      path: '/settings',
+      icon: Settings,
+      visible: true
     }
   ];
 
@@ -93,7 +138,9 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
         <div className="logo-container">
-          <div className="logo-badge">🌱</div>
+          <div className="logo-badge">
+            <Leaf size={20} color="var(--primary-color)" />
+          </div>
           {!isCollapsed && (
             <div className="logo-text">
               <span className="logo-title">EcoNext Ops</span>
@@ -105,8 +152,9 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
           className="btn-icon collapse-btn"
           onClick={onToggle}
           title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {isCollapsed ? '→' : '←'}
+          {isCollapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
         </button>
       </div>
 
@@ -123,6 +171,8 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
 
           if (!item.visible) return null;
 
+          const IconComponent = item.icon;
+
           return (
             <NavLink
               key={item.path}
@@ -132,7 +182,9 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
               }
               title={isCollapsed ? item.label : undefined}
             >
-              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-icon">
+                <IconComponent size={18} />
+              </span>
               {!isCollapsed && <span className="nav-label">{item.label}</span>}
             </NavLink>
           );
@@ -143,7 +195,7 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
         {!isCollapsed && staff && (
           <div className="staff-pill">
             <div className="staff-avatar">
-              {staff.fullName ? staff.fullName.charAt(0).toUpperCase() : 'S'}
+              {staff.fullName ? staff.fullName.charAt(0).toUpperCase() : (staff.username ? staff.username.charAt(0).toUpperCase() : 'S')}
             </div>
             <div className="staff-info">
               <span className="staff-name">{staff.fullName || staff.username}</span>
@@ -159,3 +211,5 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     </aside>
   );
 };
+
+export default Sidebar;

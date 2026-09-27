@@ -1,4 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Radio,
+  Plus,
+  RefreshCw,
+  Zap,
+  TrendingUp,
+  Package,
+  Waves,
+  FlaskConical,
+  Pause,
+  Play,
+  AlertTriangle,
+  CheckCircle2,
+  X
+} from 'lucide-react';
 import { liveSourcesApi } from '../api/operationsApis';
 import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
@@ -106,39 +121,44 @@ export default function LiveSourcesPage() {
     <div className="page-container" style={{ padding: '24px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Live Ingestion Data Sources</h1>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Radio className="text-primary" size={24} />
+            <span>Live Ingestion Data Sources</span>
+          </h1>
           <p style={{ color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
             Manage Kafka topics, CDC streams, and REST event pipelines feeding into Apache Hadoop HDFS.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary flex items-center gap-1.5"
             onClick={loadSources}
             disabled={loading}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            🔄 Refresh
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span>Refresh</span>
           </button>
           <button
-            className="btn btn-primary"
+            className="btn btn-primary flex items-center gap-1.5"
             onClick={() => setIsModalOpen(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            ➕ Register Live Source
+            <Plus size={14} />
+            <span>Register Live Source</span>
           </button>
         </div>
       </div>
 
       {error && (
-        <div style={{ padding: '12px 16px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', marginBottom: '16px' }}>
-          ⚠️ {error}
+        <div style={{ padding: '12px 16px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={16} />
+          <span>{error}</span>
         </div>
       )}
 
       {successMessage && (
-        <div style={{ padding: '12px 16px', background: '#dcfce7', color: '#166534', borderRadius: '8px', marginBottom: '16px' }}>
-          ✅ {successMessage}
+        <div style={{ padding: '12px 16px', background: '#dcfce7', color: '#166534', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <CheckCircle2 size={16} />
+          <span>{successMessage}</span>
         </div>
       )}
 
@@ -148,28 +168,32 @@ export default function LiveSourcesPage() {
           title="Active Pipelines"
           value={`${activeCount} / ${sources.length}`}
           subtitle="Streaming live events"
-          icon="⚡"
+          icon={Zap}
+          color="amber"
           trend={activeCount === sources.length ? 'up' : 'neutral'}
         />
         <StatCard
           title="Live Ingestion Rate"
           value={`${totalThroughput.toFixed(1)} ev/s`}
           subtitle="Real-time throughput"
-          icon="📈"
+          icon={TrendingUp}
+          color="emerald"
           trend="up"
         />
         <StatCard
           title="Total Events Ingested"
           value={totalEvents.toLocaleString()}
           subtitle="Across all Kafka topics"
-          icon="📦"
+          icon={Package}
+          color="cyan"
           trend="up"
         />
         <StatCard
           title="HDFS Lake Sink"
           value="Healthy"
           subtitle="Partitioned /econext/raw/"
-          icon="🌊"
+          icon={Waves}
+          color="indigo"
           trend="up"
         />
       </div>
@@ -228,21 +252,23 @@ export default function LiveSourcesPage() {
                     <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                         <button
-                          className="btn btn-sm btn-secondary"
+                          className="btn btn-sm btn-secondary flex items-center gap-1"
                           onClick={() => handleDispatchTestEvent(src.id, src.sourceName)}
                           disabled={actionLoading === `test-${src.id}`}
                           title="Dispatch single test event to Kafka"
                           style={{ padding: '4px 8px', fontSize: '12px' }}
                         >
-                          {actionLoading === `test-${src.id}` ? '...' : '🧪 Test'}
+                          <FlaskConical size={12} />
+                          <span>{actionLoading === `test-${src.id}` ? '...' : 'Test'}</span>
                         </button>
                         <button
-                          className={`btn btn-sm ${src.status === 'ACTIVE' ? 'btn-danger' : 'btn-primary'}`}
+                          className={`btn btn-sm flex items-center gap-1 ${src.status === 'ACTIVE' ? 'btn-danger' : 'btn-primary'}`}
                           onClick={() => handleToggleStatus(src.id, src.sourceName)}
                           disabled={actionLoading === `toggle-${src.id}`}
                           style={{ padding: '4px 8px', fontSize: '12px' }}
                         >
-                          {src.status === 'ACTIVE' ? '⏸️ Pause' : '▶️ Resume'}
+                          {src.status === 'ACTIVE' ? <Pause size={12} /> : <Play size={12} />}
+                          <span>{src.status === 'ACTIVE' ? 'Pause' : 'Resume'}</span>
                         </button>
                       </div>
                     </td>
@@ -260,92 +286,87 @@ export default function LiveSourcesPage() {
         title="Register Live Data Ingestion Source"
         onClose={() => setIsModalOpen(false)}
       >
-          <form onSubmit={handleCreateSource} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <form onSubmit={handleCreateSource} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Pipeline Name *</label>
+            <input
+              type="text"
+              className="input"
+              required
+              placeholder="e.g., Customer Review Sentiment Feed"
+              value={formData.sourceName}
+              onChange={(e) => setFormData({ ...formData, sourceName: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Pipeline Name *</label>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Source Type</label>
+              <select
+                className="input"
+                value={formData.sourceType}
+                onChange={(e) => setFormData({ ...formData, sourceType: e.target.value })}
+              >
+                <option value="KAFKA_TOPIC">Kafka Topic Stream</option>
+                <option value="CDC_STREAM">Database CDC Stream</option>
+                <option value="APP_EVENT_BUS">Spring Event Bus</option>
+                <option value="REST_POLL">External REST Feed</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Target Kafka Topic *</label>
               <input
                 type="text"
-                className="form-input"
+                className="input"
                 required
-                placeholder="e.g., Customer Review Sentiment Feed"
-                value={formData.sourceName}
-                onChange={(e) => setFormData({ ...formData, sourceName: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}
+                placeholder="e.g., customer-reviews"
+                value={formData.targetTopic}
+                onChange={(e) => setFormData({ ...formData, targetTopic: e.target.value })}
               />
             </div>
+          </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div>
-                <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Source Type</label>
-                <select
-                  className="form-select"
-                  value={formData.sourceType}
-                  onChange={(e) => setFormData({ ...formData, sourceType: e.target.value })}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}
-                >
-                  <option value="KAFKA_TOPIC">Kafka Topic Stream</option>
-                  <option value="CDC_STREAM">Database CDC Stream</option>
-                  <option value="APP_EVENT_BUS">Spring Event Bus</option>
-                  <option value="REST_POLL">External REST Feed</option>
-                </select>
-              </div>
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>HDFS Destination Path</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="/econext/raw/topic_name/"
+              value={formData.hdfsSinkPath}
+              onChange={(e) => setFormData({ ...formData, hdfsSinkPath: e.target.value })}
+            />
+          </div>
 
-              <div>
-                <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Target Kafka Topic *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  required
-                  placeholder="e.g., customer-reviews"
-                  value={formData.targetTopic}
-                  onChange={(e) => setFormData({ ...formData, targetTopic: e.target.value })}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}
-                />
-              </div>
-            </div>
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Description</label>
+            <textarea
+              className="input"
+              rows="3"
+              placeholder="Describe the payload format and business use case..."
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            />
+          </div>
 
-            <div>
-              <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>HDFS Destination Path</label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="/econext/raw/topic_name/"
-                value={formData.hdfsSinkPath}
-                onChange={(e) => setFormData({ ...formData, hdfsSinkPath: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px' }}>Description</label>
-              <textarea
-                className="form-input"
-                rows="3"
-                placeholder="Describe the payload format and business use case..."
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setIsModalOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={actionLoading === 'create'}
-              >
-                {actionLoading === 'create' ? 'Registering...' : 'Register Pipeline'}
-              </button>
-            </div>
-          </form>
-        </Modal>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setIsModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              disabled={actionLoading === 'create'}
+            >
+              {actionLoading === 'create' ? 'Registering...' : 'Register Pipeline'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

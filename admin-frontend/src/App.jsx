@@ -14,6 +14,10 @@ import { ProductsPage } from './pages/ProductsPage';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { OrdersPage } from './pages/OrdersPage';
+import { CustomersPage } from './pages/CustomersPage';
+import { PaymentsPage } from './pages/PaymentsPage';
+import { NotificationsPage } from './pages/NotificationsPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { ImportWizardPage } from './pages/ImportWizardPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
@@ -109,6 +113,38 @@ export const App = () => {
                 element={
                   <ProtectedRoute requiredPermission="ORDER_VIEW">
                     <OrdersPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="customers"
+                element={
+                  <ProtectedRoute>
+                    <CustomersPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="payments"
+                element={
+                  <ProtectedRoute>
+                    <PaymentsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="notifications"
+                element={
+                  <ProtectedRoute>
+                    <NotificationsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="settings"
+                element={
+                  <ProtectedRoute>
+                    <SettingsPage />
                   </ProtectedRoute>
                 }
               />

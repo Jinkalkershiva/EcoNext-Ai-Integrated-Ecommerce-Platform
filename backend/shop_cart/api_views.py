@@ -28,7 +28,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.models import ActivityLog
-from order_service.models import Order, OrderItem
+from order_service.models import Order, OrderItem, OrderStatusHistory
+from order_service.notification_service import notify_order_status_change
 from products.models import Product
 from products.serializers import CartSerializer, OrderSerializer
 from shop_cart.models import Cart, CartItem
@@ -73,8 +74,8 @@ def cart_response(cart, message=None, **extra):
 
 
 def order_queryset(user=None):
-    """Orders with their nested product data prefetched."""
-    queryset = Order.objects.prefetch_related(
+    """Orders with their nested product data and status history prefetched."""
+    queryset = Order.objects.select_related('user').prefetch_related(
         'items__product__category',
         'items__product__subcategory',
         'items__product__age_groups',
@@ -83,6 +84,7 @@ def order_queryset(user=None):
         'items__product__skin_or_body_fit',
         'items__product__season',
         'items__product__occasion',
+        'status_history',
     )
     if user is not None:
         queryset = queryset.filter(user=user)
@@ -227,16 +229,27 @@ def clear_cart(request):
 
 REQUIRED_SHIPPING_FIELDS = ('address', 'city', 'state', 'zipcode', 'country')
 
+ALLOWED_ORDER_TRANSITIONS = {
+    'PENDING': ['PAYMENT_CONFIRMED', 'ORDER_ACCEPTED', 'PROCESSING', 'CANCELLED'],
+    'PAYMENT_CONFIRMED': ['ORDER_ACCEPTED', 'PROCESSING', 'CANCELLED'],
+    'ORDER_ACCEPTED': ['PROCESSING', 'CANCELLED'],
+    'PROCESSING': ['SHIPPED', 'CANCELLED'],
+    'SHIPPED': ['OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'],
+    'OUT_FOR_DELIVERY': ['DELIVERED', 'CANCELLED'],
+    'DELIVERED': ['REFUNDED'],
+    'CANCELLED': [],
+    'PAYMENT_FAILED': ['PENDING', 'CANCELLED'],
+    'REFUNDED': []
+}
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_order(request):
-    """Turn the cart into an order.
+    """Turn the cart into an order with full shipping, payment, and tracking lifecycle.
 
-    Shipping fields are required because the Order model does not allow blanks —
-    the previous version defaulted them to '' and relied on the database to
-    accept it. Stock is checked and decremented inside one transaction, so two
-    simultaneous checkouts cannot oversell the same item.
+    Stock is checked and decremented inside one atomic transaction. An initial
+    OrderStatusHistory record is generated and a notification is dispatched.
     """
     # Accept either {'shipping': {...}} or the fields at the top level.
     shipping = request.data.get('shipping')
@@ -259,10 +272,30 @@ def create_order(request):
             errors={field: 'This field is required.' for field in missing},
         )
 
+    # Extract payment & recipient details
+    payment_method = str(shipping.get('payment_method') or 'cod').lower()
+    first_name = shipping.get('first_name') or request.user.first_name or ''
+    last_name = shipping.get('last_name') or request.user.last_name or ''
+    recipient_name = f"{first_name} {last_name}".strip() or request.user.username
+    phone = shipping.get('phone') or ''
+    email = shipping.get('email') or request.user.email or ''
+
+    razorpay_order_id = shipping.get('razorpay_order_id')
+    razorpay_payment_id = shipping.get('razorpay_payment_id')
+    razorpay_signature = shipping.get('razorpay_signature')
+
+    if payment_method in ['razorpay', 'upi'] and razorpay_payment_id:
+        payment_status = 'VERIFIED'
+        initial_status = 'payment_confirmed'
+    elif payment_method in ['razorpay', 'upi']:
+        payment_status = 'PENDING'
+        initial_status = 'pending'
+    else:
+        payment_status = 'PENDING'
+        initial_status = 'pending'
+
     with transaction.atomic():
         cart = get_or_create_cart(request.user)
-        # select_for_update locks the rows for the duration of the transaction on
-        # Postgres; on SQLite it is a no-op, which is fine for single-writer dev.
         items = list(cart.items.select_related('product').select_for_update())
 
         if not items:
@@ -278,11 +311,20 @@ def create_order(request):
         order = Order.objects.create(
             user=request.user,
             total_price=cart.get_total(),
+            recipient_name=recipient_name,
+            phone=phone,
+            email=email,
             shipping_address=values['address'],
             city=values['city'],
             state=values['state'],
             zipcode=values['zipcode'],
             country=values['country'],
+            payment_method=payment_method,
+            payment_status=payment_status,
+            razorpay_order_id=razorpay_order_id,
+            razorpay_payment_id=razorpay_payment_id,
+            razorpay_signature=razorpay_signature,
+            status=initial_status,
         )
 
         OrderItem.objects.bulk_create([
@@ -299,6 +341,15 @@ def create_order(request):
             item.product.stock = max(0, item.product.stock - item.quantity)
             item.product.save(update_fields=['stock'])
 
+        OrderStatusHistory.objects.create(
+            order=order,
+            from_status='',
+            to_status=order.canonical_status,
+            changed_by=request.user,
+            changed_by_name=f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
+            note='Order successfully placed via checkout'
+        )
+
         ActivityLog.objects.bulk_create([
             ActivityLog(
                 user=request.user,
@@ -310,6 +361,9 @@ def create_order(request):
         ])
 
         cart.items.all().delete()
+
+    # Trigger customer Email / SMS notification
+    notify_order_status_change(order, '', order.status)
 
     return Response({
         'status': 'success',
@@ -357,8 +411,32 @@ def update_order_status(request, order_id):
         )
 
     order = get_object_or_404(order_queryset(), id=order_id)
+    old_status = order.status
+    note = request.data.get('note') or request.data.get('reason_note', '')
+    carrier_name = request.data.get('carrier_name') or order.carrier_name
+    tracking_number = request.data.get('tracking_number') or order.tracking_number
+
     order.status = status_value
-    order.save(update_fields=['status', 'updated_at'])
+    if carrier_name:
+        order.carrier_name = carrier_name
+    if tracking_number:
+        order.tracking_number = tracking_number
+    order.save()
+
+    # Log history
+    OrderStatusHistory.objects.create(
+        order=order,
+        from_status=old_status,
+        to_status=status_value,
+        changed_by=request.user,
+        changed_by_name=f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
+        note=note,
+        carrier_name=carrier_name or '',
+        tracking_number=tracking_number or ''
+    )
+
+    # Trigger customer notification
+    notify_order_status_change(order, old_status, status_value, note=note)
 
     return Response({
         'status': 'success',
