@@ -16,7 +16,7 @@ import dj_database_url
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -305,6 +305,12 @@ else:
 
 # AI Copilot settings
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+
+# Razorpay Payment Gateway settings
+RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
+RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
+RAZORPAY_CURRENCY = os.getenv('RAZORPAY_CURRENCY', 'INR')
+RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
 
 # Logging
 #

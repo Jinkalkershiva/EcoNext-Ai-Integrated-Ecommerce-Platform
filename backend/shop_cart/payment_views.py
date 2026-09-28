@@ -16,17 +16,21 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
+from django.conf import settings
 from shop_cart.models import Cart
 from order_service.models import Order, NotificationLog
 from site_analytics.kafka_producer import publish_order_event
 
 logger = logging.getLogger(__name__)
 
-RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
-RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
-RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
 COMPANY_NAME = "EcoNext Sustainable Retail"
 
+
+def get_razorpay_credentials():
+    """Retrieve Razorpay Key ID and Secret with environment and settings fallback."""
+    key_id = os.getenv('RAZORPAY_KEY_ID') or getattr(settings, 'RAZORPAY_KEY_ID', '')
+    key_secret = os.getenv('RAZORPAY_KEY_SECRET') or getattr(settings, 'RAZORPAY_KEY_SECRET', '')
+    return key_id, key_secret
 
 
 def verify_signature(razorpay_order_id, razorpay_payment_id, signature):
@@ -37,12 +41,13 @@ def verify_signature(razorpay_order_id, razorpay_payment_id, signature):
     if not signature or not razorpay_order_id or not razorpay_payment_id:
         return False
 
-
     try:
-        secret = os.getenv('RAZORPAY_KEY_SECRET') or RAZORPAY_KEY_SECRET
+        _, secret = get_razorpay_credentials()
         if not secret:
-            logger.error("RAZORPAY_KEY_SECRET not found in environment")
+            logger.error("RAZORPAY_KEY_SECRET not found in environment or settings")
             return False
+
+        # Verify using standard HMAC-SHA256
         msg = f"{razorpay_order_id}|{razorpay_payment_id}".encode('utf-8')
         generated = hmac.new(
             secret.encode('utf-8'),
@@ -63,8 +68,13 @@ def verify_webhook_signature(payload_body, signature):
     if not signature or not payload_body:
         return False
     try:
+        webhook_secret = os.getenv('RAZORPAY_WEBHOOK_SECRET') or getattr(settings, 'RAZORPAY_WEBHOOK_SECRET', '')
+        if not webhook_secret:
+            _, webhook_secret = get_razorpay_credentials()
+        if not webhook_secret:
+            return False
         generated = hmac.new(
-            RAZORPAY_WEBHOOK_SECRET.encode('utf-8'),
+            webhook_secret.encode('utf-8'),
             payload_body if isinstance(payload_body, bytes) else payload_body.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
@@ -100,26 +110,32 @@ def create_razorpay_order_view(request):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         amount_in_paise = int(Decimal(str(cart_total)) * 100)
-        currency = request.data.get('currency', 'INR')
+        currency = request.data.get('currency') or getattr(settings, 'RAZORPAY_CURRENCY', 'INR') or 'INR'
+
+        key_id, key_secret = get_razorpay_credentials()
 
         # Generate Razorpay Order ID (via SDK or realistic simulation for test credentials)
         razorpay_order_id = None
         try:
             import razorpay
-            client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-            rzp_order = client.order.create({
-                'amount': amount_in_paise,
-                'currency': currency,
-                'receipt': f"rcpt_cart_{cart.id}_{int(timezone.now().timestamp())}",
-                'notes': {
-                    'user_id': str(request.user.id),
-                    'user_email': request.user.email or ''
-                }
-            })
-            razorpay_order_id = rzp_order.get('id')
-            logger.info("Created real Razorpay order ID %s for user %s", razorpay_order_id, request.user.username)
+            if key_id and key_secret:
+                client = razorpay.Client(auth=(key_id, key_secret))
+                rzp_order = client.order.create({
+                    'amount': amount_in_paise,
+                    'currency': currency,
+                    'receipt': f"rcpt_cart_{cart.id}_{int(timezone.now().timestamp())}",
+                    'notes': {
+                        'user_id': str(request.user.id),
+                        'user_email': request.user.email or ''
+                    }
+                })
+                razorpay_order_id = rzp_order.get('id')
+                logger.info("Created real Razorpay order ID %s for user %s", razorpay_order_id, request.user.username)
+            else:
+                logger.warning("Razorpay credentials missing; using test fallback order ID.")
+                razorpay_order_id = f"order_{uuid.uuid4().hex[:14]}"
         except Exception as api_err:
-            logger.info("Razorpay live SDK note (%s); generating test order ID.", api_err)
+            logger.warning("Razorpay live SDK note (%s); generating test order ID.", api_err)
             razorpay_order_id = f"order_{uuid.uuid4().hex[:14]}"
 
         customer_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
@@ -129,9 +145,12 @@ def create_razorpay_order_view(request):
             'message': 'Razorpay payment order initialized',
             'data': {
                 'razorpayOrderId': razorpay_order_id,
+                'razorpay_order_id': razorpay_order_id,
                 'order_id': razorpay_order_id,
-                'keyId': RAZORPAY_KEY_ID,
-                'key_id': RAZORPAY_KEY_ID,
+                'keyId': key_id,
+                'key_id': key_id,
+                'razorpayKeyId': key_id,
+                'razorpay_key_id': key_id,
                 'amount': amount_in_paise,
                 'amountInPaise': amount_in_paise,
                 'amountInRupees': float(cart_total),
@@ -145,6 +164,7 @@ def create_razorpay_order_view(request):
             }
         }
         return Response(response_payload, status=status.HTTP_201_CREATED)
+
 
     except Exception as exc:
         logger.exception("Error creating Razorpay order: %s", exc)

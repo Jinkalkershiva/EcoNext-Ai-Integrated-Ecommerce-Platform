@@ -143,7 +143,7 @@ export const CheckoutPage = ({ onOrderSuccess }) => {
               const orderResponse = await apiService.createOrder({
                 ...shippingData,
                 payment_method: 'razorpay',
-                razorpay_order_id: rzpResponse.razorpay_order_id,
+                razorpay_order_id: rzpResponse.razorpay_order_id || razorpayOrderId,
                 razorpay_payment_id: rzpResponse.razorpay_payment_id,
                 razorpay_signature: rzpResponse.razorpay_signature,
               });

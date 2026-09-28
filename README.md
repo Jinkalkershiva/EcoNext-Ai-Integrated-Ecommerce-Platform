@@ -858,11 +858,12 @@ All external client traffic passes through the reactive Spring Cloud Gateway on 
 ### 16.1 Prerequisites
 * **Java**: OpenJDK 21 LTS (`java -version`)
 * **Maven**: Apache Maven 3.9+ (`mvn -version`)
-* **Python**: Python 3.11+ or 3.13 (`python --version`)
+* **Python**: Python 3.11+ / 3.13 (`python --version`)
 * **Node.js**: Node.js 18+ or 20+ & npm (`node -v`, `npm -v`)
 * **Docker**: Docker Desktop with Docker Compose (`docker compose version`)
+* **MySQL**: MySQL 8.0+ server running on `localhost:3306`
 
-### 16.2 Step 1: Start Infrastructure (Docker)
+### 16.2 Step 1: Start Infrastructure (Docker / Local Services)
 ```bash
 cd microservices
 docker compose up -d
@@ -875,8 +876,10 @@ docker compose ps
 ```bash
 cd ../backend
 # Activate virtual environment
-.\venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
+# Install dependencies (including mysqlclient, bcrypt, razorpay)
 pip install -r requirements.txt
+python manage.py check
 python manage.py migrate
 python manage.py runserver 127.0.0.1:8000
 ```
@@ -892,16 +895,19 @@ mvn spring-boot:run -pl api-gateway
 # 2. Admin & Staff Service (Port 8085)
 mvn spring-boot:run -pl admin-staff-service
 
-# 3. Payment Service (Port 8087)
+# 3. Auth Service (Port 8081)
+mvn spring-boot:run -pl auth-service
+
+# 4. Payment Service (Port 8087)
 mvn spring-boot:run -pl payment-service
 ```
 
 ### 16.5 Step 4: Run React 19 Frontends
 ```bash
-# Admin Portal (Port 5074)
+# Admin Portal (Port 5074 / 5174)
 cd ../admin-frontend && npm install && npm run dev -- --port 5074
 
-# Customer Storefront (Port 5073)
+# Customer Storefront (Port 5073 / 5173)
 cd ../frontend && npm install && npm run dev -- --port 5073
 ```
 
@@ -923,6 +929,12 @@ cd ../frontend && npm install && npm run dev -- --port 5073
      - catalog-operations-service            PASSED (JPA CRUD & Threshold Tests)
      - order-operations-service              PASSED (10-Stage State Machine Tests)
      - data-import-analysis-service          PASSED (5/5 Excel/CSV & POI Tests)
+ [✓] Authentication & Security Test Suite:   100% Passed (All Workflows Operational)
+     - Django Monolith Auth (/api/auth/)     PASSED (BCrypt password hashing & SimpleJWT)
+     - Admin Staff Portal Auth (/admin/auth) PASSED (RBAC token generation & validation)
+     - Invalid Credential Handling (401)     PASSED (Accurate 401 response, zero 500s)
+     - Spring Gateway Auth Proxying          PASSED (Routes /api/auth & /api/admin)
+     - Protected API Route Guards            PASSED (Rejection on unauthenticated access)
  [✓] Razorpay & COD Payment Test Suite:      8 / 8 Tests Passed (All Scenarios Verified)
      - Server-side Razorpay order creation   PASSED (Paise amount calculation)
      - Cryptographic HMAC-SHA256 signature   PASSED (Valid verified, Invalid rejected)
@@ -935,9 +947,9 @@ cd ../frontend && npm install && npm run dev -- --port 5073
  [✓] Admin Frontend Production Build:        Compiled Cleanly with Vite (0 Errors)
  [✓] Customer Storefront Build:              Compiled Cleanly with Vite (0 Errors)
  [✓] Apache Kafka KRaft Ingestion Topics:     5 / 5 Topics Initialized & Verified
- [✓] Real Spring Boot Security Auth:         Verified with BCrypt & Stateless JWT
 ========================================================================================
 ```
+
 
 ---
 
