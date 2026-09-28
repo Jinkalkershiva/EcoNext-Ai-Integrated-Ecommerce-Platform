@@ -7,6 +7,7 @@ import {
   Tag,
   Layers,
   Truck,
+  Navigation,
   UploadCloud,
   Radio,
   Database,
@@ -60,6 +61,12 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     {
       label: 'Order Lifecycle',
       path: '/orders',
+      icon: FileText,
+      visible: isAdmin() || hasPermission('ORDER_VIEW')
+    },
+    {
+      label: 'Fulfillment & GPS',
+      path: '/fulfillment',
       icon: Truck,
       visible: isAdmin() || hasPermission('ORDER_VIEW')
     },
@@ -134,6 +141,19 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
     }
   ];
 
+  // Filter nav items and only show section headers if at least one item underneath is visible
+  const visibleNavItems = navItems.filter((item, index, array) => {
+    if (item.section) {
+      if (isCollapsed) return false;
+      for (let i = index + 1; i < array.length; i++) {
+        if (array[i].section) break;
+        if (array[i].visible) return true;
+      }
+      return false;
+    }
+    return item.visible;
+  });
+
   return (
     <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
@@ -159,17 +179,14 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
       </div>
 
       <div className="sidebar-nav">
-        {navItems.map((item, idx) => {
+        {visibleNavItems.map((item, idx) => {
           if (item.section) {
-            if (isCollapsed) return null;
             return (
               <div key={`sec-${idx}`} className="nav-section-title">
                 {item.section}
               </div>
             );
           }
-
-          if (!item.visible) return null;
 
           const IconComponent = item.icon;
 

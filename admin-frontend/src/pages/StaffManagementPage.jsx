@@ -17,11 +17,22 @@ import { Modal } from '../components/Modal';
 import { StatusBadge, RoleBadge } from '../components/Badge';
 import { useAuth } from '../context/AuthContext';
 
+const DEFAULT_OPERATIONAL_ROLES = [
+  { roleName: 'INVENTORY_MANAGER', name: 'INVENTORY_MANAGER', description: 'Manages stock inventory, adjustments, thresholds, and low-stock alerts' },
+  { roleName: 'CATALOG_MANAGER', name: 'CATALOG_MANAGER', description: 'Manages products, categories, pricing, attributes, and catalog data entry' },
+  { roleName: 'ORDER_MANAGER', name: 'ORDER_MANAGER', description: 'Supervises order processing, lifecycle states, cancellations, and logistics' },
+  { roleName: 'ORDER_PROCESSING_STAFF', name: 'ORDER_PROCESSING_STAFF', description: 'Handles daily picking, packing, and shipment dispatch transitions' },
+  { roleName: 'DATA_ANALYST', name: 'DATA_ANALYST', description: 'Accesses reports, operational analytics, sales aggregations, and data exports' },
+  { roleName: 'DATA_ENTRY_STAFF', name: 'DATA_ENTRY_STAFF', description: 'Performs manual product creation and batch CSV/Excel data entry' },
+  { roleName: 'DELIVERY_STAFF', name: 'DELIVERY_STAFF', description: 'Field and dispatch logistics updates (Out for delivery, Delivered)' }
+];
+
 export const StaffManagementPage = () => {
   const { staff: currentStaff } = useAuth();
   const [staffList, setStaffList] = useState([]);
-  const [availableRoles, setAvailableRoles] = useState([]);
+  const [availableRoles, setAvailableRoles] = useState(DEFAULT_OPERATIONAL_ROLES);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -51,9 +62,35 @@ export const StaffManagementPage = () => {
         staffApi.getAllStaff(),
         roleApi.getAllRoles()
       ]);
-      setStaffList(staffData || []);
-      setAvailableRoles(rolesData || []);
+
+      const rawStaff = Array.isArray(staffData) ? staffData : (staffData?.content || []);
+      const normalizedStaff = rawStaff.map((s) => ({
+        ...s,
+        fullName: s.fullName || s.name || s.username,
+        name: s.name || s.fullName || s.username,
+        roles: (s.roles && s.roles.length > 0)
+          ? s.roles
+          : (s.roleName ? [s.roleName] : (s.role ? [s.role] : ['ROLE_STAFF']))
+      }));
+
+      const rawRoles = Array.isArray(rolesData) ? rolesData : (rolesData?.content || []);
+      const normalizedRoles = rawRoles.length > 0 ? rawRoles.map((r) => ({
+        id: r.id || r.name || r.roleName,
+        roleName: r.roleName || r.name,
+        name: r.name || r.roleName,
+        description: r.description || r.roleName || r.name,
+        permissions: r.permissions || []
+      })) : DEFAULT_OPERATIONAL_ROLES;
+
+      setStaffList(normalizedStaff);
+      setAvailableRoles(normalizedRoles);
+
+      // Default role if not set
+      if (normalizedRoles.length > 0 && (!newStaff.roles || newStaff.roles.length === 0)) {
+        setNewStaff((prev) => ({ ...prev, roles: [normalizedRoles[0].roleName] }));
+      }
     } catch (err) {
+      console.error('Failed to load staff/roles:', err);
       setError(err.message || 'Failed to load staff directory');
     } finally {
       setLoading(false);
@@ -68,14 +105,36 @@ export const StaffManagementPage = () => {
     e.preventDefault();
     setError('');
     setSuccess('');
+    setSubmitting(true);
+
     try {
-      await staffApi.createStaff(newStaff);
-      setSuccess(`Staff member ${newStaff.username} created successfully!`);
+      const selectedRole = newStaff.roles?.[0] || availableRoles[0]?.roleName || 'INVENTORY_MANAGER';
+      const payload = {
+        username: newStaff.username?.trim(),
+        name: newStaff.fullName?.trim() || newStaff.username?.trim(),
+        fullName: newStaff.fullName?.trim() || newStaff.username?.trim(),
+        email: newStaff.email?.trim().toLowerCase(),
+        password: newStaff.password,
+        roleName: selectedRole,
+        roles: [selectedRole]
+      };
+
+      await staffApi.createStaff(payload);
+      setSuccess(`Staff account '${payload.username}' provisioned and persisted successfully!`);
       setShowCreateModal(false);
-      setNewStaff({ username: '', fullName: '', email: '', password: '', roles: ['INVENTORY_MANAGER'] });
-      loadData();
+      setNewStaff({
+        username: '',
+        fullName: '',
+        email: '',
+        password: '',
+        roles: [availableRoles[0]?.roleName || 'INVENTORY_MANAGER']
+      });
+      await loadData();
     } catch (err) {
+      console.error('Failed to create staff member:', err);
       setError(err.message || 'Failed to create staff member');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -83,13 +142,24 @@ export const StaffManagementPage = () => {
     if (!selectedStaff) return;
     setError('');
     setSuccess('');
+    setSubmitting(true);
+
     try {
-      await staffApi.updateStaffRoles(selectedStaff.id, editRoles);
-      setSuccess(`Updated roles for ${selectedStaff.username}`);
+      const primaryRole = editRoles[0] || selectedStaff.roleName || 'INVENTORY_MANAGER';
+      await staffApi.updateStaff(selectedStaff.id, {
+        name: selectedStaff.name || selectedStaff.fullName,
+        email: selectedStaff.email,
+        roleName: primaryRole,
+        roles: editRoles
+      });
+      setSuccess(`Assigned roles updated for '${selectedStaff.username}'`);
       setShowRoleModal(false);
-      loadData();
+      await loadData();
     } catch (err) {
+      console.error('Failed to update roles:', err);
       setError(err.message || 'Failed to update roles');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -97,13 +167,18 @@ export const StaffManagementPage = () => {
     if (!selectedStaff || !newPassword) return;
     setError('');
     setSuccess('');
+    setSubmitting(true);
+
     try {
       await staffApi.resetPassword(selectedStaff.id, newPassword);
-      setSuccess(`Password reset successfully for ${selectedStaff.username}`);
+      setSuccess(`Password updated successfully for '${selectedStaff.username}'`);
       setShowPasswordModal(false);
       setNewPassword('');
     } catch (err) {
+      console.error('Failed to reset password:', err);
       setError(err.message || 'Failed to reset password');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -111,9 +186,10 @@ export const StaffManagementPage = () => {
     const newStatus = staffMember.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
     try {
       await staffApi.updateStaffStatus(staffMember.id, newStatus);
-      setSuccess(`Status changed to ${newStatus} for ${staffMember.username}`);
-      loadData();
+      setSuccess(`Status changed to ${newStatus} for '${staffMember.username}'`);
+      await loadData();
     } catch (err) {
+      console.error('Failed to toggle status:', err);
       setError(err.message || 'Failed to toggle status');
     }
   };
@@ -124,7 +200,7 @@ export const StaffManagementPage = () => {
       key: 'fullName',
       render: (row) => (
         <div>
-          <div className="font-semibold text-sm">{row.fullName}</div>
+          <div className="font-semibold text-sm">{row.fullName || row.name || row.username}</div>
           <div className="mono-text text-muted text-xs">@{row.username}</div>
         </div>
       )
@@ -137,13 +213,16 @@ export const StaffManagementPage = () => {
     {
       header: 'Roles',
       key: 'roles',
-      render: (row) => (
-        <div className="flex flex-wrap gap-1">
-          {row.roles?.map((r) => (
-            <RoleBadge key={r} roleName={r} />
-          ))}
-        </div>
-      )
+      render: (row) => {
+        const roles = (row.roles && row.roles.length > 0) ? row.roles : (row.roleName ? [row.roleName] : ['ROLE_STAFF']);
+        return (
+          <div className="flex flex-wrap gap-1">
+            {roles.map((r) => (
+              <RoleBadge key={r} roleName={r} />
+            ))}
+          </div>
+        );
+      }
     },
     {
       header: 'Status',
@@ -169,7 +248,8 @@ export const StaffManagementPage = () => {
             className="btn btn-secondary btn-xs flex items-center gap-1"
             onClick={() => {
               setSelectedStaff(row);
-              setEditRoles(row.roles || []);
+              const currentRoles = (row.roles && row.roles.length > 0) ? row.roles : (row.roleName ? [row.roleName] : []);
+              setEditRoles(currentRoles);
               setShowRoleModal(true);
             }}
           >
@@ -313,20 +393,25 @@ export const StaffManagementPage = () => {
               value={newStaff.roles[0] || 'INVENTORY_MANAGER'}
               onChange={(e) => setNewStaff({ ...newStaff, roles: [e.target.value] })}
             >
-              {availableRoles.map((r) => (
-                <option key={r.roleName} value={r.roleName}>
-                  {r.roleName} - {r.description}
-                </option>
-              ))}
+              {(availableRoles.length > 0 ? availableRoles : DEFAULT_OPERATIONAL_ROLES)
+                .filter((r) => (r.roleName || r.name) !== 'ROLE_ADMIN')
+                .map((r) => {
+                  const roleKey = r.roleName || r.name;
+                  return (
+                    <option key={roleKey} value={roleKey}>
+                      {roleKey} — {r.description || roleKey}
+                    </option>
+                  );
+                })}
             </select>
           </div>
 
           <div className="modal-actions-right mt-4">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCreateModal(false)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCreateModal(false)} disabled={submitting}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary btn-sm">
-              Create Account
+            <button type="submit" className="btn btn-primary btn-sm" disabled={submitting}>
+              {submitting ? 'Creating...' : 'Create Account'}
             </button>
           </div>
         </form>
@@ -341,23 +426,24 @@ export const StaffManagementPage = () => {
         <p className="text-muted text-xs mb-3">Select one or more operational roles to grant policy permissions:</p>
         <div className="roles-checklist space-y-2">
           {availableRoles.map((role) => {
-            const isChecked = editRoles.includes(role.roleName);
+            const roleKey = role.roleName || role.name;
+            const isChecked = editRoles.includes(roleKey);
             return (
-              <label key={role.id} className="role-checkbox-item p-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] flex items-start gap-3 cursor-pointer">
+              <label key={roleKey} className="role-checkbox-item p-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   className="mt-1"
                   checked={isChecked}
                   onChange={(e) => {
                     if (e.target.checked) {
-                      setEditRoles([...editRoles, role.roleName]);
+                      setEditRoles([...editRoles, roleKey]);
                     } else {
-                      setEditRoles(editRoles.filter((r) => r !== role.roleName));
+                      setEditRoles(editRoles.filter((r) => r !== roleKey));
                     }
                   }}
                 />
                 <div className="role-info">
-                  <div className="font-semibold text-sm">{role.roleName}</div>
+                  <div className="font-semibold text-sm">{roleKey}</div>
                   <div className="text-xs text-muted">{role.description}</div>
                 </div>
               </label>
@@ -365,11 +451,11 @@ export const StaffManagementPage = () => {
           })}
         </div>
         <div className="modal-actions-right mt-4">
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowRoleModal(false)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowRoleModal(false)} disabled={submitting}>
             Cancel
           </button>
-          <button className="btn btn-primary btn-sm" onClick={handleUpdateRoles}>
-            Save Role Permissions
+          <button className="btn btn-primary btn-sm" onClick={handleUpdateRoles} disabled={submitting}>
+            {submitting ? 'Saving...' : 'Save Role Permissions'}
           </button>
         </div>
       </Modal>
@@ -391,14 +477,16 @@ export const StaffManagementPage = () => {
           />
         </div>
         <div className="modal-actions-right mt-4">
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowPasswordModal(false)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowPasswordModal(false)} disabled={submitting}>
             Cancel
           </button>
-          <button className="btn btn-primary btn-sm" onClick={handleResetPassword} disabled={!newPassword}>
-            Update Password
+          <button className="btn btn-primary btn-sm" onClick={handleResetPassword} disabled={!newPassword || submitting}>
+            {submitting ? 'Updating...' : 'Update Password'}
           </button>
         </div>
       </Modal>
     </div>
   );
 };
+
+export default StaffManagementPage;

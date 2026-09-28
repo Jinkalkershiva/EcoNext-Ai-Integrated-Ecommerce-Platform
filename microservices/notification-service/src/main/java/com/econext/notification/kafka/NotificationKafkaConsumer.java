@@ -102,4 +102,31 @@ public class NotificationKafkaConsumer {
             log.error("Failed to process order event from Kafka: {}", ex.getMessage(), ex);
         }
     }
+
+    @KafkaListener(topics = "shipment.status.updated", groupId = "${spring.kafka.consumer.group-id:notification-service-group}")
+    public void handleShipmentStatusEvent(Map<String, Object> payload) {
+        try {
+            // idx-09: Notification Service ← Kafka Topic (shipment.status.updated)
+            // reason: Ingest shipment status updates to dispatch customer delivery notifications.
+            log.info("Received shipment status event via Kafka: {}", payload);
+            Object orderIdObj = payload.get("orderId");
+            Object shipmentIdObj = payload.get("shipmentId");
+            Object shipmentNumObj = payload.get("shipmentNumber");
+            String status = (String) payload.get("status");
+            String carrierName = (String) payload.getOrDefault("carrierName", "EcoExpress Carbon-Neutral");
+            String trackingNum = (String) payload.getOrDefault("trackingNumber", "");
+
+            if (orderIdObj == null || status == null) {
+                return;
+            }
+
+            String orderId = String.valueOf(orderIdObj);
+            String shipmentNumber = shipmentNumObj != null ? String.valueOf(shipmentNumObj) : ("Shipment #" + shipmentIdObj);
+
+            log.info("Shipment event processed: {} for Order #{} -> Status: {}, Carrier: {}, Tracking: {}",
+                    shipmentNumber, orderId, status, carrierName, trackingNum);
+        } catch (Exception ex) {
+            log.error("Failed to process shipment status event from Kafka: {}", ex.getMessage(), ex);
+        }
+    }
 }

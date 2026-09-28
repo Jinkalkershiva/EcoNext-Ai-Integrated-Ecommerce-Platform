@@ -132,9 +132,9 @@ class Order(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['user', '-created_at']),
-            models.Index(fields=['status']),
-            models.Index(fields=['payment_status']),
+            models.Index(fields=['user', '-created_at'], name='idx_order_user_id'),
+            models.Index(fields=['status'], name='idx_order_status'),
+            models.Index(fields=['payment_status'], name='idx_order_payment_status'),
         ]
 
 
@@ -191,3 +191,127 @@ class NotificationLog(models.Model):
 
     def __str__(self):
         return f"[{self.notification_type}] {self.trigger_event} to {self.recipient} at {self.created_at}"
+
+
+# ============================================================================
+# Logistics & Fulfillment Domain Models (Shipment, Container, Tracking)
+# ============================================================================
+
+class Container(models.Model):
+    STATUS_CHOICES = [
+        ('CREATED', 'Created'),
+        ('PACKED', 'Packed'),
+        ('DISPATCHED', 'Dispatched'),
+        ('IN_TRANSIT', 'In Transit'),
+        ('ARRIVED_AT_HUB', 'Arrived at Hub'),
+        ('CLOSED', 'Closed'),
+    ]
+
+    container_code = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='CREATED')
+    origin = models.CharField(max_length=128)
+    destination = models.CharField(max_length=128)
+    route = models.CharField(max_length=255, blank=True, default='')
+    current_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    current_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    last_location_update = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status'], name='idx_container_status'),
+            models.Index(fields=['destination'], name='idx_container_destination'),
+            models.Index(fields=['last_location_update'], name='idx_container_last_loc_upd'),
+            models.Index(fields=['container_code'], name='idx_container_code'),
+        ]
+
+    def __str__(self):
+        return f"Container [{self.container_code}] ({self.status}) -> {self.destination}"
+
+
+class Shipment(models.Model):
+    STATUS_CHOICES = [
+        ('CREATED', 'Created'),
+        ('PACKED', 'Packed'),
+        ('DISPATCHED', 'Dispatched'),
+        ('IN_TRANSIT', 'In Transit'),
+        ('ARRIVED_AT_HUB', 'Arrived at Hub'),
+        ('OUT_FOR_DELIVERY', 'Out for Delivery'),
+        ('DELIVERED', 'Delivered'),
+        ('FAILED_DELIVERY', 'Failed Delivery'),
+        ('CANCELLED', 'Cancelled'),
+        ('RETURNED', 'Returned'),
+    ]
+
+    shipment_number = models.CharField(max_length=64, unique=True)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='shipments')
+    container = models.ForeignKey(Container, on_delete=models.SET_NULL, null=True, blank=True, related_name='shipments')
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='CREATED')
+    carrier_name = models.CharField(max_length=100, blank=True, default='EcoExpress Carbon-Neutral')
+    tracking_number = models.CharField(max_length=100, blank=True, default='')
+    vehicle_number = models.CharField(max_length=64, blank=True, default='')
+    origin = models.CharField(max_length=128, blank=True, default='')
+    destination = models.CharField(max_length=128, blank=True, default='')
+    route = models.CharField(max_length=255, blank=True, default='')
+    current_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    current_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    last_location_update = models.DateTimeField(null=True, blank=True)
+    estimated_delivery = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['order'], name='idx_shipment_order_id'),
+            models.Index(fields=['status'], name='idx_shipment_status'),
+            models.Index(fields=['container'], name='idx_shipment_container_id'),
+            models.Index(fields=['tracking_number'], name='idx_shipment_track_num'),
+            models.Index(fields=['destination'], name='idx_shipment_destination'),
+            models.Index(fields=['last_location_update'], name='idx_shipment_last_loc_upd'),
+        ]
+
+    def __str__(self):
+        return f"Shipment #{self.shipment_number} for Order #{self.order_id} ({self.status})"
+
+
+class ShipmentItem(models.Model):
+    shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, related_name='items')
+    order_item = models.ForeignKey(OrderItem, on_delete=models.CASCADE, related_name='shipment_allocations')
+    quantity = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['order_item'], name='idx_shp_item_ord_item_id'),
+            models.Index(fields=['shipment'], name='idx_shp_item_shipment_id'),
+        ]
+
+    def __str__(self):
+        return f"{self.quantity} of OrderItem #{self.order_item_id} in Shipment #{self.shipment.shipment_number}"
+
+
+class LogisticsTrackingEvent(models.Model):
+    shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, null=True, blank=True, related_name='tracking_events')
+    container = models.ForeignKey(Container, on_delete=models.CASCADE, null=True, blank=True, related_name='tracking_events')
+    status = models.CharField(max_length=50)
+    location_name = models.CharField(max_length=128, blank=True, default='')
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    description = models.TextField(blank=True, default='')
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['timestamp']
+        indexes = [
+            models.Index(fields=['shipment'], name='idx_tracking_shipment_id'),
+            models.Index(fields=['container'], name='idx_tracking_container_id'),
+            models.Index(fields=['timestamp'], name='idx_tracking_created_at'),
+        ]
+
+    def __str__(self):
+        target = f"Shipment #{self.shipment_id}" if self.shipment_id else f"Container #{self.container_id}"
+        return f"[{self.status}] {target} at {self.location_name} ({self.timestamp})"

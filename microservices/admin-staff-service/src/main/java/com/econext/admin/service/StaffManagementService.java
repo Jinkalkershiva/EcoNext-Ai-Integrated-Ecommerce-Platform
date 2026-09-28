@@ -96,13 +96,20 @@ public class StaffManagementService {
         StaffMember staff = staffRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Staff member not found with ID: " + id));
 
-        if (!staff.getEmail().equalsIgnoreCase(request.getEmail().trim()) && staffRepository.existsByEmail(request.getEmail().trim())) {
-            throw new BadRequestException("Email '" + request.getEmail() + "' is already in use by another staff member");
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            if (!staff.getEmail().equalsIgnoreCase(request.getEmail().trim()) && staffRepository.existsByEmail(request.getEmail().trim())) {
+                throw new BadRequestException("Email '" + request.getEmail() + "' is already in use by another staff member");
+            }
+            staff.setEmail(request.getEmail().trim().toLowerCase());
         }
 
-        staff.setName(request.getName().trim());
-        staff.setEmail(request.getEmail().trim().toLowerCase());
-        staff.setPhone(request.getPhone());
+        if (request.getName() != null && !request.getName().isBlank()) {
+            staff.setName(request.getName().trim());
+        }
+
+        if (request.getPhone() != null) {
+            staff.setPhone(request.getPhone());
+        }
 
         if (request.getRoleName() != null && !request.getRoleName().isBlank()) {
             String roleName = request.getRoleName().trim().toUpperCase();

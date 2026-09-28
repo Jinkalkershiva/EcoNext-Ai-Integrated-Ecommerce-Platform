@@ -22,4 +22,8 @@ public class RoleResponse {
     private Long staffCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    public String getRoleName() {
+        return this.name;
+    }
 }

@@ -29,4 +29,12 @@ public class StaffResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime lastLoginAt;
+
+    public String getFullName() {
+        return this.name;
+    }
+
+    public java.util.List<String> getRoles() {
+        return this.roleName != null ? java.util.List.of(this.roleName) : java.util.Collections.emptyList();
+    }
 }

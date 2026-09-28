@@ -14,6 +14,7 @@ import { ProductsPage } from './pages/ProductsPage';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { OrdersPage } from './pages/OrdersPage';
+import { FulfillmentPage } from './pages/FulfillmentPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { PaymentsPage } from './pages/PaymentsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
@@ -113,6 +114,14 @@ export const App = () => {
                 element={
                   <ProtectedRoute requiredPermission="ORDER_VIEW">
                     <OrdersPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="fulfillment"
+                element={
+                  <ProtectedRoute requiredPermission="ORDER_VIEW">
+                    <FulfillmentPage />
                   </ProtectedRoute>
                 }
               />

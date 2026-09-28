@@ -473,3 +473,129 @@ export const bigDataApi = {
     return res.data || res;
   }
 };
+
+export const fulfillmentApi = {
+  searchShipments: async (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.orderId) searchParams.append('orderId', params.orderId);
+    if (params.status && params.status !== 'ALL') searchParams.append('status', params.status);
+    if (params.containerId) searchParams.append('containerId', params.containerId);
+    if (params.search) searchParams.append('search', params.search);
+    if (params.page !== undefined) searchParams.append('page', params.page);
+    if (params.size !== undefined) searchParams.append('size', params.size);
+    if (params.sortBy) searchParams.append('sortBy', params.sortBy);
+    if (params.sortDir) searchParams.append('sortDir', params.sortDir);
+
+    const query = searchParams.toString();
+    const res = await apiRequest(`/order-ops/shipments${query ? '?' + query : ''}`);
+    return res.data || res;
+  },
+
+  getShipmentById: async (id) => {
+    const res = await apiRequest(`/order-ops/shipments/${id}`);
+    return res.data || res;
+  },
+
+  getShipmentsByOrderId: async (orderId) => {
+    const res = await apiRequest(`/order-ops/orders/${orderId}/shipments`);
+    return res.data || res || [];
+  },
+
+  createShipment: async (shipmentData) => {
+    const res = await apiRequest('/order-ops/shipments', {
+      method: 'POST',
+      body: shipmentData
+    });
+    return res.data || res;
+  },
+
+  updateShipmentStatus: async (id, status) => {
+    const res = await apiRequest(`/order-ops/shipments/${id}/status?status=${status}`, {
+      method: 'PATCH'
+    });
+    return res.data || res;
+  },
+
+  updateShipmentLocation: async (id, locationData) => {
+    const res = await apiRequest(`/order-ops/shipments/${id}/location`, {
+      method: 'PATCH',
+      body: locationData
+    });
+    return res.data || res;
+  },
+
+  getShipmentTracking: async (id) => {
+    const res = await apiRequest(`/order-ops/shipments/${id}/tracking`);
+    return res.data || res || [];
+  },
+
+  searchContainers: async (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.status && params.status !== 'ALL') searchParams.append('status', params.status);
+    if (params.search) searchParams.append('search', params.search);
+    if (params.page !== undefined) searchParams.append('page', params.page);
+    if (params.size !== undefined) searchParams.append('size', params.size);
+    if (params.sortBy) searchParams.append('sortBy', params.sortBy);
+    if (params.sortDir) searchParams.append('sortDir', params.sortDir);
+
+    const query = searchParams.toString();
+    const res = await apiRequest(`/order-ops/containers${query ? '?' + query : ''}`);
+    return res.data || res;
+  },
+
+  getContainerById: async (id) => {
+    const res = await apiRequest(`/order-ops/containers/${id}`);
+    return res.data || res;
+  },
+
+  createContainer: async (containerData) => {
+    const res = await apiRequest('/order-ops/containers', {
+      method: 'POST',
+      body: containerData
+    });
+    return res.data || res;
+  },
+
+  updateContainerStatus: async (id, status) => {
+    const res = await apiRequest(`/order-ops/containers/${id}/status?status=${status}`, {
+      method: 'PATCH'
+    });
+    return res.data || res;
+  },
+
+  updateContainerLocation: async (id, locationData) => {
+    const res = await apiRequest(`/order-ops/containers/${id}/location`, {
+      method: 'PATCH',
+      body: locationData
+    });
+    return res.data || res;
+  },
+
+  assignShipmentToContainer: async (containerId, shipmentId) => {
+    const res = await apiRequest(`/order-ops/containers/${containerId}/shipments/${shipmentId}`, {
+      method: 'POST'
+    });
+    return res.data || res;
+  },
+
+  getContainerTracking: async (id) => {
+    const res = await apiRequest(`/order-ops/containers/${id}/tracking`);
+    return res.data || res || [];
+  },
+
+  getFulfillmentSummary: async (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.fromTime) searchParams.append('fromTime', params.fromTime);
+    if (params.toTime) searchParams.append('toTime', params.toTime);
+
+    const query = searchParams.toString();
+    try {
+      const res = await apiRequest(`/order-ops/fulfillment/summary${query ? '?' + query : ''}`);
+      return res.data || res;
+    } catch {
+      const res = await apiRequest(`/order-ops/fulfillment-summary${query ? '?' + query : ''}`);
+      return res.data || res;
+    }
+  }
+};
+

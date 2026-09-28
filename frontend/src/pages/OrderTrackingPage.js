@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigation } from '../context/NavigationContext';
 import { useAuth } from '../context/AuthContext';
 import { apiService } from '../api';
+import { createTrackingClient } from '../utils/stompClient';
 import Button from '../components/common/Button';
 import {
   CheckCircle2,
@@ -18,7 +19,9 @@ import {
   Calendar,
   ShieldCheck,
   Search,
-  ExternalLink
+  ExternalLink,
+  Radio,
+  Navigation
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './OrderTrackingPage.css';
@@ -33,8 +36,12 @@ export const OrderTrackingPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [liveLocation, setLiveLocation] = useState(null);
+  const [lastLiveEvent, setLastLiveEvent] = useState(null);
 
   const targetOrderId = params?.orderId || params?.id;
+  const stompClientRef = useRef(null);
 
   const loadOrders = useCallback(async (selectId = null) => {
     try {
@@ -71,6 +78,66 @@ export const OrderTrackingPage = () => {
   useEffect(() => {
     loadOrders(targetOrderId);
   }, [targetOrderId]);
+
+  // idx-11: Order Operations Service (WebSocket / STOMP) → Customer Frontend
+  // reason: Stream real-time vehicle GPS coordinates and shipment milestone state transitions.
+  useEffect(() => {
+    if (!selectedOrder?.id) return;
+
+    const client = createTrackingClient();
+    stompClientRef.current = client;
+
+    client.onConnect(() => {
+      setWsConnected(true);
+    });
+
+    client.onDisconnect(() => {
+      setWsConnected(false);
+    });
+
+    client.connect();
+
+    // Subscribe to STOMP channel for this specific order
+    const orderSub = client.subscribe(`/topic/orders/${selectedOrder.id}`, (data) => {
+      if (!data) return;
+      setLastLiveEvent(data);
+
+      if (data.eventType === 'SHIPMENT_STATUS_UPDATED' || data.status) {
+        setSelectedOrder((prev) => {
+          if (!prev || String(prev.id) !== String(data.orderId)) return prev;
+          const updatedStatus = data.status;
+          return {
+            ...prev,
+            status: updatedStatus,
+            carrier_name: data.carrierName || prev.carrier_name,
+            tracking_number: data.trackingNumber || prev.tracking_number
+          };
+        });
+      }
+
+      if (data.eventType === 'SHIPMENT_LOCATION_UPDATED' || (data.latitude && data.longitude)) {
+        setLiveLocation({
+          latitude: data.latitude,
+          longitude: data.longitude,
+          locationName: data.locationName,
+          status: data.status || selectedOrder.status,
+          trackingNumber: data.trackingNumber,
+          vehicleNumber: data.vehicleNumber,
+          shipmentNumber: data.shipmentNumber,
+          note: data.note,
+          timestamp: data.timestamp || new Date().toISOString()
+        });
+      }
+    });
+
+    return () => {
+      if (orderSub && orderSub.unsubscribe) {
+        orderSub.unsubscribe();
+      }
+      client.disconnect();
+      setWsConnected(false);
+    };
+  }, [selectedOrder?.id]);
 
   const handleRefreshStatus = async () => {
     setRefreshing(true);
@@ -393,6 +460,108 @@ export const OrderTrackingPage = () => {
                           year: 'numeric'
                         })
                       : 'Within 3-4 Business Days'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Real-Time Vehicle GPS Telemetry Stream */}
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(6, 95, 70, 0.03) 100%)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+                borderRadius: 'var(--radius-lg, 12px)',
+                padding: '1.15rem 1.35rem',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.85rem'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <span
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: wsConnected ? '#10b981' : '#94a3b8',
+                      boxShadow: wsConnected ? '0 0 0 3px rgba(16, 185, 129, 0.3)' : 'none',
+                      animation: wsConnected ? 'pulse 2s infinite' : 'none'
+                    }}
+                  />
+                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Radio size={16} color={wsConnected ? '#10b981' : 'var(--text-muted)'} />
+                    Live Logistics & GPS Telemetry Stream
+                  </h4>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem' }}>
+                  <span
+                    style={{
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '9999px',
+                      backgroundColor: wsConnected ? '#dcfce7' : '#f1f5f9',
+                      color: wsConnected ? '#15803d' : '#64748b',
+                      fontWeight: 600,
+                      border: wsConnected ? '1px solid #bbf7d0' : '1px solid #e2e8f0'
+                    }}
+                  >
+                    {wsConnected ? '● STOMP WebSocket Live' : '○ Standby Mode'}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '1rem',
+                  backgroundColor: 'var(--bg-surface, #ffffff)',
+                  padding: '0.9rem 1.1rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--border-default, #e2e8f0)'
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
+                    Current GPS Coordinates
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: '0.9rem', color: liveLocation?.latitude ? '#059669' : 'var(--text-secondary)' }}>
+                    {liveLocation?.latitude && liveLocation?.longitude
+                      ? `${Number(liveLocation.latitude).toFixed(4)}° N, ${Number(liveLocation.longitude).toFixed(4)}° E`
+                      : (selectedOrder.current_latitude && selectedOrder.current_longitude
+                        ? `${Number(selectedOrder.current_latitude).toFixed(4)}° N, ${Number(selectedOrder.current_longitude).toFixed(4)}° E`
+                        : 'Awaiting first GPS ping')}
+                  </span>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
+                    Logistics Vehicle
+                  </span>
+                  <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                    🚚 {liveLocation?.vehicleNumber || selectedOrder.vehicle_number || 'EcoLogistics Electric Fleet'}
+                  </span>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
+                    Current Location / Hub
+                  </span>
+                  <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                    📍 {liveLocation?.locationName || selectedOrder.city || 'Regional Fulfillment Hub'}
+                  </span>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
+                    Telemetry Timestamp
+                  </span>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    {liveLocation?.timestamp
+                      ? new Date(liveLocation.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                      : 'Real-time telemetry ready'}
                   </span>
                 </div>
               </div>

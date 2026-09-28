@@ -6,6 +6,8 @@ spring:
     name: api-gateway
   cloud:
     gateway:
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Methods Access-Control-Allow-Headers Vary, RETAIN_FIRST
       routes:
         # 1. Auth & User Service Route (Order: 1)
         - id: auth-service-route
@@ -92,6 +94,13 @@ spring:
           predicates:
             - Path=/api/import/**, /api/analytics/**
           order: 12
+
+        # 13. WebSocket STOMP Real-Time Live Tracking Route (Order: 13)
+        - id: ws-tracking-route
+          uri: ${ORDER_OPS_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/ws-tracking/**
+          order: 13
 
         # 13. Unmigrated Django Fallback Route (Order: 10000)
         # Highest order value ensures specific Spring routes take precedence,

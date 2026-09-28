@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Leaf, AlertTriangle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Leaf, AlertCircle, Eye, EyeOff, Shield, Server, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ThemeLampToggle } from '../components/ThemeLampToggle';
 
@@ -19,6 +19,8 @@ export const LoginPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
+
     if (!username.trim() || !password.trim()) {
       setError('Please enter your username and password.');
       return;
@@ -27,123 +29,156 @@ export const LoginPage = () => {
     setError('');
     setLoading(true);
 
-    const result = await login(username.trim(), password);
-    setLoading(false);
-
-    if (result && result.success) {
-      navigate(from, { replace: true });
-    } else {
-      setError(result?.error || 'Authentication failed. Please verify your credentials.');
+    try {
+      const result = await login(username.trim(), password);
+      if (result && result.success) {
+        navigate(from, { replace: true });
+      } else {
+        setError(result?.error || 'Invalid username or password.');
+      }
+    } catch (err) {
+      setError(err?.message || 'Unable to connect to the authentication service.');
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const handleQuickFill = (user, pass) => {
-    setUsername(user);
-    setPassword(pass);
-    setError('');
   };
 
   return (
     <div className="login-page">
-      {/* Top Bar with Interactive Lamp Theme Toggle */}
-      <div className="login-topbar">
+      {/* Top Bar with Discrete Theme Toggle */}
+      <header className="login-topbar">
+        <div className="login-topbar-brand">
+          <Leaf size={18} className="text-emerald-500" />
+          <span className="login-topbar-title">EcoNext Operations</span>
+        </div>
         <ThemeLampToggle size="sm" />
-      </div>
+      </header>
 
-      <div className="login-card-container">
-        {/* EcoNext Branding */}
-        <div className="login-brand">
-          <div className="brand-logo-circle bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-            <Leaf size={28} />
-          </div>
-          <h1 className="brand-title">EcoNext</h1>
-          <p className="brand-subtitle">Admin & Staff Operational Portal</p>
-        </div>
-
-        {/* Error Alert Box */}
-        {error && (
-          <div className="alert alert-danger flex items-center gap-2" role="alert">
-            <AlertTriangle size={18} className="flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* Login Form */}
-        <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
-            <label className="form-label" htmlFor="login-username">
-              Username or Staff ID
-            </label>
-            <input
-              id="login-username"
-              type="text"
-              className="input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. admin or staff_username"
-              required
-              autoComplete="username"
-              autoFocus
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="login-password">
-              Password
-            </label>
-            <div className="password-input-wrapper relative">
-              <input
-                id="login-password"
-                type={showPassword ? 'text' : 'password'}
-                className="input pr-10"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter operational credentials"
-                required
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                className="password-toggle-btn"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                title={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+      {/* Main Centered Login Card */}
+      <main className="login-main">
+        <div className="login-card">
+          {/* Brand Header */}
+          <div className="login-header">
+            <div className="login-badge-icon">
+              <Leaf size={28} className="text-emerald-500" />
             </div>
+            <h1 className="login-title">EcoNext</h1>
+            <p className="login-subtitle">Admin & Staff Operational Portal</p>
+            <p className="login-desc">
+              Sign in to access platform governance, warehouse fulfillment, and logistics telemetry.
+            </p>
           </div>
 
-          <button
-            type="submit"
-            className="btn btn-primary btn-block"
-            disabled={loading}
-            style={{ marginTop: '0.75rem', height: '42px' }}
-          >
-            {loading ? <div className="spinner-sm"></div> : 'Authenticate & Enter Portal'}
-          </button>
-        </form>
+          {/* Error Alert Box */}
+          {error && (
+            <div className="login-error-alert" role="alert" aria-live="polite">
+              <AlertCircle size={18} className="login-error-icon" />
+              <div className="login-error-text">{error}</div>
+            </div>
+          )}
 
-        {/* Local Dev Demo Credentials */}
-        <div className="quick-access-box">
-          <p className="quick-access-title">Default Development Credentials:</p>
-          <div className="quick-access-buttons">
+          {/* Login Form */}
+          <form onSubmit={handleSubmit} className="login-form" noValidate>
+            <div className="login-field">
+              <label className="login-label" htmlFor="login-username">
+                Username or Staff ID
+              </label>
+              <div className="login-input-wrapper">
+                <input
+                  id="login-username"
+                  type="text"
+                  className="login-input"
+                  value={username}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    if (error) setError('');
+                  }}
+                  placeholder="Enter your username or staff ID"
+                  required
+                  autoComplete="username"
+                  autoFocus
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <div className="login-field">
+              <div className="login-label-row">
+                <label className="login-label" htmlFor="login-password">
+                  Password
+                </label>
+              </div>
+              <div className="login-input-wrapper">
+                <input
+                  id="login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="login-input login-input-password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (error) setError('');
+                  }}
+                  placeholder="Enter your operational password"
+                  required
+                  autoComplete="current-password"
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  className="login-password-toggle"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                  disabled={loading}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
             <button
-              type="button"
-              className="btn btn-secondary btn-xs"
-              onClick={() => handleQuickFill('admin', 'Admin@12345')}
+              type="submit"
+              className="login-submit-btn"
+              disabled={loading || !username.trim() || !password.trim()}
             >
-              Root Admin (admin / Admin@12345)
+              {loading ? (
+                <span className="login-btn-loading">
+                  <span className="login-spinner"></span>
+                  <span>Signing in...</span>
+                </span>
+              ) : (
+                <span className="login-btn-content">
+                  <Lock size={16} />
+                  <span>Sign In</span>
+                </span>
+              )}
             </button>
-          </div>
-        </div>
+          </form>
 
-        {/* Protected Notice */}
-        <div className="login-footer-text">
-          <p><strong>Protected internal platform.</strong> Authorized staff access only.</p>
-          <p className="sub-text">Connected to EcoNext Java Spring Boot & Django Microservices Core</p>
+          {/* Development / Support Guidance Notice */}
+          <div className="login-guide-box">
+            <div className="login-guide-title">
+              <Shield size={14} className="text-emerald-500" />
+              <span>Authorized Enterprise Access</span>
+            </div>
+            <p className="login-guide-text">
+              Use your assigned operational credentials. If you need account provisioning or role modifications, contact your system administrator.
+            </p>
+          </div>
+
+          {/* Platform Security Footer */}
+          <footer className="login-footer">
+            <div className="login-security-badge">
+              <Shield size={13} />
+              <span>Protected internal platform. Authorized staff access only.</span>
+            </div>
+            <div className="login-backend-badge">
+              <Server size={13} />
+              <span>Connected to EcoNext Java Spring Boot & Django Microservices Core</span>
+            </div>
+          </footer>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

@@ -20,6 +20,9 @@ import com.econext.admin.repository.StaffMemberRepository;
 import com.econext.admin.security.JwtTokenProvider;
 import com.econext.admin.service.AdminAuthService;
 import com.econext.admin.service.StaffManagementService;
+import com.econext.admin.dto.response.RoleResponse;
+import com.econext.admin.service.RoleManagementService;
+import com.econext.admin.security.StaffPrincipal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -44,6 +47,9 @@ public class AdminStaffServiceApplicationTests {
 
     @Autowired
     private StaffManagementService staffService;
+
+    @Autowired
+    private RoleManagementService roleService;
 
     @Autowired
     private StaffMemberRepository staffRepository;
@@ -297,5 +303,104 @@ public class AdminStaffServiceApplicationTests {
         assertEquals("STAFF_LOGIN", latest.getAction());
         assertEquals("admin", latest.getActorUsername());
         assertEquals("192.168.1.50", latest.getIpAddress());
+    }
+
+    @Test
+    @DisplayName("7. Step 7.1 E2E Verification: Admin Login -> Role Listing -> Staff Provisioning -> Persistence -> Staff Login -> PBAC Isolation")
+    void testStep71FullEndToEndStaffProvisioningFlow() {
+        // 1. ADMIN LOGIN
+        LoginRequest adminLogin = LoginRequest.builder()
+                .username("admin")
+                .password("Admin@12345")
+                .build();
+        AuthResponse adminAuth = authService.login(adminLogin, "127.0.0.1");
+        assertNotNull(adminAuth, "Admin login must succeed");
+        assertNotNull(adminAuth.getAccessToken(), "Admin JWT token must be generated");
+        assertEquals("ROLE_ADMIN", adminAuth.getRole(), "User must be authenticated as ROLE_ADMIN");
+        assertTrue(jwtTokenProvider.validateToken(adminAuth.getAccessToken()), "Admin JWT must be valid");
+
+        // 2. ROLE DROPDOWN: Verify actual backend roles exist and are non-empty
+        List<RoleResponse> roles = roleService.getAllRoles();
+        assertNotNull(roles);
+        assertFalse(roles.isEmpty(), "Available roles must not be empty");
+        assertTrue(roles.size() >= 8, "Expected at least 8 baseline operational roles");
+
+        List<String> roleNames = roles.stream().map(RoleResponse::getName).toList();
+        assertTrue(roleNames.contains("ROLE_ADMIN"));
+        assertTrue(roleNames.contains("ORDER_MANAGER"));
+        assertTrue(roleNames.contains("ORDER_PROCESSING_STAFF"));
+        assertTrue(roleNames.contains("INVENTORY_MANAGER"));
+        assertTrue(roleNames.contains("CATALOG_MANAGER"));
+        assertTrue(roleNames.contains("DATA_ANALYST"));
+        assertTrue(roleNames.contains("DATA_ENTRY_STAFF"));
+        assertTrue(roleNames.contains("DELIVERY_STAFF"));
+
+        for (RoleResponse r : roles) {
+            assertNotNull(r.getName(), "Role name must not be null");
+            assertFalse(r.getName().isBlank(), "Role name must not be blank");
+            assertNotNull(r.getDescription(), "Role description must not be null");
+            assertFalse(r.getDescription().isBlank(), "Role description must not be blank");
+            assertNotNull(r.getRoleName(), "Role alias getRoleName() must return valid string");
+        }
+
+        // 3. CREATE A REAL TEST STAFF ACCOUNT (ORDER_MANAGER)
+        CreateStaffRequest createReq = CreateStaffRequest.builder()
+                .name("E2E Order Staff")
+                .username("e2e_order_staff_2026")
+                .email("e2e_order_staff_2026@econext.com")
+                .password("OrderStaff@2026")
+                .roleName("ORDER_MANAGER")
+                .status(StaffStatus.ACTIVE)
+                .build();
+
+        StaffResponse createdStaff = staffService.createStaff(createReq, "admin");
+        assertNotNull(createdStaff);
+        assertNotNull(createdStaff.getId(), "Created staff must have a persisted ID");
+        assertEquals("E2E Order Staff", createdStaff.getName());
+        assertEquals("e2e_order_staff_2026", createdStaff.getUsername());
+        assertEquals("e2e_order_staff_2026@econext.com", createdStaff.getEmail());
+        assertEquals("ORDER_MANAGER", createdStaff.getRoleName());
+        assertEquals(StaffStatus.ACTIVE, createdStaff.getStatus());
+
+        // 4. VERIFY DATABASE PERSISTENCE DIRECTLY IN REPOSITORY
+        StaffMember persistedEntity = staffRepository.findByUsername("e2e_order_staff_2026")
+                .orElseThrow(() -> new AssertionError("Staff entity must exist in the database"));
+        assertEquals("E2E Order Staff", persistedEntity.getName());
+        assertEquals("e2e_order_staff_2026@econext.com", persistedEntity.getEmail());
+        assertEquals("ORDER_MANAGER", persistedEntity.getRoleName());
+        assertEquals(StaffStatus.ACTIVE, persistedEntity.getStatus());
+        assertNotEquals("OrderStaff@2026", persistedEntity.getPasswordHash(), "Password must be securely hashed with BCrypt");
+        assertTrue(passwordEncoder.matches("OrderStaff@2026", persistedEntity.getPasswordHash()), "BCrypt hash must match original password");
+
+        // 5. STAFF DIRECTORY REFRESH
+        List<StaffResponse> directory = staffService.getAllStaff();
+        assertTrue(directory.stream().anyMatch(s -> "e2e_order_staff_2026".equals(s.getUsername())), "New staff must appear in directory");
+
+        // 6. LOGIN AS NEW STAFF
+        LoginRequest staffLogin = LoginRequest.builder()
+                .username("e2e_order_staff_2026")
+                .password("OrderStaff@2026")
+                .build();
+        AuthResponse staffAuth = authService.login(staffLogin, "127.0.0.1");
+        assertNotNull(staffAuth, "Staff login must succeed");
+        assertNotNull(staffAuth.getAccessToken(), "Staff JWT token must be generated");
+        assertEquals("e2e_order_staff_2026", staffAuth.getUsername());
+        assertEquals("ORDER_MANAGER", staffAuth.getRole(), "Assigned role must be ORDER_MANAGER");
+        assertNotEquals("ROLE_ADMIN", staffAuth.getRole(), "Staff user must NOT be granted ROLE_ADMIN");
+
+        // 7. VERIFY PBAC PERMISSIONS & ENFORCEMENT
+        Set<PermissionType> perms = staffAuth.getPermissions();
+        assertNotNull(perms, "Effective permissions must be present in authentication response");
+        assertTrue(perms.contains(PermissionType.ORDER_READ), "Order staff must have ORDER_READ");
+        assertTrue(perms.contains(PermissionType.ORDER_PROCESS), "Order staff must have ORDER_PROCESS");
+        assertTrue(perms.contains(PermissionType.ORDER_STATUS_UPDATE), "Order staff must have ORDER_STATUS_UPDATE");
+        assertTrue(perms.contains(PermissionType.CATALOG_READ), "Order staff must have CATALOG_READ");
+        assertTrue(perms.contains(PermissionType.INVENTORY_READ), "Order staff must have INVENTORY_READ");
+
+        // Verify that administrative privileges are strictly omitted
+        assertFalse(perms.contains(PermissionType.STAFF_CREATE), "Order staff MUST NOT have STAFF_CREATE authority");
+        assertFalse(perms.contains(PermissionType.STAFF_DISABLE), "Order staff MUST NOT have STAFF_DISABLE authority");
+        assertFalse(perms.contains(PermissionType.STAFF_UPDATE), "Order staff MUST NOT have STAFF_UPDATE authority");
+        assertFalse(perms.contains(PermissionType.AUDIT_READ), "Order staff MUST NOT have AUDIT_READ authority");
     }
 }

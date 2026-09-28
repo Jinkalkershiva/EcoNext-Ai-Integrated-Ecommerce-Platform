@@ -69,7 +69,7 @@ public class SecurityConfig {
                     "/actuator/info"
                 ).permitAll()
                 .requestMatchers("/api/admin/staff/**").hasAnyAuthority("ROLE_ADMIN", "STAFF_READ", "STAFF_CREATE", "STAFF_UPDATE", "STAFF_DISABLE")
-                .requestMatchers("/api/admin/roles/**").hasAuthority("ROLE_ADMIN")
+                .requestMatchers("/api/admin/roles/**", "/api/admin/permissions/**").hasAnyAuthority("ROLE_ADMIN", "STAFF_READ")
                 .requestMatchers("/api/admin/audit/**").hasAnyAuthority("ROLE_ADMIN", "AUDIT_READ")
                 .anyRequest().authenticated()
             )

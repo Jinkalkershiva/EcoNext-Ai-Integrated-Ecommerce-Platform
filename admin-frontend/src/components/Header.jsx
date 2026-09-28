@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ThemeSelector } from './ThemeSelector';
+import { UiScaleControl } from './UiScaleControl';
 import { Menu, ChevronDown, LogOut, User, Settings, ShieldCheck, Activity } from 'lucide-react';
 
 export const Header = ({ title, subtitle, onToggleSidebar }) => {
@@ -35,6 +36,9 @@ export const Header = ({ title, subtitle, onToggleSidebar }) => {
           <span className="pulse-dot"></span>
           <span className="status-label">Operational Core Online</span>
         </div>
+
+        {/* UI Scale Zoom Control [ A- ] 100% [ A+ ] */}
+        <UiScaleControl size="sm" />
 
         {/* 3-Mode Theme Selector */}
         <ThemeSelector size="sm" />

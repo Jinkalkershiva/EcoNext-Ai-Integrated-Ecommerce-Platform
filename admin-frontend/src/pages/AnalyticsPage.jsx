@@ -13,11 +13,12 @@ import {
   RefreshCw,
   FileSpreadsheet
 } from 'lucide-react';
-import { analyticsApi } from '../api/operationsApis';
+import { analyticsApi, fulfillmentApi } from '../api/operationsApis';
 import { StatCard } from '../components/StatCard';
 
 export const AnalyticsPage = () => {
   const [data, setData] = useState(null);
+  const [fulfillmentData, setFulfillmentData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -25,8 +26,12 @@ export const AnalyticsPage = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await analyticsApi.getExecutiveDashboard();
-      setData(res);
+      const [res, fulfillRes] = await Promise.allSettled([
+        analyticsApi.getExecutiveDashboard(),
+        fulfillmentApi.getFulfillmentSummary()
+      ]);
+      if (res.status === 'fulfilled') setData(res.value);
+      if (fulfillRes.status === 'fulfilled') setFulfillmentData(fulfillRes.value);
     } catch (err) {
       setError(err.message || 'Failed to load analytics data');
     } finally {
@@ -182,20 +187,36 @@ export const AnalyticsPage = () => {
           </h4>
           <div className="grid grid-cols-2 gap-3 mt-3">
             <div className="p-3 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] text-center">
-              <div className="text-xl font-bold text-success">2.4 hrs</div>
-              <div className="text-xs text-muted mt-0.5">Avg. Order to Pack</div>
+              <div className="text-xl font-bold text-success">
+                {fulfillmentData ? fulfillmentData.deliveredShipments : '2.4 hrs'}
+              </div>
+              <div className="text-xs text-muted mt-0.5">
+                {fulfillmentData ? 'Delivered Loads' : 'Avg. Order to Pack'}
+              </div>
             </div>
             <div className="p-3 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] text-center">
-              <div className="text-xl font-bold text-info">6.1 hrs</div>
-              <div className="text-xs text-muted mt-0.5">Avg. Dispatch to Carrier</div>
+              <div className="text-xl font-bold text-info">
+                {fulfillmentData ? fulfillmentData.inTransitShipments : '6.1 hrs'}
+              </div>
+              <div className="text-xs text-muted mt-0.5">
+                {fulfillmentData ? 'Active In-Transit' : 'Avg. Dispatch to Carrier'}
+              </div>
             </div>
             <div className="p-3 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] text-center">
-              <div className="text-xl font-bold text-primary">99.2%</div>
-              <div className="text-xs text-muted mt-0.5">Order Accuracy SLA</div>
+              <div className="text-xl font-bold text-primary">
+                {fulfillmentData ? fulfillmentData.totalShipments : '99.2%'}
+              </div>
+              <div className="text-xs text-muted mt-0.5">
+                {fulfillmentData ? 'Total Shipments' : 'Order Accuracy SLA'}
+              </div>
             </div>
             <div className="p-3 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] text-center">
-              <div className="text-xl font-bold text-success">0.8%</div>
-              <div className="text-xs text-muted mt-0.5">Return Rate (&lt; Industry)</div>
+              <div className="text-xl font-bold text-success">
+                {fulfillmentData ? fulfillmentData.totalTrackingEvents : '0.8%'}
+              </div>
+              <div className="text-xs text-muted mt-0.5">
+                {fulfillmentData ? 'Telemetry Milestones' : 'Return Rate (< Industry)'}
+              </div>
             </div>
           </div>
         </div>

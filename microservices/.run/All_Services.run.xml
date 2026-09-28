@@ -1,9 +1,9 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="All-Services" type="CompoundRunConfigurationType">
+  <configuration default="false" name="All_Services" type="CompoundRunConfigurationType">
     <toRun name="AdminStaffServiceApplication" type="Application" />
     <toRun name="ApiGatewayApplication" type="Application" />
     <toRun name="AuthServiceApplication" type="Application" />
-    <toRun name="CartServiceApplication" type="Application" />
+    <toRun name="CartServiceApplication (2)" type="Application" />
     <toRun name="CatalogOperationsServiceApplication" type="Application" />
     <toRun name="DataImportAnalysisServiceApplication" type="Application" />
     <toRun name="NotificationServiceApplication" type="Application" />

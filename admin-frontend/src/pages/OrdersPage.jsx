@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Package,
   Truck,
+  Navigation,
   CheckCircle2,
   Clock,
   AlertTriangle,
@@ -185,6 +187,7 @@ const normalizeOrder = (o) => {
 };
 
 export const OrdersPage = () => {
+  const navigate = useNavigate();
   const { hasPermission, isAdmin } = useAuth();
   const canUpdate = isAdmin() || hasPermission('ORDER_STATUS_UPDATE');
 
@@ -449,6 +452,16 @@ export const OrdersPage = () => {
               <span>View</span>
             </button>
 
+            {/* View Fulfillment / Telemetry */}
+            <button
+              className="btn btn-secondary btn-xs flex items-center gap-1"
+              onClick={() => navigate(`/fulfillment?orderId=${row.id}`)}
+              title="View GPS telemetry & fulfillment loads"
+            >
+              <Navigation size={11} className="text-emerald-500" />
+              <span>Fulfillment</span>
+            </button>
+
             {/* Semantic Forward Action Button */}
             {canUpdate && actionCfg && (
               <button
@@ -681,11 +694,21 @@ export const OrdersPage = () => {
                 </p>
                 <p className="text-xs text-muted mt-0.5">{selectedOrder.country || 'India'}</p>
                 {selectedOrder.trackingNumber && (
-                  <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] text-xs flex items-center gap-2">
-                    <span className="text-muted">Carrier:</span>
-                    <span className="font-medium text-primary">{selectedOrder.carrierName || 'EcoExpress'}</span>
-                    <span className="text-muted ml-2">AWB:</span>
-                    <span className="font-mono font-bold">{selectedOrder.trackingNumber}</span>
+                  <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] text-xs flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted">Carrier:</span>
+                      <span className="font-medium text-primary">{selectedOrder.carrierName || 'EcoExpress'}</span>
+                      <span className="text-muted ml-1">AWB:</span>
+                      <span className="font-mono font-bold">{selectedOrder.trackingNumber}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-xs flex items-center gap-1"
+                      onClick={() => navigate(`/fulfillment?orderId=${selectedOrder.id}`)}
+                    >
+                      <Navigation size={11} className="text-emerald-500" />
+                      <span>Live Telemetry</span>
+                    </button>
                   </div>
                 )}
               </div>

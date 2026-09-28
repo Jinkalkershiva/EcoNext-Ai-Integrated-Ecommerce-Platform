@@ -106,6 +106,19 @@ urlpatterns = [
     path('api/admin/users', admin_views.admin_users_list, name='admin_users_list_noslash'),
     path('api/admin/categories/', admin_views.admin_categories_list_create, name='admin_categories_list_create'),
     path('api/admin/categories', admin_views.admin_categories_list_create, name='admin_categories_list_create_noslash'),
+    # Staff Management REST APIs (Dual route support)
+    path('api/admin/staff/', auth_views.admin_staff_list_create, name='admin_staff_list_create'),
+    path('api/admin/staff', auth_views.admin_staff_list_create, name='admin_staff_list_create_noslash'),
+    path('api/admin/staff/<int:pk>/', auth_views.admin_staff_detail, name='admin_staff_detail'),
+    path('api/admin/staff/<int:pk>', auth_views.admin_staff_detail, name='admin_staff_detail_noslash'),
+    path('api/admin/staff/<int:pk>/status/', auth_views.admin_staff_status_update, name='admin_staff_status_update'),
+    path('api/admin/staff/<int:pk>/status', auth_views.admin_staff_status_update, name='admin_staff_status_update_noslash'),
+    path('api/admin/staff/<int:pk>/reset-password/', auth_views.admin_staff_reset_password, name='admin_staff_reset_password'),
+    path('api/admin/staff/<int:pk>/reset-password', auth_views.admin_staff_reset_password, name='admin_staff_reset_password_noslash'),
+    path('api/admin/roles/', auth_views.admin_roles_list, name='admin_roles_list'),
+    path('api/admin/roles', auth_views.admin_roles_list, name='admin_roles_list_noslash'),
+    path('api/admin/permissions/', auth_views.admin_permissions_list, name='admin_permissions_list'),
+    path('api/admin/permissions', auth_views.admin_permissions_list, name='admin_permissions_list_noslash'),
 ]
 
 # Serve uploaded media (visual-search images) from the dev server. In production

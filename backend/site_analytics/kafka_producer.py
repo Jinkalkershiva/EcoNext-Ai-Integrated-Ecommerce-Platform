@@ -22,6 +22,9 @@ TOPIC_PRODUCT_VIEWS = 'product-view-events'
 TOPIC_CART_EVENTS = 'cart-events'
 TOPIC_ORDER_EVENTS = 'order-events'
 TOPIC_INVENTORY_EVENTS = 'inventory-events'
+TOPIC_SHIPMENT_STATUS = 'shipment.status.updated'
+TOPIC_SHIPMENT_LOCATION = 'shipment.location.updated'
+TOPIC_CONTAINER_STATUS = 'container.status.updated'
 
 _producer = None
 _producer_lock = threading.Lock()
@@ -119,3 +122,48 @@ def publish_order_event(order_id, user_id, total_amount, status, items_count=1):
         'source': 'ECONEXT_DJANGO_CHECKOUT'
     }
     send_event_async(TOPIC_ORDER_EVENTS, payload, key=str(order_id))
+
+
+def publish_shipment_status_event(shipment_id, order_id, status, tracking_number=None, carrier_name=None, shipment_number=None):
+    """Emits shipment status updated event."""
+    payload = {
+        'shipmentId': shipment_id,
+        'shipmentNumber': shipment_number or f"SHP-{order_id}-{shipment_id}",
+        'orderId': order_id,
+        'status': status,
+        'carrierName': carrier_name or 'EcoExpress Carbon-Neutral',
+        'trackingNumber': tracking_number or '',
+        'source': 'ECONEXT_FULFILLMENT'
+    }
+    send_event_async(TOPIC_SHIPMENT_STATUS, payload, key=str(shipment_id))
+
+
+def publish_shipment_location_event(shipment_id, order_id, latitude, longitude, location_name='', status='IN_TRANSIT', tracking_number=None, vehicle_number=None, shipment_number=None):
+    """Emits real-time shipment GPS vehicle location update event."""
+    payload = {
+        'shipmentId': shipment_id,
+        'shipmentNumber': shipment_number or f"SHP-{order_id}-{shipment_id}",
+        'orderId': order_id,
+        'latitude': float(latitude) if latitude is not None else None,
+        'longitude': float(longitude) if longitude is not None else None,
+        'locationName': location_name,
+        'status': status,
+        'trackingNumber': tracking_number or '',
+        'vehicleNumber': vehicle_number or '',
+        'source': 'ECONEXT_GPS_TRACKING'
+    }
+    send_event_async(TOPIC_SHIPMENT_LOCATION, payload, key=str(shipment_id))
+
+
+def publish_container_status_event(container_id, container_code, status, origin='', destination=''):
+    """Emits container status transition event."""
+    payload = {
+        'containerId': container_id,
+        'containerCode': container_code,
+        'status': status,
+        'origin': origin,
+        'destination': destination,
+        'source': 'ECONEXT_CONTAINER_OPS'
+    }
+    send_event_async(TOPIC_CONTAINER_STATUS, payload, key=str(container_id))
+

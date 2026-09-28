@@ -3,7 +3,7 @@
  * Communicates with the Java Spring Cloud API Gateway (port 8080) and microservices.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080/api';
 
 const TOKEN_KEY = 'econext_staff_access_token';
 const REFRESH_KEY = 'econext_staff_refresh_token';
@@ -21,8 +21,8 @@ export const authStore = {
     }
   },
   setAuth: (data) => {
-    if (data.accessToken) localStorage.setItem(TOKEN_KEY, data.accessToken);
-    if (data.refreshToken) localStorage.setItem(REFRESH_KEY, data.refreshToken);
+    if (data?.accessToken) localStorage.setItem(TOKEN_KEY, data.accessToken);
+    if (data?.refreshToken) localStorage.setItem(REFRESH_KEY, data.refreshToken);
     if (data) localStorage.setItem(USER_KEY, JSON.stringify(data));
   },
   clear: () => {
@@ -55,22 +55,11 @@ export async function apiRequest(endpoint, options = {}) {
 
   const fullUrl = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
 
-  if (endpoint.includes('/auth/login')) {
-    console.debug('[AUTH] Login request started to endpoint:', fullUrl);
-  }
-
   let response;
   try {
     response = await fetch(fullUrl, config);
   } catch (err) {
-    if (endpoint.includes('/auth/login')) {
-      console.debug('[AUTH] Network error reaching authentication service:', err.message);
-    }
     throw new Error('Unable to connect to the authentication service. Please verify backend services are active.');
-  }
-
-  if (endpoint.includes('/auth/login')) {
-    console.debug('[AUTH] Response status:', response.status);
   }
 
   if (response.status === 401 && auth) {
@@ -90,10 +79,16 @@ export async function apiRequest(endpoint, options = {}) {
 
   if (!response.ok) {
     let errorMsg = 'An unexpected error occurred.';
-    if (response.status === 401 || response.status === 403) {
-      errorMsg = data?.message || 'Invalid username or password.';
+    if (response.status === 401) {
+      if (data?.message && data.message !== 'Invalid credentials' && !data.message.includes('Bad credentials')) {
+        errorMsg = data.message;
+      } else {
+        errorMsg = 'Invalid username or password.';
+      }
+    } else if (response.status === 403) {
+      errorMsg = data?.message || 'Your account does not have authorization to access this portal.';
     } else if (response.status >= 500) {
-      errorMsg = 'Authentication service is currently unavailable. Please try again shortly.';
+      errorMsg = 'Authentication service is temporarily unavailable.';
     } else if (data?.message) {
       errorMsg = data.message;
     } else if (typeof data?.error === 'string') {
@@ -102,10 +97,6 @@ export async function apiRequest(endpoint, options = {}) {
       errorMsg = `Request failed with status ${response.status}`;
     }
     throw new Error(errorMsg);
-  }
-
-  if (endpoint.includes('/auth/login')) {
-    console.debug('[AUTH] Authentication successful, token received.');
   }
 
   return data;

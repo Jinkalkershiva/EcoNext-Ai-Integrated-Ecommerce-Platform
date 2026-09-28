@@ -41,4 +41,16 @@ public class CreateStaffRequest {
 
     @Builder.Default
     private StaffStatus status = StaffStatus.ACTIVE;
+
+    public void setFullName(String fullName) {
+        if (this.name == null || this.name.isBlank()) {
+            this.name = fullName;
+        }
+    }
+
+    public void setRoles(java.util.List<String> roles) {
+        if ((this.roleName == null || this.roleName.isBlank()) && roles != null && !roles.isEmpty()) {
+            this.roleName = roles.get(0);
+        }
+    }
 }

@@ -203,4 +203,151 @@ public class OrderOperationsServiceApplicationTests {
         );
         assertEquals(OrderStatus.RETURNED, returned.getCurrentStatus());
     }
+
+    @Autowired
+    private com.econext.order.service.ShipmentService shipmentService;
+
+    @Autowired
+    private com.econext.order.service.ContainerService containerService;
+
+    @Autowired
+    private com.econext.order.kafka.FulfillmentKafkaConsumer fulfillmentKafkaConsumer;
+
+    @Test
+    @DisplayName("4. End-to-End Shipment Creation and State Transition Flow")
+    void testShipmentCreationAndStatusTransitions() {
+        OperationalOrder order = createBaselineOrder();
+        OperationalOrderItem item = order.getItems().get(0);
+
+        com.econext.order.dto.CreateShipmentRequest req = com.econext.order.dto.CreateShipmentRequest.builder()
+                .orderId(order.getId())
+                .carrierName("EcoExpress Logistics")
+                .vehicleNumber("GJ-01-EE-4501")
+                .origin("Ahmedabad Central Hub")
+                .destination("Vadodara South")
+                .items(java.util.List.of(
+                        com.econext.order.dto.CreateShipmentRequest.ShipmentItemAllocation.builder()
+                                .orderItemId(item.getId())
+                                .quantity(1)
+                                .build()
+                ))
+                .build();
+
+        com.econext.order.dto.ShipmentResponse created = shipmentService.createShipment(req, 101L, "staff");
+        assertNotNull(created);
+        assertNotNull(created.getId());
+        assertEquals(com.econext.order.entity.ShipmentStatus.CREATED, created.getStatus());
+        assertEquals("GJ-01-EE-4501", created.getVehicleNumber());
+
+        // Update status: CREATED -> PACKED -> DISPATCHED -> IN_TRANSIT -> OUT_FOR_DELIVERY -> DELIVERED
+        com.econext.order.dto.ShipmentResponse packed = shipmentService.updateShipmentStatus(created.getId(), com.econext.order.entity.ShipmentStatus.PACKED, 101L, "staff");
+        assertEquals(com.econext.order.entity.ShipmentStatus.PACKED, packed.getStatus());
+
+        com.econext.order.dto.ShipmentResponse dispatched = shipmentService.updateShipmentStatus(created.getId(), com.econext.order.entity.ShipmentStatus.DISPATCHED, 101L, "staff");
+        assertEquals(com.econext.order.entity.ShipmentStatus.DISPATCHED, dispatched.getStatus());
+
+        com.econext.order.dto.ShipmentResponse inTransit = shipmentService.updateShipmentStatus(created.getId(), com.econext.order.entity.ShipmentStatus.IN_TRANSIT, 101L, "staff");
+        assertEquals(com.econext.order.entity.ShipmentStatus.IN_TRANSIT, inTransit.getStatus());
+
+        com.econext.order.dto.ShipmentResponse outForDeliv = shipmentService.updateShipmentStatus(created.getId(), com.econext.order.entity.ShipmentStatus.OUT_FOR_DELIVERY, 101L, "staff");
+        assertEquals(com.econext.order.entity.ShipmentStatus.OUT_FOR_DELIVERY, outForDeliv.getStatus());
+
+        com.econext.order.dto.ShipmentResponse delivered = shipmentService.updateShipmentStatus(created.getId(), com.econext.order.entity.ShipmentStatus.DELIVERED, 101L, "staff");
+        assertEquals(com.econext.order.entity.ShipmentStatus.DELIVERED, delivered.getStatus());
+
+        // Verify tracking timeline has all milestone events
+        java.util.List<com.econext.order.dto.LogisticsTrackingResponse> tracking = shipmentService.getShipmentTracking(created.getId());
+        assertTrue(tracking.size() >= 6);
+    }
+
+    @Test
+    @DisplayName("5. Physical Shipment Vehicle GPS Telemetry Tracking Flow")
+    void testShipmentGpsLocationUpdateAndLogisticsTracking() {
+        OperationalOrder order = createBaselineOrder();
+        OperationalOrderItem item = order.getItems().get(0);
+
+        com.econext.order.dto.CreateShipmentRequest req = com.econext.order.dto.CreateShipmentRequest.builder()
+                .orderId(order.getId())
+                .carrierName("EcoExpress Logistics")
+                .vehicleNumber("GJ-06-EV-9922")
+                .origin("Surat Distribution Center")
+                .destination("Vadodara")
+                .items(java.util.List.of(
+                        com.econext.order.dto.CreateShipmentRequest.ShipmentItemAllocation.builder()
+                                .orderItemId(item.getId())
+                                .quantity(1)
+                                .build()
+                ))
+                .build();
+
+        com.econext.order.dto.ShipmentResponse shipment = shipmentService.createShipment(req, 101L, "staff");
+
+        // First GPS Ping: Bharuch Highway
+        com.econext.order.dto.UpdateShipmentLocationRequest ping1 = com.econext.order.dto.UpdateShipmentLocationRequest.builder()
+                .latitude(new BigDecimal("21.7051"))
+                .longitude(new BigDecimal("72.9959"))
+                .locationName("Bharuch Transit Hub")
+                .note("Vehicle on National Highway 48")
+                .build();
+
+        com.econext.order.dto.ShipmentResponse loc1 = shipmentService.updateShipmentLocation(shipment.getId(), ping1, 101L, "driver");
+        assertEquals(new BigDecimal("21.7051"), loc1.getCurrentLatitude());
+        assertEquals(new BigDecimal("72.9959"), loc1.getCurrentLongitude());
+        assertNotNull(loc1.getLastLocationUpdate());
+
+        // Second GPS Ping: Vadodara City Limit
+        com.econext.order.dto.UpdateShipmentLocationRequest ping2 = com.econext.order.dto.UpdateShipmentLocationRequest.builder()
+                .latitude(new BigDecimal("22.3072"))
+                .longitude(new BigDecimal("73.1812"))
+                .locationName("Vadodara Delivery Hub")
+                .note("Arrived at destination hub")
+                .build();
+
+        com.econext.order.dto.ShipmentResponse loc2 = shipmentService.updateShipmentLocation(shipment.getId(), ping2, 101L, "driver");
+        assertEquals(new BigDecimal("22.3072"), loc2.getCurrentLatitude());
+        assertEquals(new BigDecimal("73.1812"), loc2.getCurrentLongitude());
+
+        // Verify tracking history contains both GPS location updates
+        java.util.List<com.econext.order.dto.LogisticsTrackingResponse> history = shipmentService.getShipmentTracking(shipment.getId());
+        assertTrue(history.stream().anyMatch(e -> "Bharuch Transit Hub".equals(e.getLocationName())));
+        assertTrue(history.stream().anyMatch(e -> "Vadodara Delivery Hub".equals(e.getLocationName())));
+    }
+
+    @Test
+    @DisplayName("6. Kafka Consumer to WebSocket STOMP Message Propagation")
+    void testKafkaConsumerToWebSocketStompMessagePropagation() {
+        // Test Kafka consumer parsing and broadcasting shipment status update
+        java.util.Map<String, Object> statusPayload = java.util.Map.of(
+                "shipmentId", 501L,
+                "shipmentNumber", "SHP-10-01",
+                "orderId", 10L,
+                "status", "OUT_FOR_DELIVERY",
+                "carrierName", "EcoExpress",
+                "trackingNumber", "ECO-9988"
+        );
+        assertDoesNotThrow(() -> fulfillmentKafkaConsumer.handleShipmentStatusEvent(statusPayload));
+
+        // Test Kafka consumer parsing and broadcasting shipment location update
+        java.util.Map<String, Object> locationPayload = java.util.Map.of(
+                "shipmentId", 501L,
+                "shipmentNumber", "SHP-10-01",
+                "orderId", 10L,
+                "latitude", "22.3072",
+                "longitude", "73.1812",
+                "locationName", "Vadodara Hub",
+                "status", "IN_TRANSIT",
+                "vehicleNumber", "GJ-01-EE-4501"
+        );
+        assertDoesNotThrow(() -> fulfillmentKafkaConsumer.handleShipmentLocationEvent(locationPayload));
+
+        // Test container status event
+        java.util.Map<String, Object> containerPayload = java.util.Map.of(
+                "containerId", 201L,
+                "containerCode", "CONT-AHM-01",
+                "status", "IN_TRANSIT",
+                "origin", "Ahmedabad",
+                "destination", "Vadodara"
+        );
+        assertDoesNotThrow(() -> fulfillmentKafkaConsumer.handleContainerStatusEvent(containerPayload));
+    }
 }

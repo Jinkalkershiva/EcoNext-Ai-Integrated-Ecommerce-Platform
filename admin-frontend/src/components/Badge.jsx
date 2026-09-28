@@ -13,13 +13,13 @@ export const StatusBadge = ({ status }) => {
   const s = status.toUpperCase();
 
   let variant = 'info';
-  if (['ACTIVE', 'ORDER_CONFIRMED', 'DELIVERED', 'COMPLETED', 'PUBLISHED'].includes(s)) {
+  if (['ACTIVE', 'ORDER_CONFIRMED', 'DELIVERED', 'COMPLETED', 'PUBLISHED', 'CLOSED'].includes(s)) {
     variant = 'success';
-  } else if (['PROCESSING', 'PACKED', 'SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'IN_PROGRESS'].includes(s)) {
+  } else if (['PROCESSING', 'PACKED', 'SHIPPED', 'DISPATCHED', 'IN_TRANSIT', 'ARRIVED_AT_HUB', 'OUT_FOR_DELIVERY', 'IN_PROGRESS'].includes(s)) {
     variant = 'info';
-  } else if (['LOW_STOCK', 'ORDER_PLACED', 'PENDING', 'VALIDATING', 'IMPORTING'].includes(s)) {
+  } else if (['LOW_STOCK', 'ORDER_PLACED', 'PENDING', 'CREATED', 'VALIDATING', 'IMPORTING'].includes(s)) {
     variant = 'warning';
-  } else if (['SUSPENDED', 'CANCELLED', 'RETURNED', 'FAILED', 'OUT_OF_STOCK', 'ARCHIVED', 'INACTIVE'].includes(s)) {
+  } else if (['SUSPENDED', 'CANCELLED', 'RETURNED', 'FAILED', 'FAILED_DELIVERY', 'OUT_OF_STOCK', 'ARCHIVED', 'INACTIVE'].includes(s)) {
     variant = 'danger';
   }
 

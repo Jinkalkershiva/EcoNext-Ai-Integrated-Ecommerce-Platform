@@ -16,10 +16,8 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UpdateStaffRequest {
-    @NotBlank(message = "Staff full name is required")
     private String name;
 
-    @NotBlank(message = "Email is required")
     @Email(message = "Invalid email format")
     private String email;
 
@@ -30,4 +28,16 @@ public class UpdateStaffRequest {
     private Set<PermissionType> customPermissions;
 
     private StaffStatus status;
+
+    public void setFullName(String fullName) {
+        if (this.name == null || this.name.isBlank()) {
+            this.name = fullName;
+        }
+    }
+
+    public void setRoles(java.util.List<String> roles) {
+        if ((this.roleName == null || this.roleName.isBlank()) && roles != null && !roles.isEmpty()) {
+            this.roleName = roles.get(0);
+        }
+    }
 }
