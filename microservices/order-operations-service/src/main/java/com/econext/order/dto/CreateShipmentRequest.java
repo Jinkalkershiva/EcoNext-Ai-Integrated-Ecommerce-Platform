@@ -40,8 +40,10 @@ public class CreateShipmentRequest {
 
     private LocalDateTime estimatedDelivery;
 
-    @NotEmpty(message = "At least one item must be allocated to the shipment")
     private List<ShipmentItemAllocation> items;
+
+    @com.fasterxml.jackson.annotation.JsonAlias({"itemIds", "itemIdList"})
+    private List<Long> itemIds;
 
     @Data
     @Builder

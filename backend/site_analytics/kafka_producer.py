@@ -167,3 +167,18 @@ def publish_container_status_event(container_id, container_code, status, origin=
     }
     send_event_async(TOPIC_CONTAINER_STATUS, payload, key=str(container_id))
 
+
+def publish_bulk_import_completed_event(import_id, filename, imported_count, skipped_count, user_name='ADMIN'):
+    """Emits product bulk import completion event to inventory-events topic."""
+    payload = {
+        'importId': import_id,
+        'filename': filename,
+        'importedCount': imported_count,
+        'skippedCount': skipped_count,
+        'operator': user_name,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'source': 'ECONEXT_BULK_IMPORT'
+    }
+    send_event_async(TOPIC_INVENTORY_EVENTS, payload, key=str(import_id))
+
+

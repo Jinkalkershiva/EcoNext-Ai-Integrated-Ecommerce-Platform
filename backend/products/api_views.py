@@ -108,13 +108,16 @@ def product_list(request):
     sort_by = request.query_params.get('sort_by', '-created_at')
 
     if age_group:
-        products = products.filter(age_groups__name__iexact=age_group)
+        products = products.filter(Q(age_groups__name__iexact=age_group) | Q(category__name__iexact=age_group))
     if gender_category:
-        products = products.filter(gender_categories__name__iexact=gender_category)
+        products = products.filter(Q(gender_categories__name__iexact=gender_category) | Q(category__name__iexact=gender_category))
     if category:
-        products = products.filter(category__name__iexact=category)
+        if str(category).isdigit():
+            products = products.filter(Q(category_id=int(category)) | Q(category__name__iexact=str(category)))
+        else:
+            products = products.filter(Q(category__name__iexact=category) | Q(age_groups__name__iexact=category) | Q(gender_categories__name__iexact=category))
     if search:
-        products = products.filter(name__icontains=search)
+        products = products.filter(Q(name__icontains=search) | Q(description__icontains=search) | Q(tags__icontains=search))
     if eco_tags:
         products = products.filter(eco_tags__name__in=eco_tags)
     if price_min:

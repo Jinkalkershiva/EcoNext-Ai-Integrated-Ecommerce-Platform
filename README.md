@@ -696,14 +696,45 @@ The operational management portal (`admin-frontend/`) connects to **Spring Boot 
 
 | Operational Role | Permissions Matrix | Primary Responsibilities & Accessible Modules |
 | :--- | :--- | :--- |
-| **`ROLE_ADMIN`** | `ALL_PERMISSIONS` (Full Governance) | Administrator Command Center, Staff Provisioning, Dynamic Role Assignment, Audit Logs, Live DB Switcher |
-| **`INVENTORY_MANAGER`** | `INVENTORY_VIEW`, `INVENTORY_ADJUST` | Warehouse Stock Audits, Low-Stock Thresholds, Inventory Ledger |
-| **`CATALOG_MANAGER`** | `CATALOG_VIEW`, `CATALOG_CREATE`, `CATALOG_EDIT` | Product Catalog, Category Hierarchies, Sustainability Badges |
+| **`ROLE_ADMIN`** | `ALL_PERMISSIONS`, `DATABASE_QUERY_READ`, `BULK_IMPORT_PRODUCTS` | Full Governance, Staff Provisioning, Audit Trail, SQL Console, Bulk Import |
+| **`INVENTORY_MANAGER`** | `INVENTORY_VIEW`, `INVENTORY_ADJUST`, `BULK_IMPORT_PRODUCTS`, `DATA_IMPORT` | Warehouse Stock Audits, Low-Stock Thresholds, Batch SKU Ingestion |
+| **`CATALOG_MANAGER`** | `CATALOG_VIEW`, `CATALOG_CREATE`, `CATALOG_EDIT`, `BULK_IMPORT_PRODUCTS`, `DATA_IMPORT` | Product Catalog, Category Taxonomy, Bulk Import Wizard |
 | **`ORDER_MANAGER`** | `ORDER_VIEW`, `ORDER_STATUS_UPDATE`, `SHIPMENT_DISPATCH` | Order Lifecycle Oversight, Dispatch Scheduling, Cancellation Review |
 | **`ORDER_PROCESSING_STAFF`** | `ORDER_VIEW`, `ORDER_STATUS_UPDATE` | Warehouse Picking, Item Packaging, Status Progression |
-| **`DATA_ANALYST`** | `ANALYTICS_VIEW`, `DATA_EXPORT` | Sales Trends, Conversion Telemetry, Operational Metrics |
-| **`DATA_ENTRY_STAFF`** | `CATALOG_VIEW`, `DATA_IMPORT` | Batch CSV / Excel SKU Ingestion, Catalog Sanitation |
+| **`DATA_ANALYST`** | `ANALYTICS_VIEW`, `DATA_EXPORT`, `DATABASE_QUERY_READ`, `AUDIT_READ` | Sales Trends, Conversion Telemetry, Read-Only SQL Inspection |
+| **`DATA_ENTRY_STAFF`** | `CATALOG_VIEW`, `DATA_IMPORT`, `BULK_IMPORT_PRODUCTS`, `CATALOG_CREATE` | Batch CSV / Excel SKU Ingestion, Catalog Data Entry |
 | **`DELIVERY_STAFF`** | `SHIPMENT_VIEW`, `SHIPMENT_LOCATION_UPDATE` | GPS Route Inspection, Courier Handoffs, Proof-of-Delivery Updates |
+
+---
+
+## 12.1 Administrative Operations
+
+### Bulk Data Import Wizard (`/admin/bulk-import` & `/import`)
+A 5-step guided batch catalog ingestion pipeline supporting `.csv` and `.xlsx` files:
+1. **Upload**: Drag-and-drop file ingestion supporting comma-separated and spreadsheet formats with template download.
+2. **Column Mapping**: Intelligent column alias resolution (`product_name`/`title` $\rightarrow$ Name, `unit_price`/`current_price` $\rightarrow$ Price, `stock_quantity`/`qty` $\rightarrow$ Stock, `eco_score` $\rightarrow$ Sustainability Score).
+3. **Deterministic Validation (Authoritative)**:
+   - **Required Fields**: SKU, Product Name, Price, and Category.
+   - **SKU Integrity**: In-file duplicate checking and database collision rejection.
+   - **Numerical Constraints**: Price $> 0$, Stock $\ge 0$, Sustainability Score $\in [0, 100]$, Carbon Footprint $\ge 0$.
+   - **Taxonomy Validation**: Enforces existing Category and AgeGroup records.
+4. **AI-Assisted Review (Assistive Layer)**:
+   - *Deterministic validation is authoritative. AI is used strictly as an assistive layer for suggestions and ambiguous data review.*
+   - Generates taxonomy recommendations (e.g. `"Kid"` $\rightarrow$ `"Kids"`) and material composition flags.
+   - Requires explicit administrator approval (**`[ Apply Fix ]`**) before updating records.
+5. **Transactional Execution & Summary**:
+   - Executes inside `transaction.atomic()` to prevent partial catalog corruption.
+   - Creates `PriceHistory` tracking rows for newly ingested items.
+   - Emits asynchronous `inventory-events` Kafka notifications (with graceful local degradation).
+   - Generates downloadable CSV error reports for skipped rows and logs `BULK_IMPORT_EXECUTED` in `ActivityLog`.
+
+### Controlled Database SQL Query Console (`/admin/database/query-console` & `/query-console`)
+A read-only SQL inspection console allowing authorized staff (`ROLE_ADMIN`, `DATA_ANALYST`) to inspect database state securely:
+* **Strict Read-Only Whitelist**: Permits only `SELECT`, `SHOW`, `DESCRIBE`, `DESC`, and `EXPLAIN` statements.
+* **Destructive Command Blocklist**: Strictly blocks mutating statements (`DROP`, `TRUNCATE`, `DELETE`, `UPDATE`, `ALTER`, `CREATE`, `INSERT`, `GRANT`, `FLUSH`, etc.).
+* **Multi-Statement Defense**: Prohibits semicolon-separated piggyback statements.
+* **Execution Safety Limits**: Automatically injects `LIMIT 100` if absent, measures query duration in milliseconds, and captures all queries in `ActivityLog` (`DATABASE_SQL_QUERY_EXECUTED`).
+* **Schema Explorer & Export**: Interactive table schema inspector with one-click CSV export and query history buffer.
 
 ---
 
@@ -874,6 +905,20 @@ cd ../frontend && npm install && npm run dev -- --port 5073
      - Post-payment verified order placement PASSED (payment_status=PAID, stock decremented)
      - Idempotency on duplicate callbacks    PASSED (Zero duplicate orders created)
      - Cash on Delivery flow                 PASSED (payment_status=PENDING, ORDER_PLACED)
+ [✓] Bulk Data Import Wizard Suite:          PASSED (Deterministic & AI Pipeline)
+     - Valid CSV Batch Ingestion             PASSED (5/5 products imported transactionally into DB)
+     - Deterministic Rule Validation         PASSED (Missing SKU, negative price/stock, score rejected)
+     - Duplicate SKU Collision Detection     PASSED (In-file and database duplicate SKU blocked)
+     - Assistive AI Taxonomy Normalization   PASSED (Category 'Kid' -> 'Kids' suggestion with [Apply Fix])
+     - XLSX Spreadsheet Ingestion            PASSED (Multi-field Excel catalog parsed and imported)
+     - Downloadable Error Reporting          PASSED (CSV error report generated for skipped records)
+     - Kafka Event Notification              PASSED (Emitted to inventory-events topic)
+ [✓] Controlled SQL Query Console Suite:     PASSED (Read-Only RBAC Protected)
+     - Safe SELECT / SHOW Execution          PASSED (Query results returned with ms execution latency)
+     - Destructive SQL Defense Blocklist     PASSED (DROP, DELETE, UPDATE, TRUNCATE blocked)
+     - Multi-Statement Piggyback Defense     PASSED (Semicolon-separated injection blocked)
+     - Granular RBAC Permission Checking     PASSED (HTTP 403 Forbidden for non-staff customers)
+     - Forensic Audit Trail Persistence      PASSED (ActivityLog entries captured for all executions)
  [✓] Frontend Production Builds:             100% Clean Compilation
      - Admin Frontend (React 19 / Vite)      PASSED (Compiled cleanly with 0 errors)
      - Customer Storefront (React 19 / Vite) PASSED (Compiled cleanly with 0 errors)

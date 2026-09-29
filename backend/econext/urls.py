@@ -24,6 +24,8 @@ from personalization.views import UserPreferenceViewSet
 from kids_products.views import KidsProductViewSet
 from copilot.views import ChatAPIView
 from products import admin_views
+from products import database_query_views
+from products import bulk_import_views
 from accounts import auth_views
 from shop_cart import payment_views
 
@@ -119,6 +121,20 @@ urlpatterns = [
     path('api/admin/roles', auth_views.admin_roles_list, name='admin_roles_list_noslash'),
     path('api/admin/permissions/', auth_views.admin_permissions_list, name='admin_permissions_list'),
     path('api/admin/permissions', auth_views.admin_permissions_list, name='admin_permissions_list_noslash'),
+
+    # Controlled Database SQL Query Console (Read-Only RBAC Protected)
+    path('api/admin/database/query/', database_query_views.execute_sql_query, name='admin_database_query'),
+    path('api/admin/database/query', database_query_views.execute_sql_query, name='admin_database_query_noslash'),
+    path('api/admin/database/query/history/', database_query_views.get_query_history, name='admin_database_query_history'),
+    path('api/admin/database/query/history', database_query_views.get_query_history, name='admin_database_query_history_noslash'),
+    path('api/admin/database/schema/', database_query_views.get_database_schema, name='admin_database_schema'),
+    path('api/admin/database/schema', database_query_views.get_database_schema, name='admin_database_schema_noslash'),
+
+    # Bulk Product Import Wizard APIs (Validation, AI review & Execution)
+    path('api/admin/products/import/validate/', bulk_import_views.validate_bulk_import, name='admin_import_validate'),
+    path('api/admin/products/import/validate', bulk_import_views.validate_bulk_import, name='admin_import_validate_noslash'),
+    path('api/admin/products/import/execute/', bulk_import_views.execute_bulk_import, name='admin_import_execute'),
+    path('api/admin/products/import/execute', bulk_import_views.execute_bulk_import, name='admin_import_execute_noslash'),
 ]
 
 # Serve uploaded media (visual-search images) from the dev server. In production

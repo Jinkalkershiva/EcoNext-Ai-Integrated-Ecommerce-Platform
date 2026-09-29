@@ -24,7 +24,7 @@ public class PaymentController {
 
     private final PaymentService paymentService;
 
-    @PostMapping("/create-order")
+    @PostMapping({"/create-order", "/create-order/"})
     public ResponseEntity<ApiResponse<PaymentResponse>> createOrder(
             @Valid @RequestBody CreatePaymentRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -34,7 +34,7 @@ public class PaymentController {
                 .body(ApiResponse.success("Payment order initialized", response));
     }
 
-    @PostMapping("/verify")
+    @PostMapping({"/verify", "/verify/"})
     public ResponseEntity<ApiResponse<PaymentResponse>> verifyPayment(
             @Valid @RequestBody VerifyPaymentRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -43,7 +43,7 @@ public class PaymentController {
         return ResponseEntity.ok(ApiResponse.success("Payment verified successfully", response));
     }
 
-    @GetMapping("/order/{orderId}")
+    @GetMapping({"/order/{orderId}", "/order/{orderId}/"})
     public ResponseEntity<ApiResponse<PaymentResponse>> getPaymentByOrderId(
             @PathVariable("orderId") Long orderId,
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -51,14 +51,14 @@ public class PaymentController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    @GetMapping("/my-payments")
+    @GetMapping({"/my-payments", "/my-payments/"})
     public ResponseEntity<ApiResponse<List<PaymentResponse>>> getMyPayments(
             @AuthenticationPrincipal UserPrincipal principal) {
         List<PaymentResponse> list = paymentService.getUserPayments(principal.getId());
         return ResponseEntity.ok(ApiResponse.success("Payments retrieved", list));
     }
 
-    @GetMapping("/all")
+    @GetMapping({"/all", "/all/"})
     public ResponseEntity<ApiResponse<List<PaymentResponse>>> getAllPaymentsAdmin(
             @AuthenticationPrincipal UserPrincipal principal) {
         log.info("Admin {} fetching all system transactions", principal.getUsername());

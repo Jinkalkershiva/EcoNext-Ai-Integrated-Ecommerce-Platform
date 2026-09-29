@@ -53,10 +53,6 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
-    # All nested relations are read_only: this serializer is only ever used for
-    # output, and marking them explicitly stops DRF from demanding nested write
-    # payloads. Callers should use product_queryset() in products/api_views.py,
-    # which prefetches exactly these eight relations.
     category = CategorySerializer(read_only=True)
     subcategory = SubCategorySerializer(read_only=True)
     age_groups = AgeGroupSerializer(many=True, read_only=True)
@@ -66,14 +62,48 @@ class ProductSerializer(serializers.ModelSerializer):
     season = SeasonSerializer(read_only=True)
     occasion = OccasionSerializer(read_only=True)
 
+    # Aliases for Admin Panel & Microservice DTO compatibility
+    price = serializers.DecimalField(source='current_price', max_digits=10, decimal_places=2, read_only=True)
+    stockQuantity = serializers.IntegerField(source='stock', read_only=True)
+    sku = serializers.SerializerMethodField()
+    categoryId = serializers.SerializerMethodField()
+    categoryName = serializers.SerializerMethodField()
+    sustainabilityScore = serializers.FloatField(source='sustainability_score', read_only=True)
+    imageUrl = serializers.CharField(source='image_url', read_only=True)
+    status = serializers.SerializerMethodField()
+
     class Meta:
         model = Product
         fields = [
             'id', 'name', 'description', 'category', 'subcategory', 'current_price', 
-            'image_url', 'stock', 'tags', 'created_at', 'age_groups', 
+            'price', 'stock', 'stockQuantity', 'sku', 'categoryId', 'categoryName',
+            'image_url', 'imageUrl', 'tags', 'status', 'created_at', 'age_groups', 
             'gender_categories', 'eco_tags', 'skin_or_body_fit', 'season', 
-            'occasion', 'popularity_score', 'sustainability_score'
+            'occasion', 'popularity_score', 'sustainability_score', 'sustainabilityScore'
         ]
+
+    def get_sku(self, obj):
+        if isinstance(obj.tags, list):
+            for t in obj.tags:
+                if isinstance(t, str):
+                    if t.upper().startswith('SKU:'):
+                        return t.split(':', 1)[1].strip()
+                    elif t.upper().startswith('ECO-'):
+                        return t.strip()
+        return f"ECO-PROD-{obj.id:04d}"
+
+    def get_categoryId(self, obj):
+        return obj.category_id if obj.category else None
+
+    def get_categoryName(self, obj):
+        return obj.category.name if obj.category else 'Uncategorized'
+
+    def get_status(self, obj):
+        if obj.stock > 10:
+            return 'ACTIVE'
+        elif obj.stock > 0:
+            return 'LOW_STOCK'
+        return 'OUT_OF_STOCK'
 
 
 class PriceHistorySerializer(serializers.ModelSerializer):

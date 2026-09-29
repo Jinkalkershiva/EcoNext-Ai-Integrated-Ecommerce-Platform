@@ -138,7 +138,7 @@ def admin_dashboard_stats(request):
 def admin_products_list_create(request):
     """
     GET: List all products with filtering, search, stock levels.
-    POST: Create a new product.
+    POST: Create a new product with flexible DTO field mapping and taxonomy linking.
     """
     if request.method == 'GET':
         qs = Product.objects.select_related('category', 'subcategory', 'season', 'occasion').prefetch_related('eco_tags', 'age_groups', 'gender_categories').all()
@@ -147,9 +147,12 @@ def admin_products_list_create(request):
         if search:
             qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
             
-        category_id = request.GET.get('category')
-        if category_id:
-            qs = qs.filter(category_id=category_id)
+        category_param = request.GET.get('category') or request.GET.get('categoryId')
+        if category_param:
+            if str(category_param).isdigit():
+                qs = qs.filter(Q(category_id=int(category_param)) | Q(category__name__iexact=str(category_param)))
+            else:
+                qs = qs.filter(category__name__iexact=str(category_param))
             
         stock_status = request.GET.get('stock_status')
         if stock_status == 'low':
@@ -161,27 +164,58 @@ def admin_products_list_create(request):
         return Response({
             'status': 'success',
             'count': qs.count(),
-            'products': serializer.data
+            'products': serializer.data,
+            'data': serializer.data
         })
         
     elif request.method == 'POST':
         data = request.data
         try:
-            category_id = data.get('category')
-            category = Category.objects.get(id=category_id) if category_id else None
+            # Resolve Category
+            category = None
+            cat_val = data.get('category') or data.get('categoryId') or data.get('category_id') or data.get('categoryName')
+            if cat_val is not None:
+                if isinstance(cat_val, int) or (isinstance(cat_val, str) and cat_val.isdigit()):
+                    category = Category.objects.filter(id=int(cat_val)).first()
+                if not category and isinstance(cat_val, str) and cat_val.strip():
+                    category = Category.objects.filter(name__iexact=cat_val.strip()).first()
+                    if not category:
+                        category = Category.objects.create(name=cat_val.strip(), description=f"{cat_val.strip()} Category")
+
             if not category:
-                return Response({'status': 'error', 'message': 'Valid category is required'}, status=status.HTTP_400_BAD_REQUEST)
-                
+                # Default fallback or first category
+                category = Category.objects.first()
+                if not category:
+                    category = Category.objects.create(name="General", description="General Category")
+
+            raw_price = data.get('price') or data.get('current_price') or data.get('currentPrice') or '0.00'
+            raw_stock = data.get('stockQuantity') if data.get('stockQuantity') is not None else (data.get('stock') if data.get('stock') is not None else 10)
+            raw_score = data.get('sustainabilityScore') or data.get('sustainability_score') or 85.0
+            raw_image = data.get('image_url') or data.get('imageUrl') or ''
+            raw_sku = data.get('sku', '').strip()
+
+            # Process tags
+            raw_tags = data.get('tags', ['sustainable', 'eco-friendly'])
+            if isinstance(raw_tags, str):
+                tags_list = [t.strip() for t in raw_tags.split(',') if t.strip()]
+            elif isinstance(raw_tags, list):
+                tags_list = [str(t).strip() for t in raw_tags if str(t).strip()]
+            else:
+                tags_list = ['sustainable', 'eco-friendly']
+
+            if raw_sku and f"SKU:{raw_sku}" not in tags_list and raw_sku not in tags_list:
+                tags_list.insert(0, f"SKU:{raw_sku}")
+
             product = Product.objects.create(
                 name=data.get('name', '').strip(),
                 description=data.get('description', '').strip(),
                 category=category,
-                current_price=Decimal(str(data.get('current_price', '0.00'))),
-                image_url=data.get('image_url', ''),
-                stock=int(data.get('stock', 10)),
-                sustainability_score=float(data.get('sustainability_score', 8.5)),
+                current_price=Decimal(str(raw_price)),
+                image_url=raw_image,
+                stock=int(raw_stock),
+                sustainability_score=float(raw_score),
                 popularity_score=float(data.get('popularity_score', 5.0)),
-                tags=data.get('tags', ['sustainable', 'eco-friendly'])
+                tags=tags_list
             )
             
             # Link PriceHistory initial entry
@@ -191,6 +225,29 @@ def admin_products_list_create(request):
                 date=timezone.now().date()
             )
             
+            # Associate Taxonomies (AgeGroup, GenderCategory, EcoTag)
+            cat_name_lower = category.name.lower()
+            prod_name_lower = product.name.lower()
+
+            if 'kid' in cat_name_lower or 'kid' in prod_name_lower or any('kid' in str(t).lower() for t in tags_list):
+                kids_group, _ = AgeGroup.objects.get_or_create(name='Kids')
+                product.age_groups.add(kids_group)
+
+            if 'teen' in cat_name_lower or 'teen' in prod_name_lower or any('teen' in str(t).lower() for t in tags_list):
+                teens_group, _ = AgeGroup.objects.get_or_create(name='Teens')
+                product.age_groups.add(teens_group)
+
+            if 'women' in cat_name_lower or 'women' in prod_name_lower or any('women' in str(t).lower() for t in tags_list):
+                women_cat, _ = GenderCategory.objects.get_or_create(name='Women')
+                product.gender_categories.add(women_cat)
+            elif 'men' in cat_name_lower or 'men' in prod_name_lower or any('men' in str(t).lower() for t in tags_list):
+                men_cat, _ = GenderCategory.objects.get_or_create(name='Men')
+                product.gender_categories.add(men_cat)
+
+            if 'unisex' in cat_name_lower or 'unisex' in prod_name_lower or any('unisex' in str(t).lower() for t in tags_list):
+                unisex_cat, _ = GenderCategory.objects.get_or_create(name='Unisex')
+                product.gender_categories.add(unisex_cat)
+
             if 'eco_tags' in data and isinstance(data['eco_tags'], list):
                 product.eco_tags.set(data['eco_tags'])
                 
@@ -203,7 +260,8 @@ def admin_products_list_create(request):
             return Response({
                 'status': 'success',
                 'message': 'Product created successfully',
-                'product': ProductSerializer(product).data
+                'product': ProductSerializer(product).data,
+                'data': ProductSerializer(product).data
             }, status=status.HTTP_201_CREATED)
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -221,7 +279,7 @@ def admin_product_detail(request, pk):
         return Response({'status': 'error', 'message': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
         
     if request.method == 'GET':
-        return Response({'status': 'success', 'product': ProductSerializer(product).data})
+        return Response({'status': 'success', 'product': ProductSerializer(product).data, 'data': ProductSerializer(product).data})
         
     elif request.method in ['PUT', 'PATCH']:
         data = request.data
@@ -229,21 +287,41 @@ def admin_product_detail(request, pk):
             product.name = data['name']
         if 'description' in data:
             product.description = data['description']
-        if 'category' in data:
-            product.category_id = data['category']
-        if 'stock' in data:
-            product.stock = int(data['stock'])
-        if 'image_url' in data:
-            product.image_url = data['image_url']
-        if 'sustainability_score' in data:
-            product.sustainability_score = float(data['sustainability_score'])
+        
+        cat_val = data.get('category') or data.get('categoryId') or data.get('category_id')
+        if cat_val is not None:
+            if isinstance(cat_val, int) or (isinstance(cat_val, str) and cat_val.isdigit()):
+                cat_obj = Category.objects.filter(id=int(cat_val)).first()
+                if cat_obj:
+                    product.category = cat_obj
+            elif isinstance(cat_val, str) and cat_val.strip():
+                cat_obj, _ = Category.objects.get_or_create(name=cat_val.strip())
+                product.category = cat_obj
+
+        if 'stock' in data or 'stockQuantity' in data:
+            product.stock = int(data.get('stock') if data.get('stock') is not None else data.get('stockQuantity', 0))
+        if 'image_url' in data or 'imageUrl' in data:
+            product.image_url = data.get('image_url') or data.get('imageUrl')
+        if 'sustainability_score' in data or 'sustainabilityScore' in data:
+            product.sustainability_score = float(data.get('sustainability_score') or data.get('sustainabilityScore', 80))
         if 'popularity_score' in data:
             product.popularity_score = float(data['popularity_score'])
+
         if 'tags' in data:
-            product.tags = data['tags']
+            raw_tags = data['tags']
+            if isinstance(raw_tags, str):
+                product.tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
+            elif isinstance(raw_tags, list):
+                product.tags = [str(t).strip() for t in raw_tags if str(t).strip()]
+
+        raw_sku = data.get('sku', '').strip()
+        if raw_sku:
+            if isinstance(product.tags, list):
+                if f"SKU:{raw_sku}" not in product.tags and raw_sku not in product.tags:
+                    product.tags.insert(0, f"SKU:{raw_sku}")
             
-        if 'current_price' in data:
-            new_price = Decimal(str(data['current_price']))
+        if 'current_price' in data or 'price' in data or 'currentPrice' in data:
+            new_price = Decimal(str(data.get('price') or data.get('current_price') or data.get('currentPrice')))
             if new_price != product.current_price:
                 product.current_price = new_price
                 PriceHistory.objects.update_or_create(
@@ -256,7 +334,20 @@ def admin_product_detail(request, pk):
             product.eco_tags.set(data['eco_tags'])
             
         product.save()
-        return Response({'status': 'success', 'message': 'Product updated', 'product': ProductSerializer(product).data})
+
+        # Taxonomy sync
+        cat_name_lower = product.category.name.lower() if product.category else ''
+        prod_name_lower = product.name.lower()
+        tags_str = ' '.join(product.tags) if isinstance(product.tags, list) else ''
+
+        if 'kid' in cat_name_lower or 'kid' in prod_name_lower or 'kid' in tags_str.lower():
+            kids_group, _ = AgeGroup.objects.get_or_create(name='Kids')
+            product.age_groups.add(kids_group)
+        if 'teen' in cat_name_lower or 'teen' in prod_name_lower or 'teen' in tags_str.lower():
+            teens_group, _ = AgeGroup.objects.get_or_create(name='Teens')
+            product.age_groups.add(teens_group)
+
+        return Response({'status': 'success', 'message': 'Product updated', 'product': ProductSerializer(product).data, 'data': ProductSerializer(product).data})
         
     elif request.method == 'DELETE':
         product_name = product.name

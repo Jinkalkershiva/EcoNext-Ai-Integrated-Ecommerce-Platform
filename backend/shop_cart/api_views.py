@@ -311,6 +311,19 @@ def create_order(request):
         cart = get_or_create_cart(request.user)
         items = list(cart.items.select_related('product').select_for_update())
 
+        # If cart in DB was empty, check if items were provided in checkout payload
+        if not items:
+            raw_items = request.data.get('items') or request.data.get('cart_items') or (shipping.get('items') if isinstance(shipping, dict) else None)
+            if raw_items and isinstance(raw_items, list):
+                for raw_it in raw_items:
+                    pid = raw_it.get('product_id') or raw_it.get('productId') or raw_it.get('id')
+                    qty = int(raw_it.get('quantity') or raw_it.get('qty') or 1)
+                    if pid:
+                        prod = Product.objects.filter(id=pid).first()
+                        if prod:
+                            CartItem.objects.create(cart=cart, product=prod, quantity=qty)
+                items = list(cart.items.select_related('product').select_for_update())
+
         if not items:
             return bad_request('Your cart is empty.')
 

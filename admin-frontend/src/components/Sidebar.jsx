@@ -134,6 +134,12 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
       visible: isAdmin() || hasPermission('AUDIT_VIEW')
     },
     {
+      label: 'SQL Query Console',
+      path: '/query-console',
+      icon: Database,
+      visible: isAdmin() || hasPermission('AUDIT_VIEW') || hasPermission('DATABASE_QUERY_READ')
+    },
+    {
       label: 'Settings & Theme',
       path: '/settings',
       icon: Settings,

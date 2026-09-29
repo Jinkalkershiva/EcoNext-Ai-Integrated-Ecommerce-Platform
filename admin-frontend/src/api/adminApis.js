@@ -113,3 +113,76 @@ export const rolesApi = {
     return res.data || [];
   }
 };
+
+export const databaseQueryApi = {
+  executeQuery: async (query, database = 'econext') => {
+    try {
+      const res = await apiRequest('/admin/database/query/', {
+        method: 'POST',
+        body: { query, database }
+      });
+      return res.data || res;
+    } catch (err) {
+      const res = await apiRequest('/admin/database/query', {
+        method: 'POST',
+        body: { query, database }
+      });
+      return res.data || res;
+    }
+  },
+
+  getQueryHistory: async () => {
+    try {
+      const res = await apiRequest('/admin/database/query/history/');
+      return res.history || res.data || [];
+    } catch {
+      const res = await apiRequest('/admin/database/query/history');
+      return res.history || res.data || [];
+    }
+  },
+
+  getDatabaseSchema: async () => {
+    try {
+      const res = await apiRequest('/admin/database/schema/');
+      return res.schema || res.data || {};
+    } catch {
+      const res = await apiRequest('/admin/database/schema');
+      return res.schema || res.data || {};
+    }
+  }
+};
+
+export const bulkImportApi = {
+  validateProducts: async (rows, checkDuplicates = true) => {
+    try {
+      const res = await apiRequest('/admin/products/import/validate/', {
+        method: 'POST',
+        body: { rows, checkDuplicates }
+      });
+      return res.data || res;
+    } catch {
+      const res = await apiRequest('/admin/products/import/validate', {
+        method: 'POST',
+        body: { rows, checkDuplicates }
+      });
+      return res.data || res;
+    }
+  },
+
+  executeImport: async (rows, filename = 'bulk_products_import.csv') => {
+    try {
+      const res = await apiRequest('/admin/products/import/execute/', {
+        method: 'POST',
+        body: { rows, filename }
+      });
+      return res.data || res;
+    } catch {
+      const res = await apiRequest('/admin/products/import/execute', {
+        method: 'POST',
+        body: { rows, filename }
+      });
+      return res.data || res;
+    }
+  }
+};
+

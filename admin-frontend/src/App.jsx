@@ -20,6 +20,7 @@ import { PaymentsPage } from './pages/PaymentsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ImportWizardPage } from './pages/ImportWizardPage';
+import { QueryConsolePage } from './pages/QueryConsolePage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
 import LiveSourcesPage from './pages/LiveSourcesPage';
@@ -162,6 +163,30 @@ export const App = () => {
                 element={
                   <ProtectedRoute requiredPermission="IMPORT_RUN">
                     <ImportWizardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="bulk-import"
+                element={
+                  <ProtectedRoute requiredPermission="IMPORT_RUN">
+                    <ImportWizardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="query-console"
+                element={
+                  <ProtectedRoute requiredPermission="AUDIT_VIEW">
+                    <QueryConsolePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="database/query-console"
+                element={
+                  <ProtectedRoute requiredPermission="AUDIT_VIEW">
+                    <QueryConsolePage />
                   </ProtectedRoute>
                 }
               />

@@ -425,9 +425,9 @@ SYSTEM_ROLES_CATALOG = [
             'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'CATALOG_DELETE',
             'INVENTORY_CREATE', 'INVENTORY_READ', 'INVENTORY_UPDATE', 'INVENTORY_ADJUST',
             'ORDER_READ', 'ORDER_UPDATE', 'ORDER_PROCESS', 'ORDER_STATUS_UPDATE',
-            'DATA_IMPORT', 'DATA_EXPORT', 'DATA_ANALYSIS',
+            'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS', 'DATA_EXPORT', 'DATA_ANALYSIS',
             'STAFF_CREATE', 'STAFF_READ', 'STAFF_UPDATE', 'STAFF_DISABLE',
-            'AUDIT_READ'
+            'AUDIT_READ', 'DATABASE_QUERY_READ'
         ]
     },
     {
@@ -438,7 +438,7 @@ SYSTEM_ROLES_CATALOG = [
         'isSystemRole': True,
         'permissions': [
             'INVENTORY_CREATE', 'INVENTORY_READ', 'INVENTORY_UPDATE', 'INVENTORY_ADJUST',
-            'CATALOG_READ', 'DATA_IMPORT', 'DATA_EXPORT'
+            'CATALOG_READ', 'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS', 'DATA_EXPORT'
         ]
     },
     {
@@ -449,7 +449,7 @@ SYSTEM_ROLES_CATALOG = [
         'isSystemRole': True,
         'permissions': [
             'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'CATALOG_DELETE',
-            'INVENTORY_READ', 'DATA_IMPORT', 'DATA_EXPORT'
+            'INVENTORY_READ', 'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS', 'DATA_EXPORT'
         ]
     },
     {
@@ -480,7 +480,7 @@ SYSTEM_ROLES_CATALOG = [
         'description': 'Accesses reports, operational analytics, sales aggregations, and data exports',
         'isSystemRole': True,
         'permissions': [
-            'DATA_ANALYSIS', 'DATA_EXPORT', 'CATALOG_READ', 'INVENTORY_READ', 'ORDER_READ', 'AUDIT_READ'
+            'DATA_ANALYSIS', 'DATA_EXPORT', 'CATALOG_READ', 'INVENTORY_READ', 'ORDER_READ', 'AUDIT_READ', 'DATABASE_QUERY_READ'
         ]
     },
     {
@@ -490,7 +490,7 @@ SYSTEM_ROLES_CATALOG = [
         'description': 'Performs manual product creation and batch CSV/Excel data entry',
         'isSystemRole': True,
         'permissions': [
-            'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'DATA_IMPORT'
+            'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS'
         ]
     },
     {

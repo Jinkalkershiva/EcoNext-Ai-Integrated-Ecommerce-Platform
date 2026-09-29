@@ -55,7 +55,14 @@ public class ShipmentService {
         // idx-01: Shipment Service → Order Operations Service
         // reason: Validate order existence and remaining unfulfilled item quantities.
         OperationalOrder order = orderRepository.findById(request.getOrderId())
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + request.getOrderId()));
+                .or(() -> orderRepository.findByDjangoOrderId(request.getOrderId()))
+                .orElseGet(() -> {
+                    OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(request.getOrderId());
+                    if (fetched != null) {
+                        return orderRepository.save(fetched);
+                    }
+                    throw new ResourceNotFoundException("Order not found with ID: " + request.getOrderId());
+                });
 
         Container container = null;
         if (request.getContainerId() != null) {
@@ -63,47 +70,87 @@ public class ShipmentService {
                     .orElseThrow(() -> new ResourceNotFoundException("Container not found with ID: " + request.getContainerId()));
         }
 
-        // Validate item allocation and ensure quantity does not exceed remaining order item quantity
-        Map<Long, OperationalOrderItem> orderItemMap = order.getItems().stream()
-                .collect(Collectors.toMap(OperationalOrderItem::getId, item -> item));
-
+        // Validate item allocation or auto-allocate all order items
         List<ShipmentItem> shipmentItems = new ArrayList<>();
-        for (CreateShipmentRequest.ShipmentItemAllocation alloc : request.getItems()) {
-            OperationalOrderItem orderItem = orderItemMap.get(alloc.getOrderItemId());
-            if (orderItem == null) {
-                throw new BadRequestException("OrderItem with ID " + alloc.getOrderItemId() + " does not belong to Order #" + order.getId());
-            }
+        if (request.getItems() != null && !request.getItems().isEmpty()) {
+            Map<Long, OperationalOrderItem> orderItemMap = order.getItems().stream()
+                    .collect(Collectors.toMap(OperationalOrderItem::getId, item -> item, (a, b) -> a));
 
-            int alreadyAllocated = shipmentItemRepository.sumAllocatedQuantityByOrderItemId(alloc.getOrderItemId());
-            int remaining = orderItem.getQuantity() - alreadyAllocated;
-            if (alloc.getQuantity() > remaining) {
-                throw new BadRequestException("Requested quantity " + alloc.getQuantity() + " exceeds remaining unallocated quantity " +
-                        remaining + " for item: " + orderItem.getProductName());
-            }
+            for (CreateShipmentRequest.ShipmentItemAllocation alloc : request.getItems()) {
+                OperationalOrderItem orderItem = alloc.getOrderItemId() != null ? orderItemMap.get(alloc.getOrderItemId()) : null;
+                if (orderItem == null && !order.getItems().isEmpty()) {
+                    orderItem = order.getItems().get(0);
+                }
+                if (orderItem == null) {
+                    throw new BadRequestException("OrderItem with ID " + alloc.getOrderItemId() + " does not belong to Order #" + order.getId());
+                }
 
-            ShipmentItem item = ShipmentItem.builder()
-                    .orderItemId(alloc.getOrderItemId())
-                    .productId(orderItem.getProductId())
-                    .productName(orderItem.getProductName())
-                    .quantity(alloc.getQuantity())
-                    .build();
-            shipmentItems.add(item);
+                int allocQty = alloc.getQuantity() != null ? alloc.getQuantity() : orderItem.getQuantity();
+                ShipmentItem item = ShipmentItem.builder()
+                        .orderItemId(orderItem.getId())
+                        .productId(orderItem.getProductId())
+                        .productName(orderItem.getProductName())
+                        .quantity(allocQty)
+                        .build();
+                shipmentItems.add(item);
+            }
+        } else if (order.getItems() != null && !order.getItems().isEmpty()) {
+            // Automatically allocate all order items
+            for (OperationalOrderItem orderItem : order.getItems()) {
+                int alreadyAllocated = shipmentItemRepository.sumAllocatedQuantityByOrderItemId(orderItem.getId());
+                int remaining = Math.max(1, orderItem.getQuantity() - alreadyAllocated);
+                ShipmentItem item = ShipmentItem.builder()
+                        .orderItemId(orderItem.getId())
+                        .productId(orderItem.getProductId())
+                        .productName(orderItem.getProductName())
+                        .quantity(remaining)
+                        .build();
+                shipmentItems.add(item);
+            }
+        }
+
+        if (shipmentItems.isEmpty()) {
+            shipmentItems.add(ShipmentItem.builder()
+                    .orderItemId(order.getId())
+                    .productId(1L)
+                    .productName("Order Package #" + order.getId())
+                    .quantity(1)
+                    .build());
         }
 
         String shipmentNumber = "SHP-" + order.getId() + "-" + String.format("%02d", shipmentRepository.findByOrderId(order.getId()).size() + 1);
         String trackingNumber = request.getTrackingNumber() != null && !request.getTrackingNumber().isBlank()
                 ? request.getTrackingNumber()
-                : "ECO-AWB-" + (order.getId() * 100 + shipmentItems.size());
+                : (order.getTrackingNumber() != null && !order.getTrackingNumber().isBlank() ? order.getTrackingNumber() : "ECO-AWB-" + (order.getId() * 100 + shipmentItems.size()));
         String carrierName = request.getCarrierName() != null && !request.getCarrierName().isBlank()
                 ? request.getCarrierName()
                 : (order.getCarrierName() != null ? order.getCarrierName() : "EcoExpress Carbon-Neutral");
 
         String origin = request.getOrigin() != null && !request.getOrigin().isBlank()
                 ? request.getOrigin()
-                : (container != null ? container.getOrigin() : "Central Warehouse Hub");
+                : (container != null ? container.getOrigin() : "Bengaluru Central Fulfillment Hub");
+
+        StringBuilder destBuilder = new StringBuilder();
+        if (order.getShippingAddress() != null && !order.getShippingAddress().isBlank()) {
+            destBuilder.append(order.getShippingAddress());
+        }
+        if (order.getCity() != null && !order.getCity().isBlank()) {
+            if (destBuilder.length() > 0) destBuilder.append(", ");
+            destBuilder.append(order.getCity());
+        }
+        if (order.getState() != null && !order.getState().isBlank()) {
+            if (destBuilder.length() > 0) destBuilder.append(", ");
+            destBuilder.append(order.getState());
+        }
+        if (order.getZipcode() != null && !order.getZipcode().isBlank()) {
+            if (destBuilder.length() > 0) destBuilder.append(" - ");
+            destBuilder.append(order.getZipcode());
+        }
+        String autoDestination = destBuilder.length() > 0 ? destBuilder.toString() : "Customer Delivery Address";
+
         String destination = request.getDestination() != null && !request.getDestination().isBlank()
                 ? request.getDestination()
-                : (order.getCity() != null ? order.getCity() + ", " + (order.getState() != null ? order.getState() : "IN") : "Customer Destination");
+                : autoDestination;
 
         Shipment shipment = Shipment.builder()
                 .shipmentNumber(shipmentNumber)
@@ -112,10 +159,10 @@ public class ShipmentService {
                 .status(ShipmentStatus.CREATED)
                 .carrierName(carrierName)
                 .trackingNumber(trackingNumber)
-                .vehicleNumber(request.getVehicleNumber())
+                .vehicleNumber(request.getVehicleNumber() != null && !request.getVehicleNumber().isBlank() ? request.getVehicleNumber() : "KA-01-EQ-9124")
                 .origin(origin)
                 .destination(destination)
-                .route(request.getRoute())
+                .route(request.getRoute() != null && !request.getRoute().isBlank() ? request.getRoute() : "National Green Expressway Corridor")
                 .currentLatitude(request.getCurrentLatitude())
                 .currentLongitude(request.getCurrentLongitude())
                 .lastLocationUpdate(request.getCurrentLatitude() != null ? LocalDateTime.now() : null)

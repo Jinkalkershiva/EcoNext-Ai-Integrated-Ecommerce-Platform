@@ -18,12 +18,16 @@ import {
   X,
   Plus,
   Box,
-  Share2,
   Compass,
   ArrowRight,
   ShieldCheck,
   Check,
-  Activity
+  Activity,
+  ChevronRight,
+  ExternalLink,
+  Info,
+  Map,
+  RotateCw
 } from 'lucide-react';
 import { fulfillmentApi, orderOpsApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
@@ -45,45 +49,32 @@ const SHIPMENT_STATUSES = [
   'CANCELLED'
 ];
 
-const CONTAINER_STATUSES = [
-  'ALL',
-  'CREATED',
-  'PACKED',
-  'DISPATCHED',
-  'IN_TRANSIT',
-  'ARRIVED_AT_HUB',
-  'CLOSED'
-];
-
-const ALLOWED_SHIPMENT_TRANSITIONS = {
-  CREATED: ['PACKED', 'CANCELLED'],
-  PACKED: ['DISPATCHED', 'CANCELLED'],
-  DISPATCHED: ['IN_TRANSIT', 'CANCELLED'],
-  IN_TRANSIT: ['ARRIVED_AT_HUB', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY', 'CANCELLED'],
-  ARRIVED_AT_HUB: ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'CANCELLED'],
-  OUT_FOR_DELIVERY: ['DELIVERED', 'FAILED_DELIVERY', 'CANCELLED'],
-  FAILED_DELIVERY: ['OUT_FOR_DELIVERY', 'RETURNED', 'CANCELLED'],
-  DELIVERED: [],
-  CANCELLED: [],
-  RETURNED: []
-};
-
-const ALLOWED_CONTAINER_TRANSITIONS = {
-  CREATED: ['PACKED', 'CLOSED'],
-  PACKED: ['DISPATCHED', 'CLOSED'],
-  DISPATCHED: ['IN_TRANSIT', 'CLOSED'],
-  IN_TRANSIT: ['ARRIVED_AT_HUB', 'CLOSED'],
-  ARRIVED_AT_HUB: ['IN_TRANSIT', 'CLOSED'],
-  CLOSED: []
-};
-
-const CARRIERS = [
+const CARRIER_OPTIONS = [
   'EcoExpress Carbon-Neutral (Default)',
   'BlueDart Express Surface',
   'Delhivery Logistics',
   'Shadowfax Hyperlocal',
   'DTDC Express'
 ];
+
+// Explicit forward state transitions graph
+const ALLOWED_SHIPMENT_TRANSITIONS = {
+  CREATED: [{ next: 'PACKED', label: 'Mark as Packed', action: 'Confirm Package Ready' }],
+  PACKED: [{ next: 'DISPATCHED', label: 'Dispatch Shipment', action: 'Leave Fulfillment Hub' }],
+  DISPATCHED: [{ next: 'IN_TRANSIT', label: 'Start / Confirm In-Transit', action: 'Hand to Carrier Linehaul' }],
+  IN_TRANSIT: [
+    { next: 'ARRIVED_AT_HUB', label: 'Arrived at Destination Hub', action: 'Inland Checkpoint Received' },
+    { next: 'OUT_FOR_DELIVERY', label: 'Send Out for Delivery', action: 'Hand to Last-Mile Courier' }
+  ],
+  ARRIVED_AT_HUB: [{ next: 'OUT_FOR_DELIVERY', label: 'Send Out for Delivery', action: 'Last-Mile Executive Dispatched' }],
+  OUT_FOR_DELIVERY: [
+    { next: 'DELIVERED', label: 'Mark Delivered', action: 'Customer Delivery Confirmed' },
+    { next: 'FAILED_DELIVERY', label: 'Report Delivery Exception', action: 'Customer Unavailable / Reschedule' }
+  ],
+  FAILED_DELIVERY: [{ next: 'OUT_FOR_DELIVERY', label: 'Re-attempt Delivery', action: 'Next Day Courier Delivery' }],
+  DELIVERED: [],
+  CANCELLED: []
+};
 
 export const FulfillmentPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -92,12 +83,12 @@ export const FulfillmentPage = () => {
   const { hasPermission, isAdmin } = useAuth();
   const canUpdate = isAdmin() || hasPermission('ORDER_STATUS_UPDATE') || hasPermission('ORDER_PROCESS');
 
-  const [activeTab, setActiveTab] = useState('shipments'); // 'shipments' | 'containers'
+  const [activeTab, setActiveTab] = useState('shipments'); // 'shipments' | 'awaiting' | 'containers'
   const [shipments, setShipments] = useState([]);
+  const [ordersAwaiting, setOrdersAwaiting] = useState([]);
   const [containers, setContainers] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState(initialOrderId ? `ORD-${initialOrderId}` : '');
-  const [orderIdFilter, setOrderIdFilter] = useState(initialOrderId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -106,51 +97,41 @@ export const FulfillmentPage = () => {
   const [wsConnected, setWsConnected] = useState(false);
   const stompClientRef = useRef(null);
 
-  // Modals & Active Selections
+  // Modals
   const [selectedShipment, setSelectedShipment] = useState(null);
   const [shipmentTrackingHistory, setShipmentTrackingHistory] = useState([]);
   const [showTrackingModal, setShowTrackingModal] = useState(false);
 
-  const [showStatusModal, setShowStatusModal] = useState(false);
-  const [statusTarget, setStatusTarget] = useState({ id: null, type: 'shipment', current: '', next: '' });
-  const [statusUpdating, setStatusUpdating] = useState(false);
-
-  const [showGpsModal, setShowGpsModal] = useState(false);
-  const [gpsForm, setGpsForm] = useState({
-    id: null,
-    type: 'shipment',
-    latitude: '',
-    longitude: '',
-    locationName: '',
-    note: ''
-  });
-  const [gpsUpdating, setGpsUpdating] = useState(false);
-
-  const [showCreateShipmentModal, setShowCreateShipmentModal] = useState(false);
-  const [createShipmentForm, setCreateShipmentForm] = useState({
-    orderId: '',
+  // Provision Physical Shipment Modal
+  const [showProvisionModal, setShowProvisionModal] = useState(false);
+  const [provisionStep, setProvisionStep] = useState(1);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [orderLookupData, setOrderLookupData] = useState(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionForm, setProvisionForm] = useState({
+    targetOrderId: initialOrderId || '',
     carrierName: 'EcoExpress Carbon-Neutral (Default)',
     trackingNumber: '',
-    vehicleNumber: '',
+    vehicleNumber: 'KA-01-EQ-9124',
     origin: 'Bengaluru Central Fulfillment Hub',
     destination: '',
     route: 'BLR-HYD-DEL Expressway Corridor',
-    estimatedDeliveryDays: 3,
-    itemIds: []
+    estimatedDays: 3
   });
-  const [orderLookupData, setOrderLookupData] = useState(null);
-  const [creatingShipment, setCreatingShipment] = useState(false);
 
-  const [showCreateContainerModal, setShowCreateContainerModal] = useState(false);
-  const [createContainerForm, setCreateContainerForm] = useState({
-    containerCode: '',
-    origin: 'Bengaluru Logistics Yard',
-    destination: 'Mumbai Inland Terminal',
-    route: 'National Highway 48 Freight Route',
-    initialLatitude: '12.9716',
-    initialLongitude: '77.5946'
+  // Direct status transition in flight
+  const [transitioningId, setTransitioningId] = useState(null);
+
+  // GPS Telemetry Modal
+  const [showGpsModal, setShowGpsModal] = useState(false);
+  const [gpsForm, setGpsForm] = useState({
+    id: null,
+    latitude: '12.9716',
+    longitude: '77.5946',
+    locationName: '',
+    note: 'Routine GPS telemetry checkpoint update'
   });
-  const [creatingContainer, setCreatingContainer] = useState(false);
+  const [gpsUpdating, setGpsUpdating] = useState(false);
 
   // 1. Fetch Shipments
   const loadShipments = useCallback(async (showSpinner = true) => {
@@ -160,7 +141,6 @@ export const FulfillmentPage = () => {
       const data = await fulfillmentApi.searchShipments({
         status: selectedStatus === 'ALL' ? undefined : selectedStatus,
         search: searchQuery || undefined,
-        orderId: orderIdFilter ? Number(orderIdFilter) : undefined,
         page: 0,
         size: 100
       });
@@ -171,46 +151,59 @@ export const FulfillmentPage = () => {
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, [selectedStatus, searchQuery, orderIdFilter]);
+  }, [selectedStatus, searchQuery]);
 
-  // 2. Fetch Containers
+  // 2. Fetch Orders Awaiting Fulfillment
+  const loadOrdersAwaiting = useCallback(async () => {
+    try {
+      const res = await orderOpsApi.getOrders({ status: 'ALL', size: 100 });
+      const allOrders = res?.orders || res?.content || (Array.isArray(res) ? res : []);
+      // Filter orders that are confirmed/placed and don't yet have active delivered shipment
+      const filtered = allOrders.filter((o) => {
+        const st = (o.status || o.currentStatus || '').toUpperCase();
+        return ['ORDER_PLACED', 'ORDER_CONFIRMED', 'PROCESSING', 'PAID'].includes(st);
+      });
+      setOrdersAwaiting(filtered);
+    } catch {
+      setOrdersAwaiting([]);
+    }
+  }, []);
+
+  // 3. Fetch Containers
   const loadContainers = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
-    setError('');
     try {
       const data = await fulfillmentApi.searchContainers({
-        status: selectedStatus === 'ALL' ? undefined : selectedStatus,
-        search: searchQuery || undefined,
         page: 0,
         size: 100
       });
       const list = data?.content || (Array.isArray(data) ? data : []);
       setContainers(list);
-    } catch (err) {
-      if (showSpinner) setError(err.message || 'Failed to load containers');
+    } catch {
+      setContainers([]);
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, [selectedStatus, searchQuery]);
+  }, []);
 
-  // Handle Tab Switch
+  // Initial Load
   useEffect(() => {
-    setSelectedStatus('ALL');
-    if (activeTab === 'shipments') {
-      loadShipments(true);
-    } else {
-      loadContainers(true);
-    }
-  }, [activeTab, loadShipments, loadContainers]);
+    loadShipments(true);
+    loadOrdersAwaiting();
+    loadContainers(false);
+  }, [loadShipments, loadOrdersAwaiting, loadContainers]);
 
-  // STOMP WebSocket Connection & Live Telemetry Subscriptions
+  // STOMP WebSocket Connection
   useEffect(() => {
     const client = createTrackingClient();
     stompClientRef.current = client;
 
     client.onConnect(() => {
       setWsConnected(true);
-      // Global broadcast topics if applicable
+      // Activity channel
+      client.subscribe('/topic/fulfillment/activity', (msg) => {
+        loadShipments(false);
+      });
     });
 
     client.onDisconnect(() => {
@@ -222,65 +215,118 @@ export const FulfillmentPage = () => {
     return () => {
       client.disconnect();
     };
-  }, []);
+  }, [loadShipments]);
 
-  // Subscribe to specific shipment topic when tracking modal is open
-  useEffect(() => {
-    if (!showTrackingModal || !selectedShipment?.id || !stompClientRef.current) return;
+  // Handle Target Order Lookup & Pre-population
+  const handleValidateOrder = async (orderIdToLookup = provisionForm.targetOrderId) => {
+    const cleaned = String(orderIdToLookup).replace(/[^0-9]/g, '');
+    if (!cleaned) {
+      setError('Please enter a valid numeric Order ID (e.g. 41 or ORD-41).');
+      return;
+    }
 
-    const sub = stompClientRef.current.subscribe(
-      `/topic/shipments/${selectedShipment.id}`,
-      (event) => {
-        // Live GPS / Status Event Received
-        if (event.status || event.currentLatitude || event.latitude) {
-          setSelectedShipment((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              status: event.status || prev.status,
-              currentLatitude: event.latitude || event.currentLatitude || prev.currentLatitude,
-              currentLongitude: event.longitude || event.currentLongitude || prev.currentLongitude,
-              lastLocationUpdate: event.timestamp || new Date().toISOString()
-            };
-          });
-
-          // Prepend event to tracking history
-          setShipmentTrackingHistory((prev) => [
-            {
-              id: Date.now(),
-              shipmentId: selectedShipment.id,
-              status: event.status || selectedShipment.status,
-              latitude: event.latitude || event.currentLatitude,
-              longitude: event.longitude || event.currentLongitude,
-              locationName: event.locationName || 'Live GPS Telemetry Ping',
-              description: event.description || event.note || 'Real-time telemetry event received via STOMP broker',
-              timestamp: event.timestamp || new Date().toISOString()
-            },
-            ...prev
-          ]);
-
-          // Update main shipments table entry silently
-          setShipments((prevList) =>
-            prevList.map((s) =>
-              s.id === selectedShipment.id
-                ? {
-                    ...s,
-                    status: event.status || s.status,
-                    currentLatitude: event.latitude || event.currentLatitude || s.currentLatitude,
-                    currentLongitude: event.longitude || event.currentLongitude || s.currentLongitude,
-                    lastLocationUpdate: event.timestamp || new Date().toISOString()
-                  }
-                : s
-            )
-          );
-        }
+    setLookupLoading(true);
+    setError('');
+    try {
+      const res = await orderOpsApi.getOrderById(cleaned);
+      const o = res?.order || res?.data || res;
+      if (!o || !o.id) {
+        throw new Error(`Order ORD-${cleaned} was not found in the database.`);
       }
-    );
 
-    return () => {
-      sub.unsubscribe();
-    };
-  }, [showTrackingModal, selectedShipment?.id]);
+      setOrderLookupData(o);
+      const addr = [
+        o.shipping_address || o.shippingAddress,
+        o.city,
+        o.state,
+        o.zipcode || o.pincode
+      ].filter(Boolean).join(', ') || 'Customer Delivery Address';
+
+      setProvisionForm((prev) => ({
+        ...prev,
+        targetOrderId: String(o.id),
+        destination: addr,
+        trackingNumber: o.tracking_number || `ECO-AWB-${o.id * 100 + 41}`,
+        carrierName: o.carrier_name || 'EcoExpress Carbon-Neutral (Default)'
+      }));
+    } catch (err) {
+      setError(err.message || `Failed to find order ORD-${cleaned}`);
+      setOrderLookupData(null);
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  // Open Provision Modal for specific order
+  const openProvisionForOrder = (order) => {
+    const orderId = order.id || order.orderId;
+    setProvisionForm({
+      targetOrderId: String(orderId),
+      carrierName: order.carrier_name || 'EcoExpress Carbon-Neutral (Default)',
+      trackingNumber: order.tracking_number || `ECO-AWB-${orderId * 100 + 41}`,
+      vehicleNumber: 'KA-01-EQ-9124',
+      origin: 'Bengaluru Central Fulfillment Hub',
+      destination: [order.shipping_address || order.shippingAddress, order.city, order.state, order.zipcode].filter(Boolean).join(', '),
+      route: 'BLR-HYD-DEL Expressway Corridor',
+      estimatedDays: 3
+    });
+    setOrderLookupData(order);
+    setProvisionStep(1);
+    setShowProvisionModal(true);
+  };
+
+  // Submit Physical Shipment Provisioning
+  const handleCreateShipmentSubmit = async (e) => {
+    e.preventDefault();
+    if (!provisionForm.targetOrderId) {
+      setError('Target Order ID is required.');
+      return;
+    }
+
+    setProvisioning(true);
+    setError('');
+    setSuccess('');
+    try {
+      const payload = {
+        orderId: parseInt(provisionForm.targetOrderId, 10),
+        carrierName: provisionForm.carrierName,
+        trackingNumber: provisionForm.trackingNumber,
+        vehicleNumber: provisionForm.vehicleNumber,
+        origin: provisionForm.origin,
+        destination: provisionForm.destination,
+        route: provisionForm.route,
+        estimatedDeliveryDays: parseInt(provisionForm.estimatedDays, 10) || 3
+      };
+
+      const created = await fulfillmentApi.createShipment(payload);
+      const shipNum = created.shipmentNumber || `SHP-${created.id}`;
+      setSuccess(`Physical Shipment #${shipNum} provisioned successfully for Order ORD-${provisionForm.targetOrderId} (Status: CREATED).`);
+      setShowProvisionModal(false);
+      loadShipments(false);
+      loadOrdersAwaiting();
+    } catch (err) {
+      setError(`Unable to create physical shipment. Reason: ${err.message || 'Validation rejected by fulfillment service.'}`);
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  // Execute Strict Forward Transition
+  const handleDirectTransition = async (shipment, nextStatus) => {
+    setTransitioningId(shipment.id);
+    setError('');
+    setSuccess('');
+    try {
+      const updated = await fulfillmentApi.updateShipmentStatus(shipment.id, nextStatus);
+      setSuccess(`Shipment #${shipment.shipmentNumber || shipment.id} transitioned to ${nextStatus}.`);
+      loadShipments(false);
+      loadOrdersAwaiting();
+    } catch (err) {
+      setError(`Transition to ${nextStatus} failed: ${err.message}`);
+    } finally {
+      setTransitioningId(null);
+    }
+  };
 
   // Open Detailed Tracking Modal
   const openShipmentTracking = async (shipment) => {
@@ -294,173 +340,38 @@ export const FulfillmentPage = () => {
     }
   };
 
-  // Open Status Transition Modal
-  const openStatusModal = (item, type = 'shipment') => {
-    const allowed = type === 'shipment'
-      ? (ALLOWED_SHIPMENT_TRANSITIONS[item.status] || [])
-      : (ALLOWED_CONTAINER_TRANSITIONS[item.status] || []);
-
-    setStatusTarget({
-      id: item.id,
-      type,
-      current: item.status,
-      next: allowed.length > 0 ? allowed[0] : ''
-    });
-    setShowStatusModal(true);
-  };
-
-  const handleStatusSubmit = async (e) => {
-    e.preventDefault();
-    if (!statusTarget.id || !statusTarget.next) return;
-
-    setStatusUpdating(true);
-    setError('');
-    setSuccess('');
-    try {
-      if (statusTarget.type === 'shipment') {
-        const updated = await fulfillmentApi.updateShipmentStatus(statusTarget.id, statusTarget.next);
-        setSuccess(`Shipment #${statusTarget.id} status updated to ${statusTarget.next}.`);
-        if (selectedShipment && selectedShipment.id === statusTarget.id) {
-          setSelectedShipment(updated);
-        }
-        loadShipments(false);
-      } else {
-        const updated = await fulfillmentApi.updateContainerStatus(statusTarget.id, statusTarget.next);
-        setSuccess(`Container #${statusTarget.id} status updated to ${statusTarget.next}.`);
-        loadContainers(false);
-      }
-      setShowStatusModal(false);
-    } catch (err) {
-      setError(err.message || 'Failed to update status transition');
-    } finally {
-      setStatusUpdating(false);
-    }
-  };
-
   // Open GPS Update Modal
-  const openGpsModal = (item, type = 'shipment') => {
+  const openGpsModal = (shipment) => {
     setGpsForm({
-      id: item.id,
-      type,
-      latitude: item.currentLatitude ? String(item.currentLatitude) : '12.9716',
-      longitude: item.currentLongitude ? String(item.currentLongitude) : '77.5946',
-      locationName: item.destination ? `En route to ${item.destination}` : 'Highway Checkpoint',
-      note: 'Routine GPS telemetry update logged by logistics operations'
+      id: shipment.id,
+      latitude: shipment.currentLatitude ? String(shipment.currentLatitude) : '12.9716',
+      longitude: shipment.currentLongitude ? String(shipment.currentLongitude) : '77.5946',
+      locationName: `En route: ${shipment.destination || 'Highway Node'}`,
+      note: 'Routine GPS telemetry coordinate checkpoint logged by driver'
     });
     setShowGpsModal(true);
   };
 
   const handleGpsSubmit = async (e) => {
     e.preventDefault();
-    if (!gpsForm.id || !gpsForm.latitude || !gpsForm.longitude) return;
+    if (!gpsForm.id) return;
 
     setGpsUpdating(true);
     setError('');
-    setSuccess('');
     try {
-      const payload = {
+      await fulfillmentApi.updateShipmentLocation(gpsForm.id, {
         latitude: parseFloat(gpsForm.latitude),
         longitude: parseFloat(gpsForm.longitude),
         locationName: gpsForm.locationName,
         note: gpsForm.note
-      };
-
-      if (gpsForm.type === 'shipment') {
-        const updated = await fulfillmentApi.updateShipmentLocation(gpsForm.id, payload);
-        setSuccess(`Shipment #${gpsForm.id} GPS telemetry updated (${payload.latitude}, ${payload.longitude}).`);
-        if (selectedShipment && selectedShipment.id === gpsForm.id) {
-          setSelectedShipment(updated);
-        }
-        loadShipments(false);
-      } else {
-        const updated = await fulfillmentApi.updateContainerLocation(gpsForm.id, payload);
-        setSuccess(`Container #${gpsForm.id} GPS coordinates updated.`);
-        loadContainers(false);
-      }
+      });
+      setSuccess(`GPS Telemetry updated for Shipment #${gpsForm.id}.`);
       setShowGpsModal(false);
-    } catch (err) {
-      setError(err.message || 'Failed to update GPS telemetry');
-    } finally {
-      setGpsUpdating(false);
-    }
-  };
-
-  // Order Lookup for Creating Shipment
-  const handleOrderLookup = async (orderId) => {
-    if (!orderId) return;
-    try {
-      const res = await orderOpsApi.getOrderById(orderId);
-      const o = res?.order || res?.data || res;
-      if (o) {
-        setOrderLookupData(o);
-        setCreateShipmentForm((prev) => ({
-          ...prev,
-          orderId: String(o.id),
-          destination: `${o.city || ''}, ${o.state || ''} ${o.zipcode || ''}`.trim() || 'Customer Delivery Address',
-          trackingNumber: `ECO-AWB-${o.id + 100000}`,
-          vehicleNumber: `KA-01-EQ-${Math.floor(1000 + Math.random() * 9000)}`,
-          itemIds: o.items ? o.items.map((it) => it.id) : []
-        }));
-      }
-    } catch (err) {
-      setError('Order not found for allocation: ' + err.message);
-    }
-  };
-
-  const handleCreateShipmentSubmit = async (e) => {
-    e.preventDefault();
-    if (!createShipmentForm.orderId) return;
-
-    setCreatingShipment(true);
-    setError('');
-    setSuccess('');
-    try {
-      const payload = {
-        orderId: parseInt(createShipmentForm.orderId, 10),
-        carrierName: createShipmentForm.carrierName,
-        trackingNumber: createShipmentForm.trackingNumber,
-        vehicleNumber: createShipmentForm.vehicleNumber,
-        origin: createShipmentForm.origin,
-        destination: createShipmentForm.destination,
-        route: createShipmentForm.route,
-        estimatedDeliveryDays: parseInt(createShipmentForm.estimatedDeliveryDays, 10) || 3,
-        itemIds: createShipmentForm.itemIds.length > 0 ? createShipmentForm.itemIds : undefined
-      };
-
-      const created = await fulfillmentApi.createShipment(payload);
-      setSuccess(`Shipment #${created.shipmentNumber || created.id} successfully created and dispatched.`);
-      setShowCreateShipmentModal(false);
       loadShipments(false);
     } catch (err) {
-      setError(err.message || 'Failed to create shipment');
+      setError(`Failed to update GPS telemetry: ${err.message}`);
     } finally {
-      setCreatingShipment(false);
-    }
-  };
-
-  const handleCreateContainerSubmit = async (e) => {
-    e.preventDefault();
-    setCreatingContainer(true);
-    setError('');
-    setSuccess('');
-    try {
-      const payload = {
-        containerCode: createContainerForm.containerCode || `CONT-ECO-${Math.floor(1000 + Math.random() * 9000)}`,
-        origin: createContainerForm.origin,
-        destination: createContainerForm.destination,
-        route: createContainerForm.route,
-        initialLatitude: parseFloat(createContainerForm.initialLatitude),
-        initialLongitude: parseFloat(createContainerForm.initialLongitude)
-      };
-
-      const created = await fulfillmentApi.createContainer(payload);
-      setSuccess(`Container [${created.containerCode}] provisioned successfully.`);
-      setShowCreateContainerModal(false);
-      loadContainers(false);
-    } catch (err) {
-      setError(err.message || 'Failed to provision container');
-    } finally {
-      setCreatingContainer(false);
+      setGpsUpdating(false);
     }
   };
 
@@ -469,236 +380,82 @@ export const FulfillmentPage = () => {
   const inTransitCount = shipments.filter((s) => ['IN_TRANSIT', 'DISPATCHED', 'ARRIVED_AT_HUB'].includes(s.status)).length;
   const outForDeliveryCount = shipments.filter((s) => s.status === 'OUT_FOR_DELIVERY').length;
   const totalContainers = containers.length;
+  const awaitingFulfillmentCount = ordersAwaiting.length;
+  const createdCount = shipments.filter((s) => s.status === 'CREATED').length;
+  const packedCount = shipments.filter((s) => s.status === 'PACKED').length;
 
-  // Shipment Table Columns
-  const shipmentColumns = [
-    {
-      header: 'Shipment & Order No',
-      key: 'shipmentNumber',
-      render: (row) => (
-        <div>
-          <div className="font-bold mono-text text-primary flex items-center gap-1">
-            <Truck size={14} className="text-muted" />
-            <span>#{row.shipmentNumber || `SHP-${row.id}`}</span>
-          </div>
-          <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
-            <Package size={12} />
-            <span>Order #{row.orderId}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      header: 'Carrier & Vehicle',
-      key: 'carrierName',
-      render: (row) => (
-        <div>
-          <div className="font-medium text-sm">{row.carrierName || 'EcoExpress Direct'}</div>
-          <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
-            <Compass size={12} />
-            <span className="mono-text font-semibold">{row.vehicleNumber || 'Standard Carrier Fleet'}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      header: 'Logistics Route',
-      key: 'origin',
-      render: (row) => (
-        <div className="text-xs">
-          <div className="flex items-center gap-1 font-medium">
-            <MapPin size={12} className="text-muted" />
-            <span>{row.origin || 'Fulfillment Hub'}</span>
-            <ArrowRight size={11} className="text-muted" />
-            <span>{row.destination || 'Customer Address'}</span>
-          </div>
-          {row.route && <div className="text-[11px] text-muted italic mt-0.5">{row.route}</div>}
-        </div>
-      )
-    },
-    {
-      header: 'Fulfillment Status',
-      key: 'status',
-      render: (row) => <StatusBadge status={row.status} />
-    },
-    {
-      header: 'Live GPS Telemetry',
-      key: 'currentLatitude',
-      render: (row) => {
-        const hasGps = row.currentLatitude && row.currentLongitude;
-        return hasGps ? (
-          <div>
-            <div className="flex items-center gap-1.5 mono-text text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-              <span>{Number(row.currentLatitude).toFixed(4)}°, {Number(row.currentLongitude).toFixed(4)}°</span>
-            </div>
-            <div className="text-[11px] text-muted mt-0.5">
-              {row.lastLocationUpdate ? new Date(row.lastLocationUpdate).toLocaleTimeString() : 'Recent'}
-            </div>
-          </div>
-        ) : (
-          <span className="text-xs text-muted italic flex items-center gap-1">
-            <Navigation size={12} />
-            <span>GPS Pending Dispatch</span>
-          </span>
-        );
-      }
-    },
-    {
-      header: 'Est. Delivery',
-      key: 'estimatedDelivery',
-      render: (row) => (
-        <div className="text-xs text-muted flex items-center gap-1">
-          <Calendar size={12} />
-          <span>{row.estimatedDelivery ? new Date(row.estimatedDelivery).toLocaleDateString() : '3-5 Days'}</span>
-        </div>
-      )
-    },
-    {
-      header: 'Actions',
-      key: 'actions',
-      sortable: false,
-      render: (row) => {
-        const allowed = ALLOWED_SHIPMENT_TRANSITIONS[row.status] || [];
-        return (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              className="btn btn-secondary btn-xs flex items-center gap-1"
-              onClick={() => openShipmentTracking(row)}
-              title="Inspect live telemetry & items"
-            >
-              <Eye size={12} />
-              <span>Track</span>
-            </button>
-
-            {canUpdate && allowed.length > 0 && (
-              <button
-                className="btn btn-primary btn-xs flex items-center gap-1 text-white"
-                onClick={() => openStatusModal(row, 'shipment')}
-                title="Transition status"
-              >
-                <Send size={11} />
-                <span>Status</span>
-              </button>
-            )}
-
-            {canUpdate && (
-              <button
-                className="btn btn-secondary btn-xs flex items-center gap-1"
-                onClick={() => openGpsModal(row, 'shipment')}
-                title="Update physical GPS coordinates"
-              >
-                <Navigation size={11} className="text-emerald-500" />
-                <span>GPS</span>
-              </button>
-            )}
-          </div>
-        );
-      }
-    }
-  ];
-
-  // Container Table Columns
-  const containerColumns = [
-    {
-      header: 'Container Code',
-      key: 'containerCode',
-      render: (row) => (
-        <div className="font-bold mono-text text-primary flex items-center gap-1.5">
-          <Box size={14} className="text-muted" />
-          <span>{row.containerCode}</span>
-        </div>
-      )
-    },
-    {
-      header: 'Operational Status',
-      key: 'status',
-      render: (row) => <StatusBadge status={row.status} />
-    },
-    {
-      header: 'Corridor & Route',
-      key: 'origin',
-      render: (row) => (
-        <div className="text-xs">
-          <div className="flex items-center gap-1 font-medium">
-            <span>{row.origin}</span>
-            <ArrowRight size={11} className="text-muted" />
-            <span>{row.destination}</span>
-          </div>
-          {row.route && <div className="text-[11px] text-muted italic mt-0.5">{row.route}</div>}
-        </div>
-      )
-    },
-    {
-      header: 'Allocated Loads',
-      key: 'shipmentCount',
-      render: (row) => (
-        <span className="badge badge-neutral badge-sm font-mono">
-          {row.shipmentCount || 0} shipment{row.shipmentCount === 1 ? '' : 's'}
-        </span>
-      )
-    },
-    {
-      header: 'Telemetry Coordinates',
-      key: 'currentLatitude',
-      render: (row) => (
-        <div className="mono-text text-xs text-muted flex items-center gap-1">
-          <Navigation size={12} className="text-emerald-500" />
-          <span>{row.currentLatitude ? `${Number(row.currentLatitude).toFixed(4)}°, ${Number(row.currentLongitude).toFixed(4)}°` : 'Stationary Yard'}</span>
-        </div>
-      )
-    },
-    {
-      header: 'Actions',
-      key: 'actions',
-      sortable: false,
-      render: (row) => {
-        const allowed = ALLOWED_CONTAINER_TRANSITIONS[row.status] || [];
-        return (
-          <div className="flex items-center gap-1.5">
-            {canUpdate && allowed.length > 0 && (
-              <button
-                className="btn btn-primary btn-xs flex items-center gap-1 text-white"
-                onClick={() => openStatusModal(row, 'container')}
-              >
-                <Send size={11} />
-                <span>Status</span>
-              </button>
-            )}
-            {canUpdate && (
-              <button
-                className="btn btn-secondary btn-xs flex items-center gap-1"
-                onClick={() => openGpsModal(row, 'container')}
-              >
-                <Navigation size={11} className="text-emerald-500" />
-                <span>GPS</span>
-              </button>
-            )}
-          </div>
-        );
-      }
-    }
-  ];
+  // Next Action Required Item
+  const activeActionableShipment = shipments.find((s) => ['CREATED', 'PACKED', 'DISPATCHED', 'IN_TRANSIT', 'ARRIVED_AT_HUB', 'OUT_FOR_DELIVERY'].includes(s.status));
+  const activeActionableOrder = ordersAwaiting.length > 0 ? ordersAwaiting[0] : null;
 
   return (
-    <div className="fulfillment-page space-y-4">
-      {/* Alert Banners */}
+    <div className="fulfillment-page space-y-6">
+      {/* Header Banner */}
+      <div className="card-header-flex">
+        <div>
+          <h2 className="section-title flex items-center gap-2">
+            <Truck size={24} className="text-primary" />
+            <span>Logistics Fulfillment & Physical GPS Tracking</span>
+          </h2>
+          <p className="text-xs text-muted mt-1">
+            End-to-end order fulfillment pipeline, physical shipment provisioning, carrier routing, and real-time STOMP telemetry.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+              wsConnected
+                ? 'bg-success-subtle text-success border-success'
+                : 'bg-surface-raised text-muted border-border'
+            }`}
+          >
+            <Radio size={14} className={wsConnected ? 'animate-pulse text-success' : ''} />
+            <span>{wsConnected ? 'STOMP TELEMETRY LIVE' : 'CONNECTING WS...'}</span>
+          </div>
+
+          <button
+            className="btn btn-primary btn-sm flex items-center gap-1.5"
+            onClick={() => {
+              setProvisionStep(1);
+              setOrderLookupData(null);
+              setProvisionForm({
+                targetOrderId: '',
+                carrierName: 'EcoExpress Carbon-Neutral (Default)',
+                trackingNumber: '',
+                vehicleNumber: 'KA-01-EQ-9124',
+                origin: 'Bengaluru Central Fulfillment Hub',
+                destination: '',
+                route: 'BLR-HYD-DEL Expressway Corridor',
+                estimatedDays: 3
+              });
+              setShowProvisionModal(true);
+            }}
+          >
+            <Plus size={16} />
+            <span>Provision Physical Shipment</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Notifications */}
       {error && (
-        <div className="alert alert-danger flex items-center justify-between">
+        <div className="alert alert-danger flex items-center justify-between p-3 rounded-lg border border-danger">
           <div className="flex items-center gap-2">
-            <AlertTriangle size={18} className="text-danger flex-shrink-0" />
-            <span>{error}</span>
+            <AlertTriangle size={18} className="text-danger shrink-0" />
+            <span className="text-sm font-medium">{error}</span>
           </div>
           <button className="btn-close" onClick={() => setError('')}>
             <X size={16} />
           </button>
         </div>
       )}
+
       {success && (
-        <div className="alert alert-success flex items-center justify-between">
+        <div className="alert alert-success flex items-center justify-between p-3 rounded-lg border border-success">
           <div className="flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-success flex-shrink-0" />
-            <span>{success}</span>
+            <CheckCircle2 size={18} className="text-success shrink-0" />
+            <span className="text-sm font-medium">{success}</span>
           </div>
           <button className="btn-close" onClick={() => setSuccess('')}>
             <X size={16} />
@@ -706,129 +463,197 @@ export const FulfillmentPage = () => {
         </div>
       )}
 
-      {/* Header & Live STOMP Indicator */}
-      <div className="page-header-flex">
+      {/* PART 3: VISIBLE PROCESS FLOW BANNER */}
+      <div className="card bg-surface-raised border border-border p-4">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
+            <Activity size={14} className="text-primary" />
+            <span>FULFILLMENT PROCESS WORKFLOW</span>
+          </span>
+          <span className="text-2xs text-muted">Standard Operating Procedure (SOP)</span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
+          {[
+            { step: '1', title: 'ORDER READY', desc: 'Paid & confirmed orders', action: 'Provision Shipment', count: awaitingFulfillmentCount, highlight: awaitingFulfillmentCount > 0 },
+            { step: '2', title: 'PROVISIONED', desc: 'Shipment record created', action: 'Assign AWB & Carrier', count: createdCount, highlight: createdCount > 0 },
+            { step: '3', title: 'PACKED', desc: 'Boxed & sealed in hub', action: 'Confirm Package Ready', count: packedCount, highlight: packedCount > 0 },
+            { step: '4', title: 'DISPATCHED', desc: 'Left fulfillment center', action: 'Hand to Linehaul', count: shipments.filter(s => s.status === 'DISPATCHED').length },
+            { step: '5', title: 'IN TRANSIT', desc: 'Expressway linehaul moving', action: 'Live GPS Telemetry', count: shipments.filter(s => s.status === 'IN_TRANSIT').length },
+            { step: '6', title: 'HUB ARRIVAL', desc: 'Arrived at destination hub', action: 'Last-mile sorting', count: shipments.filter(s => s.status === 'ARRIVED_AT_HUB').length },
+            { step: '7', title: 'OUT FOR DELIVERY', desc: 'Courier executive on way', action: 'Doorstep Delivery', count: outForDeliveryCount },
+            { step: '8', title: 'DELIVERED', desc: 'Delivered to recipient', action: 'Completed', count: shipments.filter(s => s.status === 'DELIVERED').length }
+          ].map((item, idx) => (
+            <div
+              key={idx}
+              className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between ${
+                item.highlight
+                  ? 'bg-primary-subtle border-primary text-primary font-semibold'
+                  : 'bg-surface border-border text-body'
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-2xs opacity-75">STEP {item.step}</span>
+                  {item.count !== undefined && (
+                    <span className="badge badge-secondary text-2xs px-1.5 py-0.2">{item.count}</span>
+                  )}
+                </div>
+                <div className="font-bold text-xs truncate">{item.title}</div>
+                <div className="text-2xs text-muted mt-0.5 leading-tight">{item.desc}</div>
+              </div>
+              <div className="text-2xs font-medium text-primary mt-2 pt-1 border-t border-border/50 truncate">
+                {item.action}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* PART 4: "WHAT SHOULD I DO NOW?" SECTION */}
+      <div className="card p-4 border-l-4 border-l-primary bg-surface flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h2 className="page-title flex items-center gap-2">
-            <Truck size={24} className="text-primary" />
-            <span>Logistics Fulfillment & Physical GPS Tracking</span>
-          </h2>
-          <p className="page-subtitle">
-            Manage physical freight loads, multi-shipment dispatch, GPS coordinates, and real-time STOMP telemetry.
-          </p>
-        </div>
-        <div className="header-actions flex items-center gap-2">
-          <div className={`badge ${wsConnected ? 'badge-success' : 'badge-warning'} badge-sm flex items-center gap-1.5`}>
-            <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-            <span>{wsConnected ? 'STOMP Telemetry Live' : 'Connecting STOMP...'}</span>
-          </div>
-          {canUpdate && (
-            <>
-              <button
-                className="btn btn-primary btn-sm flex items-center gap-1.5 text-white"
-                onClick={() => {
-                  setOrderLookupData(null);
-                  setShowCreateShipmentModal(true);
-                }}
-              >
-                <Plus size={14} />
-                <span>New Shipment</span>
-              </button>
-              <button
-                className="btn btn-secondary btn-sm flex items-center gap-1.5"
-                onClick={() => setShowCreateContainerModal(true)}
-              >
-                <Box size={14} />
-                <span>New Container</span>
-              </button>
-            </>
+          <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+            <Clock size={14} />
+            <span>NEXT ACTION REQUIRED</span>
+          </span>
+
+          {activeActionableOrder ? (
+            <div className="mt-1">
+              <span className="text-sm font-semibold">
+                Order ORD-{activeActionableOrder.id} is confirmed and waiting for physical fulfillment.
+              </span>
+              <p className="text-xs text-muted mt-0.5">
+                Recipient: <strong>{activeActionableOrder.recipient_name || activeActionableOrder.customer_name || 'Customer'}</strong> | Destination: <strong>{activeActionableOrder.city || 'Destination Hub'}</strong> | Total: <strong>₹{activeActionableOrder.total_price || activeActionableOrder.totalAmount}</strong>
+              </p>
+            </div>
+          ) : activeActionableShipment ? (
+            <div className="mt-1">
+              <span className="text-sm font-semibold">
+                Shipment #{activeActionableShipment.shipmentNumber || activeActionableShipment.id} is currently <strong>{activeActionableShipment.status}</strong>.
+              </span>
+              <p className="text-xs text-muted mt-0.5">
+                Linked Order: <strong>ORD-{activeActionableShipment.orderId}</strong> | Carrier: <strong>{activeActionableShipment.carrierName}</strong> | Vehicle: <strong>{activeActionableShipment.vehicleNumber}</strong>
+              </p>
+            </div>
+          ) : (
+            <div className="mt-1 text-sm text-muted">
+              All placed orders and physical shipments are up-to-date. No pending actions required.
+            </div>
           )}
-          <button
-            className="btn btn-secondary btn-sm flex items-center gap-1.5"
-            onClick={() => (activeTab === 'shipments' ? loadShipments(true) : loadContainers(true))}
-            disabled={loading}
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            <span>Refresh</span>
-          </button>
+        </div>
+
+        <div>
+          {activeActionableOrder ? (
+            <button
+              className="btn btn-primary btn-sm flex items-center gap-1.5 font-bold"
+              onClick={() => openProvisionForOrder(activeActionableOrder)}
+            >
+              <Truck size={14} />
+              <span>Provision Physical Shipment</span>
+            </button>
+          ) : activeActionableShipment && ALLOWED_SHIPMENT_TRANSITIONS[activeActionableShipment.status]?.length > 0 ? (
+            <button
+              className="btn btn-primary btn-sm flex items-center gap-1.5 font-bold"
+              onClick={() => handleDirectTransition(activeActionableShipment, ALLOWED_SHIPMENT_TRANSITIONS[activeActionableShipment.status][0].next)}
+              disabled={transitioningId === activeActionableShipment.id}
+            >
+              <Check size={14} />
+              <span>{ALLOWED_SHIPMENT_TRANSITIONS[activeActionableShipment.status][0].label}</span>
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {/* Metrics Summary Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-            <Truck size={20} />
-          </div>
-          <div>
-            <div className="text-xs text-muted font-medium">Total Shipments</div>
-            <div className="text-xl font-bold">{totalShipments}</div>
-          </div>
+      {/* PART 10: DASHBOARD METRIC CARDS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="card p-3 text-center bg-surface">
+          <div className="text-xs text-muted font-semibold">Total Shipments</div>
+          <div className="text-xl font-bold font-mono text-primary mt-1">{totalShipments}</div>
         </div>
 
-        <div className="card p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center">
-            <Navigation size={20} />
-          </div>
-          <div>
-            <div className="text-xs text-muted font-medium">Active In-Transit</div>
-            <div className="text-xl font-bold">{inTransitCount}</div>
-          </div>
+        <div className="card p-3 text-center bg-surface">
+          <div className="text-xs text-muted font-semibold">Awaiting Fulfillment</div>
+          <div className="text-xl font-bold font-mono text-warning mt-1">{awaitingFulfillmentCount}</div>
         </div>
 
-        <div className="card p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center">
-            <Package size={20} />
-          </div>
-          <div>
-            <div className="text-xs text-muted font-medium">Out for Delivery</div>
-            <div className="text-xl font-bold">{outForDeliveryCount}</div>
-          </div>
+        <div className="card p-3 text-center bg-surface">
+          <div className="text-xs text-muted font-semibold">Awaiting Packing</div>
+          <div className="text-xl font-bold font-mono text-body mt-1">{createdCount}</div>
         </div>
 
-        <div className="card p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-            <Box size={20} />
-          </div>
-          <div>
-            <div className="text-xs text-muted font-medium">Logistics Containers</div>
-            <div className="text-xl font-bold">{totalContainers}</div>
-          </div>
+        <div className="card p-3 text-center bg-surface">
+          <div className="text-xs text-muted font-semibold">Ready for Dispatch</div>
+          <div className="text-xl font-bold font-mono text-body mt-1">{packedCount}</div>
+        </div>
+
+        <div className="card p-3 text-center bg-surface">
+          <div className="text-xs text-muted font-semibold">Active In-Transit</div>
+          <div className="text-xl font-bold font-mono text-info mt-1">{inTransitCount}</div>
+        </div>
+
+        <div className="card p-3 text-center bg-surface">
+          <div className="text-xs text-muted font-semibold">Out for Delivery</div>
+          <div className="text-xl font-bold font-mono text-warning mt-1">{outForDeliveryCount}</div>
+        </div>
+
+        <div className="card p-3 text-center bg-surface">
+          <div className="text-xs text-muted font-semibold">Freight Containers</div>
+          <div className="text-xl font-bold font-mono text-muted mt-1">{totalContainers}</div>
         </div>
       </div>
 
-      {/* Navigation Tabs (Shipments vs Containers) */}
-      <div className="card p-2">
-        <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-2 mb-3">
-          <button
-            type="button"
-            className={`btn btn-sm flex items-center gap-1.5 ${activeTab === 'shipments' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('shipments')}
-          >
-            <Truck size={15} />
-            <span>Physical Shipments</span>
-            <span className="badge badge-neutral badge-xs ml-1">{shipments.length}</span>
-          </button>
+      {/* Navigation Tabs */}
+      <div className="flex items-center gap-3 border-b border-border">
+        <button
+          className={`tab-btn flex items-center gap-1.5 py-2.5 px-3 text-sm font-semibold border-b-2 ${
+            activeTab === 'shipments' ? 'border-primary text-primary' : 'border-transparent text-muted'
+          }`}
+          onClick={() => setActiveTab('shipments')}
+        >
+          <Truck size={16} />
+          <span>Physical Shipments ({shipments.length})</span>
+        </button>
 
-          <button
-            type="button"
-            className={`btn btn-sm flex items-center gap-1.5 ${activeTab === 'containers' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('containers')}
-          >
-            <Box size={15} />
-            <span>Freight Containers</span>
-            <span className="badge badge-neutral badge-xs ml-1">{containers.length}</span>
-          </button>
-        </div>
+        <button
+          className={`tab-btn flex items-center gap-1.5 py-2.5 px-3 text-sm font-semibold border-b-2 ${
+            activeTab === 'awaiting' ? 'border-primary text-primary' : 'border-transparent text-muted'
+          }`}
+          onClick={() => {
+            setActiveTab('awaiting');
+            loadOrdersAwaiting();
+          }}
+        >
+          <Package size={16} />
+          <span>Orders Awaiting Fulfillment ({ordersAwaiting.length})</span>
+        </button>
 
-        {/* Sub-Filters & Search */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-1">
-            {(activeTab === 'shipments' ? SHIPMENT_STATUSES : CONTAINER_STATUSES).map((st) => (
+        <button
+          className={`tab-btn flex items-center gap-1.5 py-2.5 px-3 text-sm font-semibold border-b-2 ${
+            activeTab === 'containers' ? 'border-primary text-primary' : 'border-transparent text-muted'
+          }`}
+          onClick={() => {
+            setActiveTab('containers');
+            loadContainers(true);
+          }}
+        >
+          <Box size={16} />
+          <span>Freight Containers ({containers.length})</span>
+        </button>
+      </div>
+
+      {/* TAB 1: Physical Shipments Table */}
+      {activeTab === 'shipments' && (
+        <div className="card">
+          {/* Status Filter Chips */}
+          <div className="p-3 border-b border-border flex items-center gap-1.5 overflow-x-auto">
+            <span className="text-xs font-semibold text-muted mr-1">Status:</span>
+            {SHIPMENT_STATUSES.map((st) => (
               <button
                 key={st}
-                type="button"
-                className={`btn btn-xs ${selectedStatus === st ? 'btn-primary' : 'btn-secondary'}`}
+                className={`btn btn-xs ${
+                  selectedStatus === st ? 'btn-primary font-bold' : 'btn-secondary'
+                }`}
                 onClick={() => setSelectedStatus(st)}
               >
                 {st.replace(/_/g, ' ')}
@@ -836,524 +661,631 @@ export const FulfillmentPage = () => {
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
-            {orderIdFilter && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-xs flex items-center gap-1"
-                onClick={() => {
-                  setOrderIdFilter('');
-                  setSearchParams({});
-                }}
-              >
-                <X size={12} />
-                <span>Clear Order #{orderIdFilter} Filter</span>
-              </button>
-            )}
-            <div className="search-input-wrapper relative min-w-[220px]">
-              <input
-                type="text"
-                className="input input-sm pl-8 w-full"
-                placeholder={activeTab === 'shipments' ? 'Search by AWB, vehicle, carrier...' : 'Search containers...'}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              <Search size={14} className="text-muted absolute left-2.5 top-1/2 -translate-y-1/2" />
+          {loading ? (
+            <div className="p-12 text-center text-muted">
+              <RefreshCw size={24} className="animate-spin mx-auto mb-2" />
+              <span>Loading physical shipments...</span>
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Table */}
-      <div className="card">
-        {activeTab === 'shipments' ? (
-          <DataTable
-            columns={shipmentColumns}
-            data={shipments}
-            loading={loading}
-            searchPlaceholder="Filter loaded shipments..."
-          />
-        ) : (
-          <DataTable
-            columns={containerColumns}
-            data={containers}
-            loading={loading}
-            searchPlaceholder="Filter loaded containers..."
-          />
-        )}
-      </div>
-
-      {/* 1. Shipment Detailed Tracking Modal (Live STOMP) */}
-      <Modal
-        isOpen={showTrackingModal}
-        onClose={() => setShowTrackingModal(false)}
-        title={`Shipment Telemetry: #${selectedShipment?.shipmentNumber || selectedShipment?.id}`}
-        maxWidth="840px"
-      >
-        {selectedShipment && (
-          <div className="space-y-4">
-            {/* Live GPS Telemetry Card */}
-            <div className="p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)]">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                  <Activity size={15} />
-                  <span>Real-Time GPS Telemetry & Physical Status</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                  <StatusBadge status={selectedShipment.status} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--border-subtle)]">
-                  <div className="text-xs text-muted">Current GPS Position</div>
-                  <div className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    {selectedShipment.currentLatitude && selectedShipment.currentLongitude
-                      ? `${Number(selectedShipment.currentLatitude).toFixed(4)}°, ${Number(selectedShipment.currentLongitude).toFixed(4)}°`
-                      : 'Stationary at Dispatch Origin'}
-                  </div>
-                </div>
-
-                <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--border-subtle)]">
-                  <div className="text-xs text-muted">Assigned Physical Vehicle</div>
-                  <div className="font-mono text-sm font-bold mt-0.5">
-                    {selectedShipment.vehicleNumber || 'Carrier Standard Vehicle'}
-                  </div>
-                </div>
-
-                <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--border-subtle)]">
-                  <div className="text-xs text-muted">Carrier & Tracking AWB</div>
-                  <div className="text-sm font-semibold mt-0.5 flex items-center gap-1">
-                    <span>{selectedShipment.carrierName || 'EcoExpress'}</span>
-                    <span className="mono-text font-bold text-xs text-muted">({selectedShipment.trackingNumber})</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-muted">
-                <div>
-                  Origin: <span className="font-medium text-foreground">{selectedShipment.origin}</span> → Destination: <span className="font-medium text-foreground">{selectedShipment.destination}</span>
-                </div>
-                <div>
-                  Last Ping: {selectedShipment.lastLocationUpdate ? new Date(selectedShipment.lastLocationUpdate).toLocaleString() : 'Recent'}
-                </div>
-              </div>
+          ) : shipments.length === 0 ? (
+            <div className="p-12 text-center text-muted">
+              <Truck size={36} className="mx-auto mb-2 opacity-50" />
+              <p className="font-semibold">No Physical Shipments Found</p>
+              <p className="text-xs mt-1">Select an order from "Orders Awaiting Fulfillment" to provision a shipment.</p>
             </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table w-full text-xs">
+                <thead>
+                  <tr>
+                    <th>Shipment & Order No</th>
+                    <th>Carrier & Vehicle</th>
+                    <th>AWB / Tracking</th>
+                    <th>Destination</th>
+                    <th>Status</th>
+                    <th>Current GPS / Milestones</th>
+                    <th>Responsible Staff Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shipments.map((s) => {
+                    const allowedTransitions = ALLOWED_SHIPMENT_TRANSITIONS[s.status] || [];
+                    const isInTransit = ['IN_TRANSIT', 'DISPATCHED', 'ARRIVED_AT_HUB', 'OUT_FOR_DELIVERY'].includes(s.status);
 
-            {/* Allocated Order Items */}
-            <div className="p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
-                <Package size={13} className="text-primary" />
-                <span>Allocated Order Items ({selectedShipment.items?.length || 0})</span>
-              </div>
-              <div className="table-responsive border border-[var(--border-subtle)] rounded-lg overflow-hidden">
-                <table className="data-table text-xs">
-                  <thead>
-                    <tr>
-                      <th>Product Item</th>
-                      <th>Quantity</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedShipment.items && selectedShipment.items.length > 0 ? (
-                      selectedShipment.items.map((it, idx) => (
-                        <tr key={it.id || idx}>
-                          <td>
-                            <div className="font-medium">{it.productName || `Item #${it.orderItemId}`}</div>
-                            {it.sku && <div className="text-[11px] text-muted font-mono">{it.sku}</div>}
-                          </td>
-                          <td className="font-mono">{it.quantity}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="2" className="text-center py-2.5 text-muted">
-                          All items under Order #{selectedShipment.orderId}
+                    return (
+                      <tr key={s.id} className="hover:bg-surface-raised">
+                        {/* Shipment & Order No */}
+                        <td>
+                          <div className="font-bold font-mono text-primary flex items-center gap-1">
+                            <Truck size={14} className="text-muted" />
+                            <span>#{s.shipmentNumber || `SHP-${s.id}`}</span>
+                          </div>
+                          <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
+                            <Package size={12} />
+                            <span>Order ORD-{s.orderId}</span>
+                          </div>
+                        </td>
+
+                        {/* Carrier & Vehicle */}
+                        <td>
+                          <div className="font-semibold">{s.carrierName || 'EcoExpress Carbon-Neutral'}</div>
+                          <div className="text-muted flex items-center gap-1 mt-0.5 font-mono">
+                            <Compass size={12} />
+                            <span>{s.vehicleNumber || 'KA-01-EQ-9124'}</span>
+                          </div>
+                        </td>
+
+                        {/* AWB */}
+                        <td className="font-mono text-muted">
+                          {s.trackingNumber || 'ECO-AWB-PENDING'}
+                        </td>
+
+                        {/* Destination */}
+                        <td className="max-w-xs truncate" title={s.destination}>
+                          <div className="flex items-center gap-1">
+                            <MapPin size={12} className="text-muted shrink-0" />
+                            <span className="truncate">{s.destination || 'Customer Destination'}</span>
+                          </div>
+                        </td>
+
+                        {/* Status */}
+                        <td>
+                          <StatusBadge status={s.status} />
+                        </td>
+
+                        {/* GPS */}
+                        <td>
+                          {s.currentLatitude && s.currentLongitude ? (
+                            <button
+                              className="btn btn-secondary btn-xs flex items-center gap-1 font-mono text-success"
+                              onClick={() => openShipmentTracking(s)}
+                            >
+                              <Navigation size={12} className="text-success" />
+                              <span>{parseFloat(s.currentLatitude).toFixed(2)}, {parseFloat(s.currentLongitude).toFixed(2)}</span>
+                            </button>
+                          ) : isInTransit ? (
+                            <button
+                              className="btn btn-secondary btn-xs flex items-center gap-1 text-primary"
+                              onClick={() => openGpsModal(s)}
+                            >
+                              <MapPin size={12} />
+                              <span>Update GPS</span>
+                            </button>
+                          ) : (
+                            <span className="text-muted text-2xs italic">GPS available in transit</span>
+                          )}
+                        </td>
+
+                        {/* Responsible Actions */}
+                        <td>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {allowedTransitions.map((tr, trIdx) => (
+                              <button
+                                key={trIdx}
+                                className={`btn btn-xs ${
+                                  trIdx === 0 ? 'btn-primary font-bold' : 'btn-secondary'
+                                }`}
+                                onClick={() => handleDirectTransition(s, tr.next)}
+                                disabled={transitioningId === s.id}
+                              >
+                                {transitioningId === s.id ? (
+                                  <RefreshCw size={10} className="animate-spin" />
+                                ) : (
+                                  <Check size={10} />
+                                )}
+                                <span>{tr.label}</span>
+                              </button>
+                            ))}
+
+                            <button
+                              className="btn btn-secondary btn-xs"
+                              onClick={() => openShipmentTracking(s)}
+                              title="View Telemetry & Timeline"
+                            >
+                              <Eye size={12} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: Orders Awaiting Fulfillment */}
+      {activeTab === 'awaiting' && (
+        <div className="card">
+          <div className="card-header-flex p-3 border-b border-border">
+            <div>
+              <h3 className="section-title text-sm flex items-center gap-2">
+                <Package size={16} />
+                <span>Orders Awaiting Physical Shipment Provisioning</span>
+              </h3>
+              <p className="text-xs text-muted">Confirmed and paid customer orders ready to be provisioned for dispatch.</p>
+            </div>
+            <button className="btn btn-secondary btn-xs" onClick={loadOrdersAwaiting}>
+              <RefreshCw size={12} />
+              <span>Refresh Orders</span>
+            </button>
+          </div>
+
+          {ordersAwaiting.length === 0 ? (
+            <div className="p-8 text-center text-muted text-xs">
+              <CheckCircle2 size={32} className="mx-auto mb-2 text-success" />
+              <p className="font-semibold text-sm">All Orders Fulfilled</p>
+              <p className="text-xs mt-1">There are currently no orders waiting for physical shipment provisioning.</p>
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table w-full text-xs">
+                <thead>
+                  <tr>
+                    <th>Order ID</th>
+                    <th>Customer Name</th>
+                    <th>Destination Address</th>
+                    <th>Amount</th>
+                    <th>Payment Status</th>
+                    <th>Order Status</th>
+                    <th>Shipment Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ordersAwaiting.map((o) => (
+                    <tr key={o.id}>
+                      <td className="font-mono font-bold text-primary">ORD-{o.id}</td>
+                      <td className="font-semibold">{o.recipient_name || o.customer_name || 'Customer'}</td>
+                      <td className="max-w-xs truncate" title={o.shipping_address || o.shippingAddress}>
+                        {[o.shipping_address || o.shippingAddress, o.city, o.state].filter(Boolean).join(', ') || 'Customer Address'}
+                      </td>
+                      <td className="font-mono font-semibold">₹{o.total_price || o.totalAmount}</td>
+                      <td>
+                        <span className="badge badge-success font-semibold">
+                          {o.payment_status || 'PAID'}
+                        </span>
+                      </td>
+                      <td>
+                        <StatusBadge status={o.status || o.currentStatus || 'ORDER_CONFIRMED'} />
+                      </td>
+                      <td>
+                        <span className="badge badge-warning">NOT CREATED</span>
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-primary btn-xs flex items-center gap-1 font-bold"
+                          onClick={() => openProvisionForOrder(o)}
+                        >
+                          <Truck size={12} />
+                          <span>Provision Shipment</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: Freight Containers Tab */}
+      {activeTab === 'containers' && (
+        <div className="card">
+          <div className="card-header-flex p-3 border-b border-border">
+            <div>
+              <h3 className="section-title text-sm flex items-center gap-2">
+                <Box size={16} />
+                <span>Freight Containers & Consolidated Dispatch Loads</span>
+              </h3>
+              <p className="text-xs text-muted">Consolidated multi-shipment logistics containers assigned to trucks.</p>
+            </div>
+          </div>
+
+          {containers.length === 0 ? (
+            <div className="p-8 text-center text-muted text-xs">No active freight containers provisioned.</div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table w-full text-xs">
+                <thead>
+                  <tr>
+                    <th>Container Code</th>
+                    <th>Origin Yard</th>
+                    <th>Destination Terminal</th>
+                    <th>Freight Route</th>
+                    <th>Status</th>
+                    <th>Assigned Shipments</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {containers.map((c) => (
+                    <tr key={c.id}>
+                      <td className="font-mono font-bold text-primary">{c.containerCode}</td>
+                      <td>{c.origin}</td>
+                      <td>{c.destination}</td>
+                      <td className="text-muted">{c.route}</td>
+                      <td>
+                        <StatusBadge status={c.status} />
+                      </td>
+                      <td className="font-mono">{c.shipmentCount || 0} shipments</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 1: PROVISION PHYSICAL SHIPMENT (3-Step Modal)                      */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={showProvisionModal}
+        onClose={() => setShowProvisionModal(false)}
+        title="PROVISION PHYSICAL LOGISTICS SHIPMENT"
+        size="lg"
+      >
+        <form onSubmit={handleCreateShipmentSubmit} className="space-y-4">
+          {/* Stepper Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-border text-xs">
+            <div className={`font-semibold ${provisionStep >= 1 ? 'text-primary' : 'text-muted'}`}>
+              1. Select & Validate Order
+            </div>
+            <ChevronRight size={14} className="text-muted" />
+            <div className={`font-semibold ${provisionStep >= 2 ? 'text-primary' : 'text-muted'}`}>
+              2. Assign Logistics Partner
+            </div>
+            <ChevronRight size={14} className="text-muted" />
+            <div className={`font-semibold ${provisionStep >= 3 ? 'text-primary' : 'text-muted'}`}>
+              3. Review & Provision
+            </div>
+          </div>
+
+          {/* STEP 1: Select Order */}
+          {provisionStep === 1 && (
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="form-label text-xs font-bold">Target Customer Order ID *</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className="input font-mono text-sm"
+                    placeholder="e.g. 41 or ORD-41"
+                    value={provisionForm.targetOrderId}
+                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, targetOrderId: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary flex items-center gap-1 whitespace-nowrap"
+                    onClick={() => handleValidateOrder()}
+                    disabled={lookupLoading || !provisionForm.targetOrderId}
+                  >
+                    {lookupLoading ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                    <span>Validate Order</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Order Validation Result Card */}
+              {orderLookupData && (
+                <div className="p-3 bg-surface-raised border border-success/50 rounded-lg space-y-2">
+                  <div className="flex items-center gap-2 text-success font-semibold text-xs">
+                    <CheckCircle2 size={16} />
+                    <span>✓ Order ORD-{orderLookupData.id} found and verified</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted">Customer:</span>{' '}
+                      <strong>{orderLookupData.recipient_name || orderLookupData.customer_name || 'Customer'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-muted">Payment:</span>{' '}
+                      <span className="badge badge-success text-2xs">PAID / CONFIRMED</span>
+                    </div>
+                  </div>
+
+                  {/* Authoritative Read-Only Address loaded from order */}
+                  <div className="mt-2 pt-2 border-t border-border">
+                    <label className="text-2xs font-bold uppercase text-muted block mb-1">
+                      Authoritative Destination Delivery Address (Loaded from Customer Order)
+                    </label>
+                    <div className="p-2 bg-surface rounded border border-border text-xs font-mono text-body">
+                      {provisionForm.destination || 'Customer Address verified in database'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end mt-4">
+                <button
+                  type="button"
+                  className="btn btn-primary flex items-center gap-1.5"
+                  disabled={!orderLookupData}
+                  onClick={() => setProvisionStep(2)}
+                >
+                  <span>Continue to Logistics Assignment</span>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Assign Logistics Partner */}
+          {provisionStep === 2 && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="form-group">
+                  <label className="form-label text-xs font-bold">Carrier Logistics Partner *</label>
+                  <select
+                    className="input text-xs"
+                    value={provisionForm.carrierName}
+                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, carrierName: e.target.value }))}
+                  >
+                    {CARRIER_OPTIONS.map((c, idx) => (
+                      <option key={idx} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label text-xs font-bold">Tracking / AWB Number</label>
+                  <input
+                    type="text"
+                    className="input font-mono text-xs"
+                    value={provisionForm.trackingNumber}
+                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, trackingNumber: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label text-xs font-bold">Vehicle / Truck Plate</label>
+                  <input
+                    type="text"
+                    className="input font-mono text-xs"
+                    value={provisionForm.vehicleNumber}
+                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, vehicleNumber: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label text-xs font-bold">Origin Dispatch Yard</label>
+                  <input
+                    type="text"
+                    className="input text-xs"
+                    value={provisionForm.origin}
+                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, origin: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group md:col-span-2">
+                  <label className="form-label text-xs font-bold">Freight Expressway Corridor</label>
+                  <input
+                    type="text"
+                    className="input text-xs"
+                    value={provisionForm.route}
+                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, route: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mt-4">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setProvisionStep(1)}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary flex items-center gap-1.5"
+                  onClick={() => setProvisionStep(3)}
+                >
+                  <span>Review & Provision</span>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: Review & Submit */}
+          {provisionStep === 3 && (
+            <div className="space-y-4">
+              <div className="p-3 bg-surface-raised border border-border rounded-lg space-y-2 text-xs">
+                <div className="font-bold text-sm text-primary mb-2">Physical Shipment Review Summary</div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-muted">Target Order:</span> <strong>ORD-{provisionForm.targetOrderId}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted">Initial Status:</span> <span className="badge badge-success">CREATED</span>
+                  </div>
+                  <div>
+                    <span className="text-muted">Carrier Partner:</span> <strong>{provisionForm.carrierName}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted">AWB Number:</span> <strong className="font-mono">{provisionForm.trackingNumber}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted">Vehicle Number:</span> <strong className="font-mono">{provisionForm.vehicleNumber}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted">Origin Yard:</span> <strong>{provisionForm.origin}</strong>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-border">
+                  <span className="text-muted block text-2xs uppercase font-bold">Destination Delivery Address:</span>
+                  <p className="font-mono text-xs mt-0.5">{provisionForm.destination}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mt-4">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setProvisionStep(2)}
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary flex items-center gap-2 font-bold"
+                  disabled={provisioning}
+                >
+                  {provisioning ? <RefreshCw size={14} className="animate-spin" /> : <Truck size={14} />}
+                  <span>{provisioning ? 'Provisioning Shipment...' : 'CREATE PHYSICAL SHIPMENT'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </form>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: GPS Telemetry & Tracking Timeline                                */}
+      {/* ========================================================================= */}
+      {showTrackingModal && selectedShipment && (
+        <Modal
+          isOpen={showTrackingModal}
+          onClose={() => setShowTrackingModal(false)}
+          title={`LIVE GPS TELEMETRY & TRACKING: #${selectedShipment.shipmentNumber || selectedShipment.id}`}
+          size="lg"
+        >
+          <div className="space-y-4 text-xs">
+            {/* Telemetry Bar */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-3 bg-surface-raised rounded-lg border border-border">
+              <div>
+                <span className="text-muted block">Status:</span>
+                <StatusBadge status={selectedShipment.status} />
+              </div>
+              <div>
+                <span className="text-muted block">Vehicle Plate:</span>
+                <strong className="font-mono">{selectedShipment.vehicleNumber || 'KA-01-EQ-9124'}</strong>
+              </div>
+              <div>
+                <span className="text-muted block">Carrier:</span>
+                <strong>{selectedShipment.carrierName}</strong>
+              </div>
+              <div>
+                <span className="text-muted block">AWB:</span>
+                <strong className="font-mono">{selectedShipment.trackingNumber}</strong>
               </div>
             </div>
 
-            {/* Historical Tracking Timeline */}
-            <div className="p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-3 flex items-center gap-1.5">
-                <ShieldCheck size={14} className="text-primary" />
-                <span>Telemetry Audit & Location Event Stream</span>
+            {/* Coordinates / Map Preview */}
+            <div className="p-4 bg-surface rounded-lg border border-border text-center space-y-2">
+              <div className="flex items-center justify-center gap-2 text-primary font-bold">
+                <Navigation size={18} />
+                <span>Current Coordinates: {selectedShipment.currentLatitude || '12.9716'}, {selectedShipment.currentLongitude || '77.5946'}</span>
               </div>
+              <p className="text-2xs text-muted">
+                Route: {selectedShipment.origin} → {selectedShipment.destination}
+              </p>
+            </div>
 
-              <div className="space-y-3">
+            {/* Milestone Timeline */}
+            <div>
+              <h4 className="font-bold text-xs uppercase text-muted mb-2">Historical Milestone Events</h4>
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                 {shipmentTrackingHistory.length === 0 ? (
-                  <p className="text-xs text-muted italic">No historical location milestones recorded yet.</p>
+                  <div className="text-muted text-center py-4">No milestone events recorded yet.</div>
                 ) : (
                   shipmentTrackingHistory.map((ev, idx) => (
-                    <div key={ev.id || idx} className="flex items-start gap-3 text-xs">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0"></div>
+                    <div key={idx} className="p-2 bg-surface-raised rounded border border-border flex items-start gap-2">
+                      <CheckCircle2 size={14} className="text-primary shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <div className="flex items-center justify-between">
-                          <span className="font-semibold text-primary">{ev.locationName || ev.status}</span>
-                          <span className="text-muted text-[11px]">{ev.timestamp ? new Date(ev.timestamp).toLocaleString() : ''}</span>
+                          <span className="font-bold text-primary">{ev.status}</span>
+                          <span className="text-2xs text-muted font-mono">{ev.timestamp}</span>
                         </div>
-                        {ev.latitude && ev.longitude && (
-                          <div className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-                            {Number(ev.latitude).toFixed(4)}° N, {Number(ev.longitude).toFixed(4)}° E
-                          </div>
-                        )}
-                        {ev.description && (
-                          <div className="text-[11px] text-muted mt-0.5 bg-[var(--surface)] p-1.5 rounded">
-                            {ev.description}
-                          </div>
-                        )}
+                        <p className="text-2xs text-muted mt-0.5">{ev.description || ev.locationName}</p>
                       </div>
                     </div>
                   ))
                 )}
               </div>
             </div>
-          </div>
-        )}
-      </Modal>
 
-      {/* 2. Status Transition Modal */}
-      <Modal
-        isOpen={showStatusModal}
-        onClose={() => setShowStatusModal(false)}
-        title={`Update ${statusTarget.type === 'shipment' ? 'Shipment' : 'Container'} Status: #${statusTarget.id}`}
-        maxWidth="500px"
-      >
-        <form onSubmit={handleStatusSubmit} className="space-y-4">
-          <div className="form-group">
-            <label className="form-label text-xs font-semibold">Current State</label>
-            <div className="mt-1">
-              <StatusBadge status={statusTarget.current} />
+            <div className="flex justify-end pt-2 border-t border-border">
+              <button className="btn btn-secondary" onClick={() => setShowTrackingModal(false)}>
+                Close
+              </button>
             </div>
           </div>
+        </Modal>
+      )}
 
-          <div className="form-group">
-            <label className="form-label text-xs font-semibold">Select Next Transition State *</label>
-            <select
-              className="input input-sm w-full"
-              value={statusTarget.next}
-              onChange={(e) => setStatusTarget({ ...statusTarget, next: e.target.value })}
-              required
-            >
-              {(statusTarget.type === 'shipment'
-                ? (ALLOWED_SHIPMENT_TRANSITIONS[statusTarget.current] || [])
-                : (ALLOWED_CONTAINER_TRANSITIONS[statusTarget.current] || [])
-              ).map((st) => (
-                <option key={st} value={st}>
-                  {st.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setShowStatusModal(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm flex items-center gap-1.5 text-white"
-              disabled={statusUpdating || !statusTarget.next}
-            >
-              {statusUpdating ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
-              <span>{statusUpdating ? 'Publishing Event...' : 'Confirm Transition'}</span>
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* 3. GPS Location Update Modal */}
-      <Modal
-        isOpen={showGpsModal}
-        onClose={() => setShowGpsModal(false)}
-        title={`Inject GPS Telemetry: ${gpsForm.type === 'shipment' ? 'Shipment' : 'Container'} #${gpsForm.id}`}
-        maxWidth="540px"
-      >
-        <form onSubmit={handleGpsSubmit} className="space-y-3">
-          <p className="text-xs text-muted">
-            Submitting coordinates updates physical telemetry, pushes a Kafka event, and broadcasts to live WebSocket STOMP subscribers.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Latitude (°N) *</label>
-              <input
-                type="number"
-                step="any"
-                className="input input-sm font-mono w-full"
-                value={gpsForm.latitude}
-                onChange={(e) => setGpsForm({ ...gpsForm, latitude: e.target.value })}
-                placeholder="e.g. 12.9716"
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Longitude (°E) *</label>
-              <input
-                type="number"
-                step="any"
-                className="input input-sm font-mono w-full"
-                value={gpsForm.longitude}
-                onChange={(e) => setGpsForm({ ...gpsForm, longitude: e.target.value })}
-                placeholder="e.g. 77.5946"
-                required
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label text-xs font-semibold">Location / Milestone Name</label>
-            <input
-              type="text"
-              className="input input-sm w-full"
-              value={gpsForm.locationName}
-              onChange={(e) => setGpsForm({ ...gpsForm, locationName: e.target.value })}
-              placeholder="e.g. Toll Plaza Kilometer 42, NH-48"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label text-xs font-semibold">Operational Telemetry Note</label>
-            <input
-              type="text"
-              className="input input-sm w-full"
-              value={gpsForm.note}
-              onChange={(e) => setGpsForm({ ...gpsForm, note: e.target.value })}
-              placeholder="e.g. Vehicle moving at 65 km/h on schedule"
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setShowGpsModal(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm flex items-center gap-1.5 text-white"
-              disabled={gpsUpdating}
-            >
-              {gpsUpdating ? <RefreshCw size={13} className="animate-spin" /> : <Navigation size={13} />}
-              <span>{gpsUpdating ? 'Broadcasting Ping...' : 'Transmit GPS Ping'}</span>
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* 4. Create Shipment Modal */}
-      <Modal
-        isOpen={showCreateShipmentModal}
-        onClose={() => setShowCreateShipmentModal(false)}
-        title="Provision Physical Freight Shipment"
-        maxWidth="640px"
-      >
-        <form onSubmit={handleCreateShipmentSubmit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Target Order ID *</label>
-              <div className="flex items-center gap-2">
+      {/* ========================================================================= */}
+      {/* MODAL 3: Update GPS Telemetry                                             */}
+      {/* ========================================================================= */}
+      {showGpsModal && (
+        <Modal
+          isOpen={showGpsModal}
+          onClose={() => setShowGpsModal(false)}
+          title="LOG PHYSICAL GPS TELEMETRY"
+          size="md"
+        >
+          <form onSubmit={handleGpsSubmit} className="space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="form-group">
+                <label className="form-label font-bold">Latitude *</label>
                 <input
-                  type="number"
-                  className="input input-sm w-full"
-                  value={createShipmentForm.orderId}
-                  onChange={(e) => {
-                    setCreateShipmentForm({ ...createShipmentForm, orderId: e.target.value });
-                    if (e.target.value) handleOrderLookup(e.target.value);
-                  }}
-                  placeholder="e.g. 1"
+                  type="text"
+                  className="input font-mono"
+                  value={gpsForm.latitude}
+                  onChange={(e) => setGpsForm((p) => ({ ...p, latitude: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label font-bold">Longitude *</label>
+                <input
+                  type="text"
+                  className="input font-mono"
+                  value={gpsForm.longitude}
+                  onChange={(e) => setGpsForm((p) => ({ ...p, longitude: e.target.value }))}
                   required
                 />
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label text-xs font-semibold">Carrier Logistics Partner</label>
-              <select
-                className="input input-sm w-full"
-                value={createShipmentForm.carrierName}
-                onChange={(e) => setCreateShipmentForm({ ...createShipmentForm, carrierName: e.target.value })}
-              >
-                {CARRIERS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Tracking / AWB Number</label>
+              <label className="form-label font-bold">Location Milestone Name</label>
               <input
                 type="text"
-                className="input input-sm mono-text w-full"
-                value={createShipmentForm.trackingNumber}
-                onChange={(e) => setCreateShipmentForm({ ...createShipmentForm, trackingNumber: e.target.value })}
-                placeholder="e.g. ECO-AWB-91823"
+                className="input"
+                value={gpsForm.locationName}
+                onChange={(e) => setGpsForm((p) => ({ ...p, locationName: e.target.value }))}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label text-xs font-semibold">Vehicle / Truck Plate</label>
-              <input
-                type="text"
-                className="input input-sm mono-text w-full"
-                value={createShipmentForm.vehicleNumber}
-                onChange={(e) => setCreateShipmentForm({ ...createShipmentForm, vehicleNumber: e.target.value })}
-                placeholder="e.g. KA-01-EQ-9812"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Origin Dispatch Yard</label>
-              <input
-                type="text"
-                className="input input-sm w-full"
-                value={createShipmentForm.origin}
-                onChange={(e) => setCreateShipmentForm({ ...createShipmentForm, origin: e.target.value })}
+              <label className="form-label font-bold">Telemetry Note</label>
+              <textarea
+                className="input"
+                rows={2}
+                value={gpsForm.note}
+                onChange={(e) => setGpsForm((p) => ({ ...p, note: e.target.value }))}
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Destination Address</label>
-              <input
-                type="text"
-                className="input input-sm w-full"
-                value={createShipmentForm.destination}
-                onChange={(e) => setCreateShipmentForm({ ...createShipmentForm, destination: e.target.value })}
-                placeholder="City, State"
-                required
-              />
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowGpsModal(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary font-bold" disabled={gpsUpdating}>
+                {gpsUpdating ? 'Logging...' : 'Save GPS Telemetry'}
+              </button>
             </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label text-xs font-semibold">Freight Expressway Corridor</label>
-            <input
-              type="text"
-              className="input input-sm w-full"
-              value={createShipmentForm.route}
-              onChange={(e) => setCreateShipmentForm({ ...createShipmentForm, route: e.target.value })}
-            />
-          </div>
-
-          {orderLookupData && (
-            <div className="p-2.5 rounded bg-[var(--surface)] border border-[var(--border-subtle)] text-xs">
-              <div className="font-semibold text-primary">Found Order #{orderLookupData.id}</div>
-              <div className="text-muted mt-0.5">
-                Customer: {orderLookupData.customer_name || orderLookupData.customerName || 'Customer'} | Items: {orderLookupData.items?.length || 1}
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setShowCreateShipmentModal(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm flex items-center gap-1.5 text-white"
-              disabled={creatingShipment}
-            >
-              {creatingShipment ? <RefreshCw size={13} className="animate-spin" /> : <Truck size={13} />}
-              <span>{creatingShipment ? 'Creating Shipment...' : 'Create & Dispatch Shipment'}</span>
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* 5. Create Container Modal */}
-      <Modal
-        isOpen={showCreateContainerModal}
-        onClose={() => setShowCreateContainerModal(false)}
-        title="Provision Freight Logistics Container"
-        maxWidth="540px"
-      >
-        <form onSubmit={handleCreateContainerSubmit} className="space-y-3">
-          <div className="form-group">
-            <label className="form-label text-xs font-semibold">Container Code / Identifier</label>
-            <input
-              type="text"
-              className="input input-sm mono-text w-full"
-              value={createContainerForm.containerCode}
-              onChange={(e) => setCreateContainerForm({ ...createContainerForm, containerCode: e.target.value })}
-              placeholder="e.g. CONT-ECO-8819 (leave blank to auto-generate)"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Origin Hub</label>
-              <input
-                type="text"
-                className="input input-sm w-full"
-                value={createContainerForm.origin}
-                onChange={(e) => setCreateContainerForm({ ...createContainerForm, origin: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label text-xs font-semibold">Destination Terminal</label>
-              <input
-                type="text"
-                className="input input-sm w-full"
-                value={createContainerForm.destination}
-                onChange={(e) => setCreateContainerForm({ ...createContainerForm, destination: e.target.value })}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label text-xs font-semibold">Freight Route</label>
-            <input
-              type="text"
-              className="input input-sm w-full"
-              value={createContainerForm.route}
-              onChange={(e) => setCreateContainerForm({ ...createContainerForm, route: e.target.value })}
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setShowCreateContainerModal(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm flex items-center gap-1.5 text-white"
-              disabled={creatingContainer}
-            >
-              {creatingContainer ? <RefreshCw size={13} className="animate-spin" /> : <Box size={13} />}
-              <span>{creatingContainer ? 'Provisioning...' : 'Create Container'}</span>
-            </button>
-          </div>
-        </form>
-      </Modal>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 };

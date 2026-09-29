@@ -1,0 +1,90 @@
+import base64
+import os
+import logging
+import jwt
+from django.conf import settings
+from django.contrib.auth.models import User
+from rest_framework import authentication
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+logger = logging.getLogger(__name__)
+
+class DualJWTAuthentication(authentication.BaseAuthentication):
+    """
+    Dual JWT Authentication backend supporting:
+    1. Standard SimpleJWT tokens issued by Django (customer authentication).
+    2. Spring Boot microservice JWT tokens issued by admin-staff-service or auth-service.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.simple_jwt_auth = JWTAuthentication()
+
+    def authenticate(self, request):
+        header = self.simple_jwt_auth.get_header(request)
+        if header is None:
+            return None
+
+        raw_token = self.simple_jwt_auth.get_raw_token(header)
+        if raw_token is None:
+            return None
+
+        # 1. Try standard Django SimpleJWT
+        try:
+            validated_token = self.simple_jwt_auth.get_validated_token(raw_token)
+            user = self.simple_jwt_auth.get_user(validated_token)
+            if user:
+                return (user, validated_token)
+        except Exception:
+            pass
+
+        # 2. Try Spring Boot microservice JWT token
+        token_str = raw_token.decode('utf-8') if isinstance(raw_token, bytes) else str(raw_token)
+        spring_secret = os.getenv('JWT_SECRET_KEY', '404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970')
+
+        keys_to_try = []
+        try:
+            keys_to_try.append(base64.b64decode(spring_secret))
+        except Exception:
+            pass
+        keys_to_try.append(spring_secret.encode('utf-8'))
+
+        for key in keys_to_try:
+            try:
+                payload = jwt.decode(token_str, key, algorithms=['HS256', 'HS384', 'HS512'])
+                username = payload.get('username') or payload.get('sub')
+                if not username:
+                    continue
+
+                user = User.objects.filter(username__iexact=username).first()
+                if not user:
+                    user = User.objects.filter(email__iexact=username).first()
+                if not user:
+                    # Auto-provision staff user if valid admin/staff token
+                    role = payload.get('role', '')
+                    is_admin_or_staff = any(r in ['ROLE_ADMIN', 'STAFF', 'ADMIN', 'INVENTORY_MANAGER', 'CATALOG_MANAGER', 'ORDER_MANAGER'] for r in [role] + payload.get('roles', []))
+                    user, _ = User.objects.get_or_create(
+                        username=username,
+                        defaults={
+                            'email': payload.get('email', f"{username}@econext.com"),
+                            'first_name': payload.get('name', username),
+                            'is_staff': is_admin_or_staff,
+                            'is_superuser': role == 'ROLE_ADMIN'
+                        }
+                    )
+
+                role = payload.get('role', '')
+                roles = payload.get('roles', [role] if role else [])
+                if any(r in ['ROLE_ADMIN', 'STAFF', 'ADMIN', 'INVENTORY_MANAGER', 'CATALOG_MANAGER', 'ORDER_MANAGER'] for r in roles):
+                    if not user.is_staff:
+                        user.is_staff = True
+                        user.save(update_fields=['is_staff'])
+
+                return (user, payload)
+            except jwt.PyJWTError:
+                continue
+            except Exception as ex:
+                logger.debug("Error decoding Spring JWT token: %s", ex)
+                continue
+
+        return None

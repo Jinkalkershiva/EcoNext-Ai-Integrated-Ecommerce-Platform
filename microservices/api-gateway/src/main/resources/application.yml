@@ -17,9 +17,8 @@ spring:
           order: 1
 
         # 2. Product Catalog, Taxonomies & Kids Route (Order: 2)
-        # Note: /api/products/trending/ is naturally routed here under /api/products/**
         - id: product-service-route
-          uri: ${PRODUCT_SERVICE_URL:http://localhost:8082}
+          uri: ${PRODUCT_SERVICE_URL:http://localhost:8000}
           predicates:
             - Path=/api/products/**, /api/categories/**, /api/kids/**
           order: 2
@@ -71,7 +70,7 @@ spring:
         - id: admin-staff-service-route
           uri: ${ADMIN_SERVICE_URL:http://localhost:8085}
           predicates:
-            - Path=/api/admin/**, /api/staff/**
+            - Path=/api/admin/auth/**, /api/admin/staff/**, /api/staff/**, /api/admin/roles/**, /api/admin/permissions/**, /api/admin/audit/**
           order: 9
 
         # 10. Catalog & Inventory Operations Service (Order: 10)

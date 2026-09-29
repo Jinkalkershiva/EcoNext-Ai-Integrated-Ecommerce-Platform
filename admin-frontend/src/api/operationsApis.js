@@ -1,5 +1,11 @@
 import { apiRequest, authStore } from './client';
-import { staffApi as baseStaffApi, rolesApi as baseRolesApi, authApi as baseAuthApi } from './adminApis';
+import { 
+  staffApi as baseStaffApi, 
+  rolesApi as baseRolesApi, 
+  authApi as baseAuthApi,
+  databaseQueryApi as baseDatabaseQueryApi,
+  bulkImportApi as baseBulkImportApi
+} from './adminApis';
 
 // Re-export staff & role APIs
 export const staffApi = {
@@ -22,6 +28,8 @@ export const roleApi = {
 };
 
 export const authApi = baseAuthApi;
+export const databaseQueryApi = baseDatabaseQueryApi;
+export const bulkImportApi = baseBulkImportApi;
 
 export const catalogOpsApi = {
   getProducts: async (params = {}) => {
