@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Package,
   Plus,
@@ -10,7 +11,9 @@ import {
   Tag,
   X,
   Search,
-  RefreshCw
+  RefreshCw,
+  ChevronDown,
+  UploadCloud
 } from 'lucide-react';
 import { catalogOpsApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
@@ -19,6 +22,7 @@ import { StatusBadge } from '../components/Badge';
 import { useAuth } from '../context/AuthContext';
 
 export const ProductsPage = () => {
+  const navigate = useNavigate();
   const { hasPermission, isAdmin } = useAuth();
   const canManage = isAdmin() || hasPermission('CATALOG_MANAGE');
 
@@ -27,6 +31,10 @@ export const ProductsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Dropdown Menu State
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const addMenuRef = useRef(null);
 
   // Modals
   const [showProductModal, setShowProductModal] = useState(false);
@@ -71,6 +79,16 @@ export const ProductsPage = () => {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target)) {
+        setShowAddMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const openCreateModal = () => {
@@ -260,10 +278,111 @@ export const ProductsPage = () => {
           searchPlaceholder="Search by name, SKU, or tags..."
           actions={
             canManage && (
-              <button className="btn btn-primary btn-sm flex items-center gap-1.5" onClick={openCreateModal}>
-                <Plus size={14} />
-                <span>Create Eco Product</span>
-              </button>
+              <div className="relative inline-block text-left" ref={addMenuRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm flex items-center gap-1.5"
+                  onClick={() => setShowAddMenu(!showAddMenu)}
+                  aria-haspopup="true"
+                  aria-expanded={showAddMenu}
+                >
+                  <Plus size={14} />
+                  <span>+ Add Product</span>
+                  <ChevronDown size={14} style={{ transform: showAddMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }} />
+                </button>
+
+                {showAddMenu && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: 'calc(100% + 6px)',
+                      zIndex: 100,
+                      minWidth: '240px',
+                      backgroundColor: 'var(--card-bg, #ffffff)',
+                      border: '1px solid var(--border-color, #e2e8f0)',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                      padding: '0.4rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.2rem'
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddMenu(false);
+                        openCreateModal();
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.65rem',
+                        width: '100%',
+                        padding: '0.6rem 0.75rem',
+                        fontSize: '0.85rem',
+                        fontWeight: '500',
+                        color: 'var(--text-primary, #1e293b)',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        borderRadius: 'var(--radius-sm, 6px)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover, #f1f5f9)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <Package size={16} className="text-primary" />
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Create Single Product</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Manual entry form</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddMenu(false);
+                        navigate('/import');
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.65rem',
+                        width: '100%',
+                        padding: '0.6rem 0.75rem',
+                        fontSize: '0.85rem',
+                        fontWeight: '500',
+                        color: 'var(--text-primary, #1e293b)',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        borderRadius: 'var(--radius-sm, 6px)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover, #f1f5f9)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <UploadCloud size={16} style={{ color: '#059669' }} />
+                      <div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Bulk Import Products</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>CSV / XLSX batch import wizard</div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
             )
           }
         />

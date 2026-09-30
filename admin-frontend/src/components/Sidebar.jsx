@@ -8,7 +8,6 @@ import {
   Layers,
   Truck,
   Navigation,
-  UploadCloud,
   Database,
   Users,
   UserCheck,
@@ -86,12 +85,6 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
       path: '/notifications',
       icon: Bell,
       visible: isAdmin() || hasPermission('ORDER_VIEW')
-    },
-    {
-      label: 'Bulk Import Wizard',
-      path: '/import',
-      icon: UploadCloud,
-      visible: isAdmin() || hasPermission('IMPORT_RUN')
     },
     {
       section: 'GOVERNANCE & INSIGHTS'
