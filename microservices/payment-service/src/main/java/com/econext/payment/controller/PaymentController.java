@@ -24,6 +24,8 @@ public class PaymentController {
 
     private final PaymentService paymentService;
 
+    // Called by API Gateway (/api/payments/create-order) during customer checkout.
+    // Initializes Razorpay Order ID and records a pending payment transaction.
     @PostMapping({"/create-order", "/create-order/"})
     public ResponseEntity<ApiResponse<PaymentResponse>> createOrder(
             @Valid @RequestBody CreatePaymentRequest request,
@@ -34,6 +36,8 @@ public class PaymentController {
                 .body(ApiResponse.success("Payment order initialized", response));
     }
 
+    // Called by API Gateway (/api/payments/verify) after Razorpay checkout completion.
+    // Performs server-side HMAC-SHA256 cryptographic verification and emits PAYMENT_SUCCESS to Kafka topic 'payment-events'.
     @PostMapping({"/verify", "/verify/"})
     public ResponseEntity<ApiResponse<PaymentResponse>> verifyPayment(
             @Valid @RequestBody VerifyPaymentRequest request,

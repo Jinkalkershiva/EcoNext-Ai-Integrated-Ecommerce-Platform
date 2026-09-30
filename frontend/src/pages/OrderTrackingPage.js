@@ -15,13 +15,15 @@ import {
   ShoppingBag,
   MapPin,
   CreditCard,
-  ArrowLeft,
   Calendar,
   ShieldCheck,
   Search,
   ExternalLink,
   Radio,
-  Navigation
+  Lock,
+  KeyRound,
+  Send,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './OrderTrackingPage.css';
@@ -36,9 +38,16 @@ export const OrderTrackingPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState(null);
-  const [wsConnected, setWsConnected] = useState(false);
+  const [wsStatus, setWsStatus] = useState('connecting'); // 'connected' | 'connecting' | 'disconnected'
   const [liveLocation, setLiveLocation] = useState(null);
   const [lastLiveEvent, setLastLiveEvent] = useState(null);
+
+  // Delivery OTP Verification States
+  const [deliveryOtp, setDeliveryOtp] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpSuccess, setOtpSuccess] = useState(null);
+  const [otpError, setOtpError] = useState(null);
+  const [otpResent, setOtpResent] = useState(false);
 
   const targetOrderId = params?.orderId || params?.id;
   const stompClientRef = useRef(null);
@@ -84,15 +93,16 @@ export const OrderTrackingPage = () => {
   useEffect(() => {
     if (!selectedOrder?.id) return;
 
+    setWsStatus('connecting');
     const client = createTrackingClient();
     stompClientRef.current = client;
 
     client.onConnect(() => {
-      setWsConnected(true);
+      setWsStatus('connected');
     });
 
     client.onDisconnect(() => {
-      setWsConnected(false);
+      setWsStatus('disconnected');
     });
 
     client.connect();
@@ -103,14 +113,27 @@ export const OrderTrackingPage = () => {
       setLastLiveEvent(data);
 
       if (data.eventType === 'SHIPMENT_STATUS_UPDATED' || data.status) {
+        const newStatus = (data.status || '').toUpperCase();
         setSelectedOrder((prev) => {
           if (!prev || String(prev.id) !== String(data.orderId)) return prev;
-          const updatedStatus = data.status;
+
+          // Dynamically update timeline steps based on incoming state
+          const updatedTimeline = (prev.tracking_timeline || []).map((step) => {
+            if (newStatus === 'DELIVERED') {
+              return { ...step, state: 'completed' };
+            }
+            if (step.step === newStatus) {
+              return { ...step, state: 'current', timestamp: new Date().toISOString() };
+            }
+            return step;
+          });
+
           return {
             ...prev,
-            status: updatedStatus,
+            status: newStatus,
             carrier_name: data.carrierName || prev.carrier_name,
-            tracking_number: data.trackingNumber || prev.tracking_number
+            tracking_number: data.trackingNumber || prev.tracking_number,
+            tracking_timeline: updatedTimeline
           };
         });
       }
@@ -135,7 +158,7 @@ export const OrderTrackingPage = () => {
         orderSub.unsubscribe();
       }
       client.disconnect();
-      setWsConnected(false);
+      setWsStatus('disconnected');
     };
   }, [selectedOrder?.id]);
 
@@ -154,8 +177,72 @@ export const OrderTrackingPage = () => {
     if (found) {
       setSelectedOrder(found);
       setError(null);
+      setOtpSuccess(null);
+      setOtpError(null);
     } else {
       setError(`No order found matching "${searchQuery}".`);
+    }
+  };
+
+  // Delivery OTP Verification Handler
+  const handleVerifyDeliveryOtp = async (e) => {
+    e?.preventDefault();
+    if (!deliveryOtp.trim()) {
+      setOtpError('Please enter the 6-digit delivery PIN.');
+      return;
+    }
+    setOtpLoading(true);
+    setOtpError(null);
+    setOtpSuccess(null);
+    try {
+      const res = await apiService.verifyOrderDeliveryOtp(selectedOrder.id, deliveryOtp.trim());
+      const successMsg = res?.message || 'Delivery PIN verified successfully! Order marked as DELIVERED.';
+      setOtpSuccess(successMsg);
+      setDeliveryOtp('');
+
+      // Instantly update selected order status locally and in order list
+      setSelectedOrder((prev) => {
+        if (!prev) return prev;
+        const updatedTimeline = (prev.tracking_timeline || []).map((step) => ({
+          ...step,
+          state: 'completed',
+          timestamp: step.step === 'DELIVERED' ? new Date().toISOString() : step.timestamp
+        }));
+
+        return {
+          ...prev,
+          status: 'DELIVERED',
+          tracking_timeline: updatedTimeline
+        };
+      });
+
+      setOrders((prevOrders) =>
+        prevOrders.map((ord) =>
+          ord.id === selectedOrder.id ? { ...ord, status: 'DELIVERED' } : ord
+        )
+      );
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Invalid or expired Delivery PIN. Please try again.';
+      setOtpError(msg);
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // Delivery OTP Resend Handler
+  const handleResendDeliveryOtp = async () => {
+    setOtpLoading(true);
+    setOtpError(null);
+    try {
+      await apiService.sendOrderDeliveryOtp(selectedOrder.id);
+      setOtpResent(true);
+      setOtpSuccess('A fresh 6-digit Delivery PIN has been sent to your email.');
+      setTimeout(() => setOtpResent(false), 30000);
+    } catch (err) {
+      const msg = err?.data?.message || err?.message || 'Failed to resend Delivery PIN. Please try again.';
+      setOtpError(msg);
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -206,6 +293,13 @@ export const OrderTrackingPage = () => {
 
   const badge = getStatusBadgeStyle(selectedOrder?.status);
   const timeline = selectedOrder?.tracking_timeline || [];
+  const isOutForDelivery = (selectedOrder?.status || '').toUpperCase() === 'OUT_FOR_DELIVERY';
+  const isDelivered = (selectedOrder?.status || '').toUpperCase() === 'DELIVERED';
+
+  // Compute active GPS coordinates
+  const currentLat = liveLocation?.latitude || selectedOrder?.current_latitude;
+  const currentLon = liveLocation?.longitude || selectedOrder?.current_longitude;
+  const mapsUrl = (currentLat && currentLon) ? `https://www.google.com/maps?q=${currentLat},${currentLon}` : null;
 
   return (
     <div className="container tracking-page-container">
@@ -286,6 +380,8 @@ export const OrderTrackingPage = () => {
                   onClick={() => {
                     setSelectedOrder(ord);
                     setError(null);
+                    setOtpSuccess(null);
+                    setOtpError(null);
                   }}
                 >
                   <div className="order-mini-header">
@@ -465,6 +561,141 @@ export const OrderTrackingPage = () => {
               </div>
             </div>
 
+            {/* Interactive Delivery PIN / OTP Verification Widget (Shown when OUT_FOR_DELIVERY) */}
+            {isOutForDelivery && (
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                  border: '2px solid #10b981',
+                  borderRadius: 'var(--radius-lg, 12px)',
+                  padding: '1.5rem',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.12)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#059669', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <KeyRound size={20} />
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#064e3b' }}>
+                        Secure Delivery PIN Verification
+                      </h4>
+                      <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.8rem', color: '#047857' }}>
+                        Your package is Out for Delivery! Enter the 6-digit PIN sent to your email to confirm package handover.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    style={{
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '9999px',
+                      backgroundColor: '#d1fae5',
+                      color: '#065f46',
+                      fontWeight: 700,
+                      fontSize: '0.75rem',
+                      border: '1px solid #a7f3d0'
+                    }}
+                  >
+                    🔐 PIN Active (10m TTL)
+                  </span>
+                </div>
+
+                <form onSubmit={handleVerifyDeliveryOtp} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      pattern="[0-9]*"
+                      className="form-input"
+                      placeholder="Enter 6-Digit PIN"
+                      value={deliveryOtp}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '');
+                        setDeliveryOtp(val);
+                        setOtpError(null);
+                      }}
+                      style={{
+                        maxWidth: '220px',
+                        fontSize: '1.25rem',
+                        fontWeight: 800,
+                        letterSpacing: '4px',
+                        textAlign: 'center',
+                        fontFamily: 'var(--font-mono, monospace)',
+                        border: '2px solid #059669',
+                        padding: '0.55rem 0.75rem',
+                        backgroundColor: '#ffffff'
+                      }}
+                    />
+
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="md"
+                      disabled={otpLoading || deliveryOtp.length < 4}
+                      icon={<CheckCheck size={18} />}
+                      style={{ backgroundColor: '#059669', borderColor: '#059669', fontWeight: 700 }}
+                    >
+                      {otpLoading ? 'Verifying...' : 'Verify & Mark Delivered'}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="md"
+                      onClick={handleResendDeliveryOtp}
+                      disabled={otpLoading || otpResent}
+                      icon={<Send size={15} />}
+                    >
+                      {otpResent ? 'PIN Resent' : 'Resend PIN'}
+                    </Button>
+                  </div>
+
+                  {otpError && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#b91c1c', fontSize: '0.85rem', fontWeight: 600, marginTop: '0.35rem' }}>
+                      <AlertCircle size={16} />
+                      {otpError}
+                    </div>
+                  )}
+
+                  {otpSuccess && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#047857', fontSize: '0.85rem', fontWeight: 700, marginTop: '0.35rem' }}>
+                      <CheckCircle2 size={16} />
+                      {otpSuccess}
+                    </div>
+                  )}
+                </form>
+              </div>
+            )}
+
+            {/* Delivery Success Confirmation Card */}
+            {isDelivered && (
+              <div
+                style={{
+                  backgroundColor: '#f0fdf4',
+                  border: '1px solid #86efac',
+                  borderRadius: 'var(--radius-lg, 12px)',
+                  padding: '1.2rem 1.4rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem'
+                }}
+              >
+                <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#16a34a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <CheckCheck size={22} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#166534' }}>
+                    Package Delivered Successfully!
+                  </h4>
+                  <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.85rem', color: '#15803d' }}>
+                    Thank you for supporting 100% sustainable, carbon-neutral commerce with EcoNext.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Live Real-Time Vehicle GPS Telemetry Stream */}
             <div
               style={{
@@ -485,13 +716,13 @@ export const OrderTrackingPage = () => {
                       width: '10px',
                       height: '10px',
                       borderRadius: '50%',
-                      backgroundColor: wsConnected ? '#10b981' : '#94a3b8',
-                      boxShadow: wsConnected ? '0 0 0 3px rgba(16, 185, 129, 0.3)' : 'none',
-                      animation: wsConnected ? 'pulse 2s infinite' : 'none'
+                      backgroundColor: wsStatus === 'connected' ? '#10b981' : wsStatus === 'connecting' ? '#f59e0b' : '#94a3b8',
+                      boxShadow: wsStatus === 'connected' ? '0 0 0 3px rgba(16, 185, 129, 0.3)' : 'none',
+                      animation: wsStatus === 'connected' ? 'pulse 2s infinite' : 'none'
                     }}
                   />
                   <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <Radio size={16} color={wsConnected ? '#10b981' : 'var(--text-muted)'} />
+                    <Radio size={16} color={wsStatus === 'connected' ? '#10b981' : 'var(--text-muted)'} />
                     Live Logistics & GPS Telemetry Stream
                   </h4>
                 </div>
@@ -501,13 +732,13 @@ export const OrderTrackingPage = () => {
                     style={{
                       padding: '0.2rem 0.55rem',
                       borderRadius: '9999px',
-                      backgroundColor: wsConnected ? '#dcfce7' : '#f1f5f9',
-                      color: wsConnected ? '#15803d' : '#64748b',
-                      fontWeight: 600,
-                      border: wsConnected ? '1px solid #bbf7d0' : '1px solid #e2e8f0'
+                      backgroundColor: wsStatus === 'connected' ? '#dcfce7' : wsStatus === 'connecting' ? '#fef3c7' : '#f1f5f9',
+                      color: wsStatus === 'connected' ? '#15803d' : wsStatus === 'connecting' ? '#b45309' : '#64748b',
+                      fontWeight: 700,
+                      border: wsStatus === 'connected' ? '1px solid #bbf7d0' : wsStatus === 'connecting' ? '1px solid #fde68a' : '1px solid #e2e8f0'
                     }}
                   >
-                    {wsConnected ? '● STOMP WebSocket Live' : '○ Standby Mode'}
+                    {wsStatus === 'connected' ? '● STOMP WebSocket Live' : wsStatus === 'connecting' ? '○ Connecting...' : '○ Standby Mode'}
                   </span>
                 </div>
               </div>
@@ -527,13 +758,38 @@ export const OrderTrackingPage = () => {
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
                     Current GPS Coordinates
                   </span>
-                  <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: '0.9rem', color: liveLocation?.latitude ? '#059669' : 'var(--text-secondary)' }}>
-                    {liveLocation?.latitude && liveLocation?.longitude
-                      ? `${Number(liveLocation.latitude).toFixed(4)}° N, ${Number(liveLocation.longitude).toFixed(4)}° E`
-                      : (selectedOrder.current_latitude && selectedOrder.current_longitude
-                        ? `${Number(selectedOrder.current_latitude).toFixed(4)}° N, ${Number(selectedOrder.current_longitude).toFixed(4)}° E`
-                        : 'Awaiting first GPS ping')}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                    <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: '0.9rem', color: currentLat ? '#059669' : 'var(--text-secondary)' }}>
+                      {currentLat && currentLon
+                        ? `${Number(currentLat).toFixed(4)}° N, ${Number(currentLon).toFixed(4)}° E`
+                        : 'Awaiting first GPS ping'}
+                    </span>
+
+                    {mapsUrl && (
+                      <a
+                        href={mapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          fontSize: '0.78rem',
+                          color: '#059669',
+                          fontWeight: 700,
+                          textDecoration: 'none',
+                          padding: '0.2rem 0.55rem',
+                          borderRadius: '4px',
+                          backgroundColor: '#ecfdf5',
+                          border: '1px solid #a7f3d0',
+                          width: 'fit-content'
+                        }}
+                      >
+                        <ExternalLink size={13} />
+                        Open in Google Maps
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 <div>

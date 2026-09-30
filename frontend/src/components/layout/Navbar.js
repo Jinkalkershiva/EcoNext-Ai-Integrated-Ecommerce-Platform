@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Leaf, Search, Camera, ShoppingBag, User, LogOut, Menu, X, Sparkles, SlidersHorizontal, ChevronDown, LayoutDashboard, Truck } from 'lucide-react';
+import { Leaf, Search, Camera, ShoppingBag, User, LogOut, Menu, X, Sparkles, SlidersHorizontal, ChevronDown, LayoutDashboard, Truck, TrendingUp } from 'lucide-react';
 import { useNavigation } from '../../context/NavigationContext';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
@@ -99,7 +99,7 @@ export const Navbar = () => {
                 className={`nav-link ${page === 'trending' ? 'active' : ''}`}
                 onClick={() => navigateTo('trending')}
               >
-                🔥 Trending
+                <TrendingUp size={14} style={{ color: 'var(--color-primary)' }} /> Trending
               </span>
             </li>
             <li>
@@ -389,10 +389,10 @@ export const Navbar = () => {
                 <button
                   type="button"
                   className="nav-link"
-                  style={{ justifyContent: 'flex-start', padding: '0.75rem' }}
+                  style={{ justifyContent: 'flex-start', padding: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                   onClick={() => { navigateTo('trending'); setMobileMenuOpen(false); }}
                 >
-                  🔥 Trending Products
+                  <TrendingUp size={16} /> Trending Products
                 </button>
                 <button
                   type="button"

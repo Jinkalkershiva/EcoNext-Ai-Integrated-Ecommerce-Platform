@@ -107,6 +107,20 @@ export const catalogOpsApi = {
     }
   },
 
+  searchProductImages: async (query = '', category = '') => {
+    const params = new URLSearchParams();
+    if (query) params.append('query', query);
+    if (category) params.append('category', category);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    try {
+      const res = await apiRequest(`/admin/products/image-search/${queryString}`);
+      return res.results || res.data || res || [];
+    } catch {
+      const res = await apiRequest(`/catalog-ops/products/image-search${queryString}`);
+      return res.data || res || [];
+    }
+  },
+
   getCategories: async () => {
     try {
       const res = await apiRequest('/admin/categories/');

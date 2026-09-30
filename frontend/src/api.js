@@ -40,6 +40,12 @@ const PAYMENT_API_BASE =
     import.meta.env.VITE_PAYMENT_API_URL) ||
   'http://localhost:8087/api/payments';
 
+const ORDER_OPS_API_BASE =
+  (typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    import.meta.env.VITE_ORDER_OPS_API_URL) ||
+  'http://localhost:8084/api/order-ops';
+
 const ACCESS_TOKEN_KEY = 'authToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 // 'user' rather than 'authUser' so that sessions already in localStorage from
@@ -238,10 +244,18 @@ async function request(path, options = {}) {
     if (token) requestHeaders.Authorization = `Bearer ${token}`;
   }
 
-  const fullUrl =
-    typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))
-      ? path
-      : `${API_BASE_URL}${path}`;
+  let fullUrl;
+  if (typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) {
+    fullUrl = path;
+  } else if (typeof path === 'string' && path.startsWith('/order-ops')) {
+    fullUrl = `${ORDER_OPS_API_BASE}${path.replace(/^\/order-ops/, '')}`;
+  } else if (typeof path === 'string' && path.startsWith('/notifications')) {
+    fullUrl = `${NOTIFICATION_API_BASE}${path.replace(/^\/notifications/, '')}`;
+  } else if (typeof path === 'string' && path.startsWith('/payments')) {
+    fullUrl = `${PAYMENT_API_BASE}${path.replace(/^\/payments/, '')}`;
+  } else {
+    fullUrl = `${API_BASE_URL}${path}`;
+  }
 
   let response;
   try {
@@ -580,6 +594,42 @@ export const apiService = {
 
   getOrderDetail(orderId) {
     return request(`/orders/${orderId}/`, { auth: true });
+  },
+
+  // ---------- Delivery OTP & Live Logistics Tracking ----------
+
+  verifyDeliveryOtp(shipmentId, otp, deliveryStaffUsername = 'CUSTOMER') {
+    return request(`/order-ops/shipments/${shipmentId}/delivery-otp/verify`, {
+      method: 'POST',
+      body: { otp, deliveryStaffUsername },
+    });
+  },
+
+  verifyOrderDeliveryOtp(orderId, otp, deliveryStaffUsername = 'CUSTOMER') {
+    return request(`/order-ops/orders/${orderId}/delivery-otp/verify`, {
+      method: 'POST',
+      body: { otp, deliveryStaffUsername },
+    });
+  },
+
+  sendDeliveryOtp(shipmentId) {
+    return request(`/order-ops/shipments/${shipmentId}/delivery-otp/send`, {
+      method: 'POST',
+    });
+  },
+
+  sendOrderDeliveryOtp(orderId) {
+    return request(`/order-ops/orders/${orderId}/delivery-otp/send`, {
+      method: 'POST',
+    });
+  },
+
+  getDeliveryOtpStatus(shipmentId) {
+    return request(`/order-ops/shipments/${shipmentId}/delivery-otp/status`);
+  },
+
+  getShipmentTracking(shipmentId) {
+    return request(`/order-ops/shipments/${shipmentId}/tracking`);
   },
 
   // ---------- Copilot ----------

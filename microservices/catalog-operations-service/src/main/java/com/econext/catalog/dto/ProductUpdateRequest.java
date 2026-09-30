@@ -34,6 +34,9 @@ public class ProductUpdateRequest {
     @JsonAlias({"imageUrl", "image_url"})
     private String imageUrl;
 
+    @JsonAlias({"additionalImages", "additional_images", "additionalImageUrls"})
+    private List<String> additionalImages;
+
     @Min(value = 0, message = "Stock cannot be negative")
     @JsonAlias({"stockQuantity", "stock", "quantity"})
     private Integer stock;
@@ -60,6 +63,18 @@ public class ProductUpdateRequest {
                     .toList();
         } else if (rawTags instanceof List<?> list) {
             this.tags = list.stream().map(Object::toString).toList();
+        }
+    }
+
+    @JsonProperty("additionalImages")
+    public void setAdditionalImagesObject(Object raw) {
+        if (raw instanceof String str) {
+            this.additionalImages = Arrays.stream(str.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+        } else if (raw instanceof List<?> list) {
+            this.additionalImages = list.stream().map(Object::toString).toList();
         }
     }
 }

@@ -50,7 +50,7 @@ export const ProductCard = ({ product, onViewDetails, onAddToCart, children }) =
       {/* Media Image */}
       <div className="product-card-media" onClick={handleCardClick}>
         <img
-          src={!imageError && product.image_url ? product.image_url : fallbackImage}
+          src={!imageError && (product.image_url || product.imageUrl) ? (product.image_url || product.imageUrl) : fallbackImage}
           alt={product.name || 'Eco Product'}
           className="product-card-image"
           loading="lazy"

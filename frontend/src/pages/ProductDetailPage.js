@@ -26,6 +26,7 @@ export const ProductDetailPage = ({ productId: propProductId }) => {
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState('overview');
   const [isCopied, setIsCopied] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
 
   useEffect(() => {
     const fetchProductData = async () => {
@@ -36,6 +37,7 @@ export const ProductDetailPage = ({ productId: propProductId }) => {
         const data = await apiService.getProductDetail(idToLoad);
         if (data && data.status === 'success') {
           setProduct(data.product);
+          setSelectedImage(data.product.image_url || data.product.imageUrl || null);
           setPrediction(data.price_prediction);
 
           if (data.product?.category?.id || data.product?.category_id) {
@@ -100,6 +102,11 @@ export const ProductDetailPage = ({ productId: propProductId }) => {
   const ecoTags = Array.isArray(product.eco_tags) ? product.eco_tags : [];
   const inStock = product.stock === undefined || product.stock > 0;
 
+  const primaryImg = product.image_url || product.imageUrl || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80';
+  const additionalImgs = Array.isArray(product.additional_images) ? product.additional_images : (Array.isArray(product.additionalImages) ? product.additionalImages : []);
+  const allImages = [primaryImg, ...additionalImgs].filter(Boolean);
+  const displayImage = selectedImage || primaryImg;
+
   return (
     <div className="container">
       {/* Navigation Breadcrumb */}
@@ -125,11 +132,39 @@ export const ProductDetailPage = ({ productId: propProductId }) => {
         <div className="product-gallery-side">
           <div className="product-main-image-frame">
             <img
-              src={product.image_url || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80'}
+              src={displayImage}
               alt={product.name}
               className="product-main-image"
+              onError={(e) => {
+                e.currentTarget.src = 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80';
+              }}
             />
           </div>
+
+          {allImages.length > 1 && (
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
+              {allImages.map((img, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setSelectedImage(img)}
+                  style={{
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: 'var(--radius-sm, 6px)',
+                    overflow: 'hidden',
+                    border: displayImage === img ? '2px solid var(--color-primary, #059669)' : '1px solid var(--border-subtle, #e2e8f0)',
+                    padding: 0,
+                    cursor: 'pointer',
+                    backgroundColor: 'var(--bg-surface-sunken, #f8fafc)',
+                    flexShrink: 0
+                  }}
+                >
+                  <img src={img} alt={`Thumb ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </button>
+              ))}
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <div

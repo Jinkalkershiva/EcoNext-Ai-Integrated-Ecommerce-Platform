@@ -28,6 +28,8 @@ public class InventoryOperationsController {
 
     private final OperationalInventoryService inventoryService;
 
+    // Called by API Gateway (/api/inventory-ops/adjust) from Admin Frontend (InventoryPage).
+    // Mutates product quantity in MySQL and writes an immutable audit record to stock_adjustment_log.
     @PostMapping("/adjust")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('INVENTORY_ADJUST')")
     @Operation(summary = "Adjust inventory stock for a product with reason logging and staff attribution")

@@ -184,4 +184,44 @@ public class DataImportAnalysisServiceApplicationTests {
         assertNotNull(kpis.getOrderStatusDistribution());
         assertNotNull(kpis.getCategoryDistribution());
     }
+
+    @Test
+    @DisplayName("5. In-File Duplicate SKU Validation and Rejection")
+    void testInFileDuplicateSkuDetection() throws Exception {
+        String csvContent = "sku,name,current_price,stock\n" +
+                "TEST-DUP-001,Recycled Notebook,12.50,50\n" +
+                "TEST-DUP-001,Alternative Recycled Notebook,12.50,30\n" +
+                "TEST-UNIQUE-002,Bamboo Pen Set,5.00,100\n";
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "sku_duplicate_test.csv",
+                "text/csv",
+                csvContent.getBytes(StandardCharsets.UTF_8)
+        );
+
+        HeaderDetectionResponse detection = importService.uploadAndDetectHeaders(file);
+        assertNotNull(detection);
+        assertEquals("sku", detection.getSuggestedMappings().get("sku"));
+
+        Map<String, String> mapping = Map.of(
+                "sku", "sku",
+                "name", "name",
+                "current_price", "currentPrice",
+                "stock", "stock"
+        );
+
+        ImportPreviewResponse preview = importService.previewImport(
+                ImportPreviewRequest.builder()
+                        .fileId(detection.getFileId())
+                        .columnMapping(mapping)
+                        .checkDuplicates(true)
+                        .build()
+        );
+
+        assertEquals(3, preview.getTotalRows());
+        assertEquals(2, preview.getValidRows()); // Row 1 valid, Row 2 duplicate SKU (invalid), Row 3 valid
+        assertEquals(1, preview.getInvalidRows());
+        assertEquals(1, preview.getDuplicateRows());
+    }
 }

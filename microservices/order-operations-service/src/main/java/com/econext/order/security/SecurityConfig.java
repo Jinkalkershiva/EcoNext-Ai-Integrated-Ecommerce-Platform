@@ -37,7 +37,13 @@ public class SecurityConfig {
                     "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/actuator/health",
-                    "/actuator/info"
+                    "/actuator/info",
+                    "/ws-tracking/**",
+                    "/api/order-ops/shipments/*/delivery-otp/**",
+                    "/api/order-ops/shipments/*/verify-delivery-pin",
+                    "/api/order-ops/shipments/*/send-otp",
+                    "/api/order-ops/orders/*/delivery-otp/**",
+                    "/api/order-ops/shipments/*/tracking"
                 ).permitAll()
                 .anyRequest().authenticated()
             )

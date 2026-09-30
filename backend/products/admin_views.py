@@ -133,6 +133,33 @@ def admin_dashboard_stats(request):
     })
 
 
+def sanitize_image_url(url_str):
+    if not url_str or not isinstance(url_str, str):
+        return ''
+    cleaned = url_str.strip()
+    lower = cleaned.lower()
+    if lower.startswith('http://') or lower.startswith('https://'):
+        return cleaned
+    if lower.startswith('//'):
+        return f"https:{cleaned}"
+    # Block unsafe schemes like javascript: or data: dangerous execution
+    return ''
+
+
+def sanitize_image_list(images):
+    if isinstance(images, str):
+        images = [i.strip() for i in images.split(',') if i.strip()]
+    if not isinstance(images, list):
+        return []
+    res = []
+    for item in images:
+        if isinstance(item, str):
+            sanitized = sanitize_image_url(item)
+            if sanitized and sanitized not in res:
+                res.append(sanitized)
+    return res
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAdminOrInternalService])
 def admin_products_list_create(request):
@@ -191,8 +218,11 @@ def admin_products_list_create(request):
             raw_price = data.get('price') or data.get('current_price') or data.get('currentPrice') or '0.00'
             raw_stock = data.get('stockQuantity') if data.get('stockQuantity') is not None else (data.get('stock') if data.get('stock') is not None else 10)
             raw_score = data.get('sustainabilityScore') or data.get('sustainability_score') or 85.0
-            raw_image = data.get('image_url') or data.get('imageUrl') or ''
+            raw_image = sanitize_image_url(data.get('image_url') or data.get('imageUrl') or '')
             raw_sku = data.get('sku', '').strip()
+
+            additional_images_raw = data.get('additional_images') or data.get('additionalImages') or []
+            additional_images_clean = sanitize_image_list(additional_images_raw)
 
             # Process tags
             raw_tags = data.get('tags', ['sustainable', 'eco-friendly'])
@@ -206,12 +236,17 @@ def admin_products_list_create(request):
             if raw_sku and f"SKU:{raw_sku}" not in tags_list and raw_sku not in tags_list:
                 tags_list.insert(0, f"SKU:{raw_sku}")
 
+            image_features = {
+                'additional_images': additional_images_clean
+            }
+
             product = Product.objects.create(
                 name=data.get('name', '').strip(),
                 description=data.get('description', '').strip(),
                 category=category,
                 current_price=Decimal(str(raw_price)),
                 image_url=raw_image,
+                image_features=image_features,
                 stock=int(raw_stock),
                 sustainability_score=float(raw_score),
                 popularity_score=float(data.get('popularity_score', 5.0)),
@@ -301,7 +336,12 @@ def admin_product_detail(request, pk):
         if 'stock' in data or 'stockQuantity' in data:
             product.stock = int(data.get('stock') if data.get('stock') is not None else data.get('stockQuantity', 0))
         if 'image_url' in data or 'imageUrl' in data:
-            product.image_url = data.get('image_url') or data.get('imageUrl')
+            product.image_url = sanitize_image_url(data.get('image_url') or data.get('imageUrl'))
+        if 'additional_images' in data or 'additionalImages' in data:
+            add_imgs = sanitize_image_list(data.get('additional_images') or data.get('additionalImages'))
+            features = product.image_features or {}
+            features['additional_images'] = add_imgs
+            product.image_features = features
         if 'sustainability_score' in data or 'sustainabilityScore' in data:
             product.sustainability_score = float(data.get('sustainability_score') or data.get('sustainabilityScore', 80))
         if 'popularity_score' in data:
@@ -353,6 +393,96 @@ def admin_product_detail(request, pk):
         product_name = product.name
         product.delete()
         return Response({'status': 'success', 'message': f"Product '{product_name}' deleted successfully"})
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrInternalService])
+def admin_product_image_search(request):
+    """
+    Universal Image Search for product catalog management across all categories.
+    Accepts query/q and category/categoryName.
+    Returns high-resolution sustainable product photography matches.
+    """
+    raw_query = request.GET.get('query') or request.GET.get('q') or ''
+    category_name = request.GET.get('category') or request.GET.get('categoryName') or ''
+
+    clean_query = raw_query.strip().lower()
+    clean_cat = category_name.strip().lower()
+    combined = f"{clean_query} {clean_cat}".strip()
+
+    curated_catalog = [
+        # Apparel & Clothing
+        {"title": "Organic Cotton Crewneck T-Shirt", "imageUrl": "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
+        {"title": "Sustainable Linen Summer Dress", "imageUrl": "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
+        {"title": "Recycled Wool Winter Jacket", "imageUrl": "https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
+        {"title": "Eco Hemp Casual Shirt", "imageUrl": "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
+        {"title": "Organic Denim Jeans", "imageUrl": "https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
+
+        # Footwear
+        {"title": "Recycled Ocean Plastic Sneakers", "imageUrl": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
+        {"title": "Natural Cork Sole Casual Shoes", "imageUrl": "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
+        {"title": "Eco-friendly Trail Running Shoes", "imageUrl": "https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
+        {"title": "Organic Canvas Slip-on Shoes", "imageUrl": "https://images.unsplash.com/photo-1560769629-975ec94e6a86?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1560769629-975ec94e6a86?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
+
+        # Home & Living / Kitchen
+        {"title": "Handmade Bamboo Kitchen Storage Box", "imageUrl": "https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
+        {"title": "Reusable Ceramic Coffee Mug", "imageUrl": "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
+        {"title": "Stainless Steel Insulated Water Bottle", "imageUrl": "https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
+        {"title": "Coconut Bowl & Wooden Cutlery Set", "imageUrl": "https://images.unsplash.com/photo-1546938576-6e6a64f317cc?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1546938576-6e6a64f317cc?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
+
+        # Bags & Travel Gear
+        {"title": "Recycled Canvas Everyday Backpack", "imageUrl": "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Bags & Travel Gear"},
+        {"title": "Organic Cotton Grocery Tote Bag", "imageUrl": "https://images.unsplash.com/photo-1597484661643-2f5fef640dd1?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1597484661643-2f5fef640dd1?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Bags & Travel Gear"},
+        {"title": "Upcycled Waterproof Duffle Bag", "imageUrl": "https://images.unsplash.com/photo-1501554728187-ce583db33af7?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1501554728187-ce583db33af7?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Bags & Travel Gear"},
+
+        # Personal Care & Beauty
+        {"title": "Natural Organic Botanical Face Serum", "imageUrl": "https://images.unsplash.com/photo-1608248597359-009772a5a58d?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1608248597359-009772a5a58d?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
+        {"title": "Ayurvedic Herbal Shampoo & Conditioner", "imageUrl": "https://images.unsplash.com/photo-1535585209827-a15fcdbc4c2d?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1535585209827-a15fcdbc4c2d?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
+        {"title": "Zero-Waste Bamboo Toothbrush Set", "imageUrl": "https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
+        {"title": "Organic Moisturizing Body Cream", "imageUrl": "https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
+
+        # Eco Accessories & Lifestyle
+        {"title": "Handmade Bamboo Polarized Sunglasses", "imageUrl": "https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Eco Accessories"},
+        {"title": "Recycled Cork Cardholder Wallet", "imageUrl": "https://images.unsplash.com/photo-1627123424574-724758594e93?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1627123424574-724758594e93?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Eco Accessories"},
+
+        # Kids & Teens
+        {"title": "Organic Bamboo Cotton Kids Romper", "imageUrl": "https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Kids"},
+        {"title": "Natural Wooden Building Blocks Toy", "imageUrl": "https://images.unsplash.com/photo-1587654780291-39c9404d7dd0?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1587654780291-39c9404d7dd0?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Kids"},
+
+        # Fitness & Outdoors
+        {"title": "Natural Tree Rubber Yoga Mat", "imageUrl": "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Fitness & Sports"},
+        {"title": "Eco-Friendly Resistance Bands Set", "imageUrl": "https://images.unsplash.com/photo-1598289431512-b97b0917affc?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1598289431512-b97b0917affc?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Fitness & Sports"},
+
+        # Groceries & Food
+        {"title": "Organic Fair Trade Ground Coffee", "imageUrl": "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Groceries"},
+        {"title": "Artisanal Himalayan Green Tea", "imageUrl": "https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Groceries"}
+    ]
+
+    keywords = [k for k in combined.split() if k]
+    results = []
+
+    if keywords:
+        for item in curated_catalog:
+            item_text = f"{item['title']} {item['category']}".lower()
+            if any(k in item_text for k in keywords):
+                results.append(item)
+    else:
+        results = list(curated_catalog)
+
+    if len(results) < 4:
+        for item in curated_catalog:
+            if item not in results:
+                results.append(item)
+            if len(results) >= 8:
+                break
+
+    return Response({
+        'status': 'success',
+        'query': raw_query,
+        'category': category_name,
+        'count': len(results),
+        'results': results
+    })
 
 
 @api_view(['GET'])

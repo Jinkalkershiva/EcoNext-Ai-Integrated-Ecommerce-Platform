@@ -33,6 +33,8 @@ public class OrderOperationsController {
 
     private final OperationalOrderService orderService;
 
+    // Called by API Gateway (/api/order-ops/orders) from Admin Frontend (OrdersPage).
+    // Searches orders across status filters and temporal windows.
     @GetMapping("/orders")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
     @Operation(summary = "Search and filter operational customer orders")
@@ -52,6 +54,7 @@ public class OrderOperationsController {
         return ResponseEntity.ok(ApiResponse.ok(orders));
     }
 
+    // Called by API Gateway when inspecting individual order history and item allocations.
     @GetMapping("/orders/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
     @Operation(summary = "Get detailed order information and timeline history by ID")
@@ -60,6 +63,8 @@ public class OrderOperationsController {
         return ResponseEntity.ok(ApiResponse.ok(order));
     }
 
+    // Called by API Gateway from staff order detail actions (e.g., Confirm, Pack, Ship).
+    // Validates sequential state machine rules and records audit transition timeline.
     @PatchMapping("/orders/{id}/status")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_STATUS_UPDATE') or hasAuthority('ORDER_PROCESS')")
     @Operation(summary = "Transition order status to the next lifecycle stage with staff attribution")

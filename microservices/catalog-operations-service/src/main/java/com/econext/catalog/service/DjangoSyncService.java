@@ -114,4 +114,31 @@ public class DjangoSyncService {
             log.warn("Django stock sync note: {}", e.getMessage());
         }
     }
+
+    public void syncProductUpdateToDjango(OperationalProduct product) {
+        if (!syncEnabled || product.getDjangoProductId() == null) return;
+        try {
+            String url = djangoBackendUrl + "/api/admin/products/" + product.getDjangoProductId() + "/";
+            Map<String, Object> body = new HashMap<>();
+            body.put("name", product.getName());
+            body.put("description", product.getDescription());
+            body.put("current_price", product.getCurrentPrice());
+            body.put("stock", product.getStock());
+            body.put("image_url", product.getImageUrl());
+            body.put("sustainability_score", product.getSustainabilityScore());
+            body.put("popularity_score", product.getPopularityScore());
+            if (product.getCategory() != null) {
+                body.put("category", product.getCategory().getDjangoCategoryId() != null ? product.getCategory().getDjangoCategoryId() : product.getCategory().getId());
+            }
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("X-Internal-Service-Key", internalServiceKey);
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            restTemplate.exchange(url, HttpMethod.PATCH, entity, Map.class);
+        } catch (Exception e) {
+            log.warn("Django product update sync note: {}", e.getMessage());
+        }
+    }
 }

@@ -406,6 +406,59 @@ sequenceDiagram
     Gateway-->>Staff: Render live truck pin on Leaflet Map
 ```
 
+### 6.5 End-to-End Order & Fulfillment Lifecycle (Dual-Perspective)
+
+```mermaid
+flowchart TD
+    subgraph CustomerLifecycle["Customer Storefront Journey"]
+        C1["1. Browse Catalog / Visual Search / AI Copilot"] --> C2["2. Add Sustainable Product to Cart"]
+        C2 --> C3["3. Checkout & Shipping Details"]
+        C3 --> C4["4. Razorpay Online Payment / COD"]
+        C4 --> C5["5. Order Placed (ORDER_PLACED)"]
+        C5 --> C6["6. Real-Time Tracking (/ws-tracking)"]
+        C6 --> C7["7. Out for Delivery Alert"]
+        C7 --> C8["8. Order Delivered (DELIVERED)"]
+    end
+
+    subgraph StaffLifecycle["Staff Operational Management Journey"]
+        S1["1. Staff Login & Role Authorization"] --> S2["2. Orders Dashboard Oversight"]
+        S2 --> S3["3. Confirm Order (ORDER_CONFIRMED)"]
+        S3 --> S4["4. Warehouse Processing (PROCESSING)"]
+        S4 --> S5["5. Packaging & Item Allocation (PACKED)"]
+        S5 --> S6["6. Provision Shipment & Dispatch (SHIPPED)"]
+        S6 --> S7["7. Fleet GPS Telemetry (IN_TRANSIT)"]
+        S7 --> S8["8. Courier Out for Delivery (OUT_FOR_DELIVERY)"]
+        S8 --> S9["9. Delivery Confirmation (DELIVERED)"]
+    end
+
+    C5 -.-> S2
+    S3 -.-> C6
+    S6 -.-> C6
+    S7 -.-> C6
+    S8 -.-> C7
+    S9 -.-> C8
+```
+
+#### Customer Order Lifecycle Steps
+1. **Product Selection**: Explore eco-certified inventory, filter by sustainability rating, or query via CLIP visual search.
+2. **Add to Cart**: Real-time stock availability verification against inventory ledger.
+3. **Checkout**: Enter carbon-neutral shipping address and contact credentials.
+4. **Payment**: Server-side Razorpay order generation with cryptographic HMAC-SHA256 signature verification.
+5. **Order Confirmed**: Atomic stock decrement and instant email/SMS dispatch.
+6. **Shipment / Fulfillment Tracking**: Live STOMP WebSocket telemetry stream on `/topic/orders/{orderId}`.
+7. **Out for Delivery**: Notification dispatch when courier reaches local hub.
+8. **Delivered**: Final delivery timestamp and sustainable impact points credit.
+
+#### Staff Order & Fulfillment Lifecycle Steps
+1. **Staff Login**: Authenticate into Admin Portal via authoritative `admin-staff-service` SSOT.
+2. **Order Dashboard**: Monitor incoming order pipeline with filterable status tabs.
+3. **Confirm Order**: Validate order details and advance status to `ORDER_CONFIRMED`.
+4. **Pack Order**: Warehouse personnel package items with eco-friendly materials (`PACKED`).
+5. **Create / Provision Shipment**: Assign carrier (`EcoExpress`), generate tracking number, and transition to `SHIPPED`.
+6. **Shipment In Transit**: Physical fleet transit with continuous GPS telemetry pings (`IN_TRANSIT`).
+7. **Out for Delivery**: Courier handoff for last-mile delivery (`OUT_FOR_DELIVERY`).
+8. **Delivery Confirmation**: Staff marks order `DELIVERED`, concluding order lifecycle and recording audit trail.
+
 ---
 
 ## 7. Database Management System (DBMS) & Entity-Relationship (ER) Design

@@ -70,17 +70,29 @@ class ProductSerializer(serializers.ModelSerializer):
     categoryName = serializers.SerializerMethodField()
     sustainabilityScore = serializers.FloatField(source='sustainability_score', read_only=True)
     imageUrl = serializers.CharField(source='image_url', read_only=True)
+    additional_images = serializers.SerializerMethodField()
+    additionalImages = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
-            'id', 'name', 'description', 'category', 'subcategory', 'current_price', 
+            'id', 'name', 'description', 'category', 'subcategory', 'current_price',
             'price', 'stock', 'stockQuantity', 'sku', 'categoryId', 'categoryName',
-            'image_url', 'imageUrl', 'tags', 'status', 'created_at', 'age_groups', 
-            'gender_categories', 'eco_tags', 'skin_or_body_fit', 'season', 
+            'image_url', 'imageUrl', 'additional_images', 'additionalImages', 'tags', 'status', 'created_at', 'age_groups',
+            'gender_categories', 'eco_tags', 'skin_or_body_fit', 'season',
             'occasion', 'popularity_score', 'sustainability_score', 'sustainabilityScore'
         ]
+
+    def get_additional_images(self, obj):
+        if isinstance(obj.image_features, dict):
+            imgs = obj.image_features.get('additional_images', [])
+            if isinstance(imgs, list):
+                return imgs
+        return []
+
+    def get_additionalImages(self, obj):
+        return self.get_additional_images(obj)
 
     def get_sku(self, obj):
         if isinstance(obj.tags, list):

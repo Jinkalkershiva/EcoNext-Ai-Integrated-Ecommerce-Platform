@@ -29,6 +29,8 @@ public class DataImportController {
 
     private final DataImportService importService;
 
+    // Step 1: Called by API Gateway (/api/import/upload) from ImportWizardPage.
+    // Parses CSV/XLSX byte streams and extracts detected column headers.
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('DATA_IMPORT')")
     @Operation(summary = "Step 1: Upload CSV or Excel file and extract detected column headers")
@@ -40,6 +42,8 @@ public class DataImportController {
         return ResponseEntity.ok(ApiResponse.ok("File uploaded and headers detected successfully", detection));
     }
 
+    // Step 2: Called by API Gateway (/api/import/preview) with column mappings.
+    // Validates data types, checks DB and in-file duplicate SKUs, and generates validation previews.
     @PostMapping("/preview")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('DATA_IMPORT')")
     @Operation(summary = "Step 2: Map columns, validate records, detect duplicates and preview rows")
@@ -48,6 +52,8 @@ public class DataImportController {
         return ResponseEntity.ok(ApiResponse.ok("Preview generated successfully", preview));
     }
 
+    // Step 3: Called by API Gateway (/api/import/execute) after staff review.
+    // Ingests validated rows into MySQL catalog and writes summary reports and audit logs.
     @PostMapping("/execute")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('DATA_IMPORT')")
     @Operation(summary = "Step 3: Confirm and execute bulk import of validated records into catalog")

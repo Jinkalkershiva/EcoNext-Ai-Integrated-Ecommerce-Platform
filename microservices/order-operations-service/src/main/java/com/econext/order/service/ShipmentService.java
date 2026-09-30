@@ -36,6 +36,9 @@ public class ShipmentService {
     private final OrderStatusTransitionRepository transitionRepository;
     private final DjangoOrderSyncService djangoOrderSyncService;
     private final com.econext.order.kafka.FulfillmentEventProducer fulfillmentEventProducer;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private DeliveryOtpService deliveryOtpService;
 
     private static final Map<ShipmentStatus, Set<ShipmentStatus>> ALLOWED_SHIPMENT_TRANSITIONS = Map.ofEntries(
             Map.entry(ShipmentStatus.CREATED, Set.of(ShipmentStatus.PACKED, ShipmentStatus.CANCELLED)),
@@ -265,6 +268,17 @@ public class ShipmentService {
 
         // Update derived OperationalOrder status if applicable
         evaluateAndSyncOrderStatus(updated.getOrderId(), staffId, staffUsername);
+
+        // Automatically generate and dispatch secure Delivery OTP email when shipment is OUT_FOR_DELIVERY
+        if (targetStatus == ShipmentStatus.OUT_FOR_DELIVERY) {
+            try {
+                if (deliveryOtpService != null) {
+                    deliveryOtpService.generateAndSendOtp(updated.getId(), staffId, staffUsername);
+                }
+            } catch (Exception ex) {
+                log.warn("Automatic delivery OTP generation skipped on OUT_FOR_DELIVERY transition for shipment #{}: {}", updated.getId(), ex.getMessage());
+            }
+        }
 
         return mapToResponse(updated);
     }

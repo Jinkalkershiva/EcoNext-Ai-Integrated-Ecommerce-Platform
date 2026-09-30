@@ -187,9 +187,21 @@ public class DataImportService {
 
     private void validateRows(List<ParsedRow> rows, boolean checkDuplicates) {
         Set<String> seenNames = new HashSet<>();
+        Set<String> seenSkus = new HashSet<>();
 
         for (ParsedRow row : rows) {
             Map<String, Object> mapped = row.getMappedValues();
+
+            String sku = (String) mapped.get("sku");
+            if (sku != null && !sku.trim().isEmpty()) {
+                String normalizedSku = sku.trim().toUpperCase();
+                if (checkDuplicates && seenSkus.contains(normalizedSku)) {
+                    row.setDuplicate(true);
+                    row.addError("Duplicate SKU detected in dataset: " + sku.trim());
+                } else {
+                    seenSkus.add(normalizedSku);
+                }
+            }
 
             String name = (String) mapped.get("name");
             if (name == null || name.trim().isEmpty()) {
@@ -255,6 +267,9 @@ public class DataImportService {
             body.put("currentPrice", mapped.get("currentPrice"));
             body.put("stock", mapped.getOrDefault("stock", 0));
             body.put("imageUrl", mapped.getOrDefault("imageUrl", "https://images.unsplash.com/photo-1542291026-7eec264c27ff"));
+            if (mapped.containsKey("sku")) {
+                body.put("sku", mapped.get("sku"));
+            }
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
             ResponseEntity<Map> resp = restTemplate.postForEntity(url, entity, Map.class);
@@ -269,7 +284,9 @@ public class DataImportService {
         Map<String, String> mappings = new HashMap<>();
         for (String h : headers) {
             String clean = h.trim().toLowerCase().replaceAll("[^a-z0-9]", "");
-            if (clean.contains("productname") || clean.equals("name") || clean.equals("title") || clean.equals("itemname")) {
+            if (clean.contains("sku") || clean.equals("code") || clean.equals("itemcode") || clean.equals("productcode")) {
+                mappings.put(h, "sku");
+            } else if (clean.contains("productname") || clean.equals("name") || clean.equals("title") || clean.equals("itemname")) {
                 mappings.put(h, "name");
             } else if (clean.contains("desc") || clean.contains("detail")) {
                 mappings.put(h, "description");

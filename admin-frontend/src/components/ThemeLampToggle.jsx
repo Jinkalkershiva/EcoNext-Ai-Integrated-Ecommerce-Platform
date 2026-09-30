@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { Palette, Moon, Flame } from 'lucide-react';
+import { Sun, Moon, SunMedium } from 'lucide-react';
 
 export const ThemeLampToggle = ({ className = '', size = 'md' }) => {
   const { theme, toggleTheme } = useTheme();
@@ -10,10 +10,10 @@ export const ThemeLampToggle = ({ className = '', size = 'md' }) => {
       case 'dark':
         return { icon: Moon, label: 'Dark Mode', color: '#818cf8', next: 'Warm Mode' };
       case 'warm':
-        return { icon: Flame, label: 'Warm Mode', color: '#f59e0b', next: 'Colorful Mode' };
+        return { icon: SunMedium, label: 'Warm Mode', color: '#f59e0b', next: 'Light Mode' };
       case 'colorful':
       default:
-        return { icon: Palette, label: 'Colorful Mode', color: '#10b981', next: 'Dark Mode' };
+        return { icon: Sun, label: 'Light Mode', color: '#10b981', next: 'Dark Mode' };
     }
   };
 

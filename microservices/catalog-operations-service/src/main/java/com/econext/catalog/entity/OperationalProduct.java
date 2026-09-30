@@ -45,6 +45,9 @@ public class OperationalProduct {
     @Column(name = "image_url", length = 1024)
     private String imageUrl;
 
+    @Column(name = "additional_images_json", columnDefinition = "TEXT")
+    private String additionalImagesJson;
+
     @Column(nullable = false)
     @Builder.Default
     private Integer stock = 0;

@@ -24,6 +24,7 @@ public class ProductResponse {
     private String subcategoryName;
     private BigDecimal currentPrice;
     private String imageUrl;
+    private List<String> additionalImages;
     private Integer stock;
     private Integer lowStockThreshold;
     private boolean lowStock;

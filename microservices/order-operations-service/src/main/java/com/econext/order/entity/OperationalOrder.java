@@ -39,6 +39,9 @@ public class OperationalOrder {
     @Column(name = "customer_name", length = 128)
     private String customerName;
 
+    @Column(name = "customer_phone", length = 32)
+    private String customerPhone;
+
     @Column(name = "total_amount", nullable = false, precision = 10, scale = 2)
     private BigDecimal totalAmount;
 
@@ -82,4 +85,11 @@ public class OperationalOrder {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    public String getOrderReferenceNumber() {
+        if (djangoOrderId != null) {
+            return "ORD-" + djangoOrderId;
+        }
+        return id != null ? "ORD-" + id : "ORD-PENDING";
+    }
 }

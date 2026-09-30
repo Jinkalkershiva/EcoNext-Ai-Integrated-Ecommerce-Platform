@@ -30,6 +30,8 @@ public class CatalogOperationsController {
 
     // ==================== PRODUCTS ====================
 
+    // Called by API Gateway (/api/catalog-ops/products) from Admin Frontend (ProductsPage).
+    // Queries MySQL catalog_product table with pagination and category/status filtering.
     @GetMapping("/products")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('CATALOG_READ')")
     @Operation(summary = "Search and filter operational catalog products")
@@ -49,6 +51,19 @@ public class CatalogOperationsController {
         return ResponseEntity.ok(ApiResponse.ok(products));
     }
 
+    // Universal Image Search across all EcoNext categories
+    @GetMapping("/products/image-search")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('CATALOG_READ') or hasAuthority('CATALOG_CREATE')")
+    @Operation(summary = "Search dynamic product images across catalog categories")
+    public ResponseEntity<ApiResponse<List<ImageSearchResultDto>>> searchProductImages(
+            @RequestParam String query,
+            @RequestParam(required = false) String category
+    ) {
+        List<ImageSearchResultDto> results = catalogService.searchProductImages(query, category);
+        return ResponseEntity.ok(ApiResponse.ok(results));
+    }
+
+    // Called by API Gateway when client or microservice inspects a single product by ID.
     @GetMapping("/products/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('CATALOG_READ')")
     @Operation(summary = "Get product details by ID")
@@ -57,6 +72,8 @@ public class CatalogOperationsController {
         return ResponseEntity.ok(ApiResponse.ok(product));
     }
 
+    // Called by API Gateway / Admin Frontend on single product creation (+ Add Product -> Create Single Product).
+    // Validates SKU uniqueness, initializes stock quantity, and records audit trail.
     @PostMapping("/products")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('CATALOG_CREATE')")
     @Operation(summary = "Create a new catalog product (Manual Data Entry)")

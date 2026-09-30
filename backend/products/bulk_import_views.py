@@ -342,6 +342,9 @@ def execute_bulk_import(request):
                 sust_score = 85.0
 
             description = str(data.get('description', f"Premium sustainable {name} crafted with certified eco-friendly materials.")).strip()
+            image_url = str(data.get('image_url') or data.get('imageUrl') or data.get('image') or '').strip()
+            if image_url and not (image_url.startswith('http://') or image_url.startswith('https://') or image_url.startswith('//')):
+                image_url = ''
 
             # Create Product
             product = Product.objects.create(
@@ -349,6 +352,7 @@ def execute_bulk_import(request):
                 category=category,
                 current_price=price,
                 stock=stock,
+                image_url=image_url,
                 description=description,
                 sustainability_score=sust_score,
                 tags=[f"SKU:{sku}", category.name.lower(), "bulk-import"]

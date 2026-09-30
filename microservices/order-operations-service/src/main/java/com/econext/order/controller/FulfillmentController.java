@@ -30,6 +30,7 @@ public class FulfillmentController {
 
     private final ShipmentService shipmentService;
     private final ContainerService containerService;
+    private final com.econext.order.service.DeliveryOtpService deliveryOtpService;
 
     // ==========================================
     // Shipment Endpoints
@@ -70,6 +71,8 @@ public class FulfillmentController {
         return ResponseEntity.ok(ApiResponse.ok(shipment));
     }
 
+    // Called by API Gateway (/api/order-ops/shipments) when staff creates a shipment from packed order items.
+    // Persists shipment in MySQL and publishes SHIPMENT_CREATED to Kafka topic 'shipment.status.updated'.
     @PostMapping("/shipments")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
     @Operation(summary = "Create and allocate order items to a new shipment")
@@ -84,6 +87,8 @@ public class FulfillmentController {
                 .body(ApiResponse.ok("Shipment #" + created.getShipmentNumber() + " created successfully", created));
     }
 
+    // Called by API Gateway when staff transitions shipment status (DISPATCHED, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED).
+    // Dispatches Kafka event 'shipment.status.updated' which WebSocket consumer broadcasts to live tracking clients.
     @PatchMapping("/shipments/{id}/status")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_STATUS_UPDATE') or hasAuthority('ORDER_PROCESS')")
     @Operation(summary = "Transition shipment lifecycle state")
@@ -98,6 +103,8 @@ public class FulfillmentController {
         return ResponseEntity.ok(ApiResponse.ok("Shipment status transitioned to " + updated.getStatus(), updated));
     }
 
+    // Called by API Gateway / mobile courier app when GPS coordinates update for a vehicle in transit.
+    // Publishes to Kafka topic 'shipment.location.updated' which pushes live coordinates to STOMP destination /topic/shipments/{id}.
     @PatchMapping("/shipments/{id}/location")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_STATUS_UPDATE') or hasAuthority('ORDER_PROCESS')")
     @Operation(summary = "Update physical GPS coordinates and location milestone for a shipment")
@@ -118,6 +125,91 @@ public class FulfillmentController {
     public ResponseEntity<ApiResponse<List<LogisticsTrackingResponse>>> getShipmentTracking(@PathVariable Long id) {
         List<LogisticsTrackingResponse> tracking = shipmentService.getShipmentTracking(id);
         return ResponseEntity.ok(ApiResponse.ok(tracking));
+    }
+
+    // ==========================================
+    // Delivery OTP & Customer Verification
+    // ==========================================
+
+    @PostMapping({"/shipments/{id}/delivery-otp/send", "/shipments/{id}/send-otp"})
+    @Operation(summary = "Generate and dispatch a secure 6-digit Delivery PIN / OTP to customer")
+    public ResponseEntity<ApiResponse<DeliveryOtpResponse>> sendDeliveryOtp(
+            @PathVariable Long id,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "SYSTEM";
+        DeliveryOtpResponse response = deliveryOtpService.generateAndSendOtp(id, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Delivery PIN generated and dispatched successfully", response));
+    }
+
+    @PostMapping({"/shipments/{id}/delivery-otp/verify", "/shipments/{id}/verify-delivery-pin"})
+    @Operation(summary = "Verify customer Delivery PIN / OTP and mark shipment & order as DELIVERED")
+    public ResponseEntity<ApiResponse<DeliveryOtpResponse>> verifyDeliveryOtp(
+            @PathVariable Long id,
+            @RequestBody(required = false) DeliveryOtpVerifyRequest request,
+            @RequestParam(required = false) String otp,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        String rawOtp = (request != null && request.getOtp() != null) ? request.getOtp() : otp;
+        Long staffId = principal != null ? principal.getId() : (request != null ? request.getDeliveryStaffId() : null);
+        String staffUsername = principal != null ? principal.getUsername() : (request != null && request.getDeliveryStaffUsername() != null ? request.getDeliveryStaffUsername() : "DELIVERY_AGENT");
+
+        DeliveryOtpResponse response = deliveryOtpService.verifyDeliveryOtp(id, rawOtp, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok(response.getMessage(), response));
+    }
+
+    @GetMapping("/shipments/{id}/delivery-otp/status")
+    @Operation(summary = "Check status and remaining TTL of active Delivery PIN for a shipment")
+    public ResponseEntity<ApiResponse<DeliveryOtpResponse>> getDeliveryOtpStatus(@PathVariable Long id) {
+        DeliveryOtpResponse response = deliveryOtpService.getOtpStatus(id);
+        return ResponseEntity.ok(ApiResponse.ok(response));
+    }
+
+    @PostMapping({"/orders/{orderId}/delivery-otp/send"})
+    @Operation(summary = "Generate and dispatch Delivery PIN for active shipment of an order")
+    public ResponseEntity<ApiResponse<DeliveryOtpResponse>> sendOrderDeliveryOtp(
+            @PathVariable Long orderId,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        List<ShipmentResponse> shipments = shipmentService.getShipmentsByOrderId(orderId);
+        if (shipments.isEmpty()) {
+            throw new com.econext.order.exception.GlobalExceptionHandler.ResourceNotFoundException("No shipment found for order #" + orderId);
+        }
+        ShipmentResponse target = shipments.stream()
+                .filter(s -> s.getStatus() == ShipmentStatus.OUT_FOR_DELIVERY || s.getStatus() != ShipmentStatus.DELIVERED)
+                .findFirst()
+                .orElse(shipments.get(0));
+
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "SYSTEM";
+        DeliveryOtpResponse response = deliveryOtpService.generateAndSendOtp(target.getId(), staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Delivery PIN generated and dispatched successfully", response));
+    }
+
+    @PostMapping({"/orders/{orderId}/delivery-otp/verify"})
+    @Operation(summary = "Verify customer Delivery PIN for active shipment of an order and mark DELIVERED")
+    public ResponseEntity<ApiResponse<DeliveryOtpResponse>> verifyOrderDeliveryOtp(
+            @PathVariable Long orderId,
+            @RequestBody(required = false) DeliveryOtpVerifyRequest request,
+            @RequestParam(required = false) String otp,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        List<ShipmentResponse> shipments = shipmentService.getShipmentsByOrderId(orderId);
+        if (shipments.isEmpty()) {
+            throw new com.econext.order.exception.GlobalExceptionHandler.ResourceNotFoundException("No shipment found for order #" + orderId);
+        }
+        ShipmentResponse target = shipments.stream()
+                .filter(s -> s.getStatus() == ShipmentStatus.OUT_FOR_DELIVERY || s.getStatus() != ShipmentStatus.DELIVERED)
+                .findFirst()
+                .orElse(shipments.get(0));
+
+        String rawOtp = (request != null && request.getOtp() != null) ? request.getOtp() : otp;
+        Long staffId = principal != null ? principal.getId() : (request != null ? request.getDeliveryStaffId() : null);
+        String staffUsername = principal != null ? principal.getUsername() : (request != null && request.getDeliveryStaffUsername() != null ? request.getDeliveryStaffUsername() : "DELIVERY_AGENT");
+
+        DeliveryOtpResponse response = deliveryOtpService.verifyDeliveryOtp(target.getId(), rawOtp, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok(response.getMessage(), response));
     }
 
     @GetMapping({"/fulfillment/summary", "/fulfillment-summary"})
