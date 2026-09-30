@@ -1,4 +1,4 @@
-# EcoNext — AI-Integrated E-Commerce, Spring Boot Microservices & Big Data Platform
+# EcoNext — AI-Integrated E-Commerce & Spring Boot Microservices Platform
 
 [![Java](https://img.shields.io/badge/Java-21%20LTS-orange.svg?logo=openjdk&logoColor=white)](https://www.oracle.com/java/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.4-brightgreen.svg?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
@@ -11,8 +11,6 @@
 [![MySQL](https://img.shields.io/badge/MySQL-8.0-blue.svg?logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Redis](https://img.shields.io/badge/Redis-7%20Alpine-DC382D.svg?logo=redis&logoColor=white)](https://redis.io/)
 [![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-3.7%20KRaft-black.svg?logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
-[![Apache Spark](https://img.shields.io/badge/Apache%20Spark-3.5%20Structured%20Streaming-E25A1C.svg?logo=apachespark&logoColor=white)](https://spark.apache.org/)
-[![Apache Hadoop](https://img.shields.io/badge/Apache%20Hadoop-HDFS%20Data%20Lake-66CCFF.svg?logo=apachehadoop&logoColor=white)](https://hadoop.apache.org/)
 [![Razorpay](https://img.shields.io/badge/Razorpay-HMAC--SHA256%20Verified-blue.svg)](https://razorpay.com/)
 [![Build Status](https://img.shields.io/badge/Build-Passing%20(100%25%20Verified)-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -23,7 +21,7 @@
 
 **EcoNext** is an enterprise-grade, sustainable AI-integrated retail platform and distributed e-commerce ecosystem developed as a **Final-Year Group Capstone Project**.
 
-The platform combines multi-modal artificial intelligence (computer vision similarity search, predictive price forecasting, TF-IDF natural language intent search, and LLM-grounded conversational commerce) with a high-throughput **Java 21 / Spring Boot 3.3.4 microservices architecture**, a reactive **Spring Cloud API Gateway**, a dedicated **React 19 Admin & Staff Operations Portal**, a secure **Razorpay Online Payment Gateway**, and an event-driven **Big Data streaming & Hadoop HDFS Data Lake** ingestion layer.
+The platform combines multi-modal artificial intelligence (computer vision similarity search, predictive price forecasting, TF-IDF natural language intent search, and LLM-grounded conversational commerce) with a high-throughput **Java 21 / Spring Boot 3.3.4 microservices architecture**, a reactive **Spring Cloud API Gateway**, a dedicated **React 19 Admin & Staff Operations Portal**, a secure **Razorpay Online Payment Gateway**, and an event-driven **Apache Kafka real-time streaming & STOMP WebSocket tracking** layer.
 
 ### 👥 Capstone Project Team Members
 * **Shiva Jinkalker** ([GitHub: @Jinkalkershiva](https://github.com/Jinkalkershiva))
@@ -43,7 +41,7 @@ The platform combines multi-modal artificial intelligence (computer vision simil
 8. [Core Microservices & Bounded Contexts](#8-core-microservices--bounded-contexts)
 9. [Razorpay Payment Gateway & Cryptographic Integrity](#9-razorpay-payment-gateway--cryptographic-integrity)
 10. [AI & Machine Learning Engineering](#10-ai--machine-learning-engineering)
-11. [Big Data Streaming, Real-Time Fulfillment & Hadoop Data Lake](#11-big-data-streaming-real-time-fulfillment--hadoop-data-lake)
+11. [Real-Time Event Streaming, Fulfillment & GPS Tracking](#11-real-time-event-streaming-fulfillment--gps-tracking)
 12. [Admin & Staff Operational Governance (RBAC/PBAC)](#12-admin--staff-operational-governance-rbacpbac)
 13. [Customer Storefront Experience](#13-customer-storefront-experience)
 14. [API Route Matrix & Gateway Ingress Mapping](#14-api-route-matrix--gateway-ingress-mapping)
@@ -65,7 +63,7 @@ Traditional e-commerce platforms suffer from critical structural, architectural,
 4. **Lack of Sustainability Visibility**: Modern eco-conscious consumers struggle to identify environmentally responsible products, organic materials, and carbon-conscious supply chains due to greenwashing and missing standardized sustainability metrics.
 5. **Premature Payment & Order State Inconsistencies**: Flawed checkout gateways create unconfirmed orders before online payment capture, leaving pending ghost orders and depleted stock when customers abandon payment modals.
 6. **Monolithic Bottlenecks & Operational Opacity**: Tightly coupled monoliths present single points of failure, lack granular role-based operational security for administrative staff, and obscure the multi-stage lifecycle of order fulfillment.
-7. **Telemetry & Clickstream Data Silos**: Customer behavior, search drop-offs, and conversion analytics are often lost or siloed in relational databases rather than ingested in real time into analytical data lakes for predictive intelligence.
+7. **Operational Event Visibility**: Complex order lifecycle changes, payments, and multi-leg fulfillment require reliable real-time event streaming and live telemetry rather than slow manual polling.
 
 ### 1.2 How EcoNext Addresses the Problem
 
@@ -81,7 +79,7 @@ Traditional e-commerce platforms suffer from critical structural, architectural,
 | **Admin & Staff Authority** | Spring Boot `admin-staff-service` Single Source of Truth (SSOT) |
 | **Real-Time GPS Logistics** | Physical `Shipment` domain model + Kafka streaming + STOMP `/ws-tracking` |
 | **Staff Governance & Auditing** | Granular 8-Role RBAC/PBAC Admin Portal with forensic audit logging |
-| **Real-Time Big Data Telemetry** | Apache Kafka KRaft + PySpark Streaming + Hadoop HDFS Data Lake |
+| **Real-Time Event Telemetry** | Apache Kafka KRaft Event Streaming + STOMP WebSocket Broadcasting |
 
 ---
 
@@ -95,7 +93,7 @@ The primary engineering objectives of this final-year capstone project are:
 * **Architect a Scalable Microservices Ecosystem**: Decouple business domains into independent Spring Boot microservices with Spring Cloud Gateway routing, stateless JWT security, and domain-owned MySQL database clusters.
 * **Consolidate Admin/Staff Authority**: Establish Spring Boot `admin-staff-service` via API Gateway as the authoritative Single Source of Truth for administrative governance and 8 operational staff roles.
 * **Real-Time Logistics Tracking**: Implement a physical `Shipment` domain hierarchy with vehicle GPS telemetry streamed over Kafka and broadcast to clients via WebSocket STOMP.
-* **Construct a Big Data Streaming Pipeline**: Stream real-time telemetry (searches, impressions, cart events, orders) through Apache Kafka KRaft brokers into an Apache Hadoop HDFS Data Lake via PySpark Structured Streaming.
+* **Event-Driven Architecture**: Connect distributed services with Apache Kafka KRaft brokers for reliable asynchronous event propagation across payments, orders, and fulfillment updates.
 
 ---
 
@@ -139,11 +137,9 @@ flowchart TD
         RedisCache[("Redis 7<br/>(Cache & OTP Store)")]
     end
 
-    subgraph RealTimeLayer["Real-Time & Big Data Streaming"]
+    subgraph RealTimeLayer["Real-Time Event Streaming & Logistics"]
         KafkaBroker["Apache Kafka KRaft Broker<br/>(Port 9092)"]
         StompBroker["WebSocket / STOMP Server<br/>(/ws-tracking)"]
-        SparkEngine["Spark Structured Streaming & Analytics"]
-        HadoopHDFS[("Apache Hadoop HDFS Data Lake<br/>hdfs://localhost:9000/econext/")]
     end
 
     CustomerStore -->|HTTP / REST| DjangoCore
@@ -186,8 +182,6 @@ flowchart TD
     KafkaBroker --> OrderOpsService
     OrderOpsService --> StompBroker
     KafkaBroker --> NotificationService
-    KafkaBroker --> SparkEngine
-    SparkEngine --> HadoopHDFS
 ```
 
 ### 3.2 Architectural Principles & Patterns
@@ -218,8 +212,6 @@ flowchart TD
 | **Intent Search NLP** | Scikit-learn (TF-IDF Vectorizer) | Natural language lifestyle query transformation and cosine similarity catalog retrieval. |
 | **Conversational AI** | Google Gemini (via AI bridge) | Context-aware shopping assistant grounded with real database candidate products. |
 | **Event Broker** | Apache Kafka 3.7 (KRaft Mode) | Distributed event streaming broker operating without ZooKeeper across high-throughput topics. |
-| **Stream Processing** | Apache Spark 3.5 (PySpark) | Structured Streaming pipeline reading Kafka topics and checkpointing partitioned Parquet to HDFS. |
-| **Distributed Data Lake** | Apache Hadoop 3.x (HDFS) | Multi-tier analytical storage lake (`/econext/raw/`, `/econext/processed/`, `/econext/analytics/`). |
 | **Data Ingestion** | Apache POI 5.3, OpenCSV 5.9 | High-performance batch parser for Excel (`.xlsx`, `.xls`) and CSV product catalog uploads. |
 | **Authentication** | JJWT 0.12.6 / SimpleJWT | Stateless HMAC-SHA256 JWT access and refresh token security with BCrypt password hashing. |
 | **Containerization** | Docker & Docker Compose | Containerized infrastructure for MySQL 8, Redis 7, Kafka KRaft, and Kafka-UI. |
@@ -236,7 +228,7 @@ flowchart LR
     Staff([Admin & Operations Staff])
     PaymentGateway([Razorpay Payment Gateway])
     KafkaBroker([Apache Kafka KRaft])
-    DataLake([Hadoop HDFS Data Lake])
+    WebSocketClient([Live Tracking Clients])
 
     subgraph EcoNextPlatform["EcoNext Enterprise Platform"]
         GatewayCore["Spring Cloud Gateway (:8080)<br/>& Microservices Ecosystem"]
@@ -254,11 +246,11 @@ flowchart LR
     GatewayCore <-->|Candidate Grounding, Forecasts, Visual Embeddings| AIEngine
     GatewayCore <-->|ACID Transactions, Read/Write Ledgers| Database
 
-    GatewayCore -->|Clickstream, GPS Updates, Orders| KafkaBroker
-    KafkaBroker -->|Structured Parquet Streaming| DataLake
+    GatewayCore -->|GPS Updates, Payment Events, Orders| KafkaBroker
+    KafkaBroker -->|Fulfillment Telemetry Fan-out| WebSocketClient
 ```
 
-### 5.2 Level 1: End-to-End E-Commerce, Logistics & Big Data Pipeline Flow
+### 5.2 Level 1: End-to-End E-Commerce, Logistics & Event Streaming Flow
 
 ```mermaid
 flowchart TD
@@ -295,9 +287,9 @@ flowchart TD
         P -.->|Live Feeds| A
     end
 
-    subgraph BigDataPipeline["6. Big Data Lake Ingestion"]
-        O -->|Stream Read| Q[PySpark Structured Streaming]
-        Q -->|Snappy Parquet| R[Hadoop HDFS: /econext/raw/]
+    subgraph NotificationPipeline["6. Asynchronous Notifications & Events"]
+        O -->|order-events, payment-events| Q[Notification Service :8089]
+        Q -->|Dispatch Email / SMS| R[(Customer Notifications)]
     end
 ```
 
@@ -654,9 +646,9 @@ backend/
 
 ---
 
-## 11. Big Data Streaming, Real-Time Fulfillment & Hadoop Data Lake
+## 11. Real-Time Event Streaming, Fulfillment & GPS Tracking
 
-Real-time operational events, logistics GPS coordinates, and customer telemetry stream into Apache Kafka KRaft brokers, broadcasting live updates via STOMP WebSocket and writing partitioned facts to Hadoop HDFS:
+Real-time operational events, logistics GPS coordinates, and payment status updates stream through Apache Kafka KRaft brokers, broadcasting live updates to operational staff via STOMP WebSocket:
 
 ```
 [ Microservices & Logistics Telemetry ]
@@ -665,8 +657,7 @@ Real-time operational events, logistics GPS coordinates, and customer telemetry 
        ├──> shipment.location.updated   (Real-time vehicle GPS latitude / longitude)
        ├──> container.status.updated    (Multimodal container milestones)
        ├──> order-events                (Fulfillment stage advancements)
-       ├──> payment-events              (Razorpay payment captures)
-       └──> user-search-events          (Clickstream and search queries)
+       └──> payment-events              (Razorpay payment captures)
               │
               ├───► [ STOMP WebSocket Broker (/ws-tracking) ]
               │          ├── /topic/orders/{orderId}
@@ -679,13 +670,9 @@ Real-time operational events, logistics GPS coordinates, and customer telemetry 
      [ Apache Kafka KRaft Broker (:9092) ]
               │
               ▼
-     [ PySpark Structured Streaming Engine ]
-              │
-              ▼ (Snappy-compressed Parquet partitioned by year/month/day)
-     [ Hadoop HDFS: hdfs://localhost:9000/econext/ ]
-           ├── /raw/                (Ingested raw event streams)
-           ├── /processed/          (Cleaned tabular facts)
-           └── /analytics/          (Aggregated daily KPI metrics)
+     [ Asynchronous Service Consumers ]
+            ├── order-operations-service (Fulfillment live feed)
+            └── notification-service     (Email / SMS notifications)
 ```
 
 ---
@@ -791,7 +778,7 @@ All external client traffic passes through the reactive Spring Cloud Gateway on 
 |  - Designed & developed React 19 Admin & Staff Portal with custom design tokens       |
 |  - Built real-time GPS fulfillment engine with Kafka event streams & STOMP /ws-track  |
 |  - Consolidated Admin/Staff authority to Spring Boot admin-staff-service (SSOT)       |
-|  - Created Apache Kafka event emitters, PySpark streaming, and Hadoop HDFS ingestion  |
+|  - Created Apache Kafka event emitters, consumers, and STOMP WebSocket tracking      |
 |  - Developed Payment & Notification microservices with Razorpay integration           |
 |  - Fixed Razorpay pre-order flow with HMAC-SHA256 signature verification & idempotency|
 |  - Implemented Redis OTP authentication and 10-stage sequential order state machine   |
@@ -944,4 +931,4 @@ cd ../frontend && npm install && npm run dev -- --port 5073
 This project is open-source software licensed under the **[MIT License](LICENSE)**.
 
 ### 19.2 Academic Acknowledgments
-Developed as a **Final-Year Group Capstone Project** in Computer Science & Engineering. We express our sincere gratitude to our project advisors, faculty mentors, and the open-source engineering community behind Spring Boot, Django, React, Apache Kafka, Apache Spark, and Google Gemini.
+Developed as a **Final-Year Group Capstone Project** in Computer Science & Engineering. We express our sincere gratitude to our project advisors, faculty mentors, and the open-source engineering community behind Spring Boot, Django, React, Apache Kafka, and Google Gemini.

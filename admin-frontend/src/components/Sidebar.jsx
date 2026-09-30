@@ -9,7 +9,6 @@ import {
   Truck,
   Navigation,
   UploadCloud,
-  Radio,
   Database,
   Users,
   UserCheck,
@@ -95,19 +94,7 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
       visible: isAdmin() || hasPermission('IMPORT_RUN')
     },
     {
-      label: 'Live Ingestion Sources',
-      path: '/sources',
-      icon: Radio,
-      visible: isAdmin() || hasPermission('IMPORT_RUN') || hasPermission('ANALYTICS_VIEW')
-    },
-    {
       section: 'GOVERNANCE & INSIGHTS'
-    },
-    {
-      label: 'Big Data & Hadoop',
-      path: '/big-data',
-      icon: Database,
-      visible: isAdmin() || hasPermission('ANALYTICS_VIEW')
     },
     {
       label: 'Staff Directory',

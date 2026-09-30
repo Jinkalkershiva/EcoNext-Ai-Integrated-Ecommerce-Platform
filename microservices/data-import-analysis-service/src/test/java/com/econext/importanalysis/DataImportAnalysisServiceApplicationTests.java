@@ -173,12 +173,6 @@ public class DataImportAnalysisServiceApplicationTests {
         assertThrows(IllegalArgumentException.class, () -> importService.uploadAndDetectHeaders(maliciousFile));
     }
 
-    @Autowired
-    private com.econext.importanalysis.service.LiveDataSourceService liveDataSourceService;
-
-    @Autowired
-    private com.econext.importanalysis.service.BigDataAnalyticsService bigDataAnalyticsService;
-
     @Test
     @DisplayName("4. Operational Intelligence & Analytics KPI Aggregation")
     void testOperationalAnalyticsDashboardKpis() {
@@ -189,49 +183,5 @@ public class DataImportAnalysisServiceApplicationTests {
         assertNotNull(kpis.getTotalProducts());
         assertNotNull(kpis.getOrderStatusDistribution());
         assertNotNull(kpis.getCategoryDistribution());
-    }
-
-    @Test
-    @DisplayName("5. Big Data Live Sources, Telemetry & Ingestion Invariants")
-    void testBigDataLiveSourcesAndStreamingTelemetry() {
-        // Test 1: Verify default live sources are seeded
-        var sources = liveDataSourceService.getAllSources();
-        assertNotNull(sources);
-        assertFalse(sources.isEmpty());
-        assertTrue(sources.stream().anyMatch(s -> s.getTargetTopic().equals("user-search-events")));
-        assertTrue(sources.stream().anyMatch(s -> s.getTargetTopic().equals("product-view-events")));
-
-        // Test 2: Test toggle status
-        var firstSource = sources.get(0);
-        var toggled = liveDataSourceService.toggleStatus(firstSource.getId());
-        assertNotNull(toggled);
-        assertNotEquals(firstSource.getStatus(), toggled.getStatus());
-
-        // Test 3: Test dispatch test event
-        var eventResult = liveDataSourceService.dispatchTestEvent(firstSource.getId());
-        assertEquals("success", eventResult.get("status"));
-        assertNotNull(eventResult.get("topic"));
-
-        // Test 4: Big Data Overview metrics
-        var overview = bigDataAnalyticsService.getBigDataOverview();
-        assertNotNull(overview);
-        assertEquals("CONNECTED", overview.getKafkaClusterStatus());
-        assertNotNull(overview.getEventsPerTopic());
-        assertFalse(overview.getThroughputTrend().isEmpty());
-        assertFalse(overview.getAiForecastingInsights().isEmpty());
-
-        // Test 5: Search Trends metrics
-        var searchTrends = bigDataAnalyticsService.getSearchTrends();
-        assertNotNull(searchTrends);
-        assertFalse(searchTrends.getTopQueries().isEmpty());
-        assertFalse(searchTrends.getZeroResultQueries().isEmpty());
-        assertTrue(searchTrends.getSearchToCartConversionRate() > 0);
-
-        // Test 6: HDFS Lake metrics
-        var hdfsMetrics = bigDataAnalyticsService.getHdfsLakeMetrics();
-        assertNotNull(hdfsMetrics);
-        assertEquals("HEALTHY", hdfsMetrics.getHdfsStatus());
-        assertFalse(hdfsMetrics.getDirectoryBreakdown().isEmpty());
-        assertFalse(hdfsMetrics.getSparkPipelines().isEmpty());
     }
 }

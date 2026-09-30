@@ -437,51 +437,6 @@ export const auditApi = {
   }
 };
 
-export const liveSourcesApi = {
-  getSources: async () => {
-    const res = await apiRequest('/import/sources');
-    return res.data || res || [];
-  },
-  getSourceById: async (id) => {
-    const res = await apiRequest(`/import/sources/${id}`);
-    return res.data || res;
-  },
-  createSource: async (sourceData) => {
-    const res = await apiRequest('/import/sources', {
-      method: 'POST',
-      body: sourceData
-    });
-    return res.data || res;
-  },
-  toggleStatus: async (id) => {
-    const res = await apiRequest(`/import/sources/${id}/toggle`, {
-      method: 'POST'
-    });
-    return res.data || res;
-  },
-  dispatchTestEvent: async (id) => {
-    const res = await apiRequest(`/import/sources/${id}/test-event`, {
-      method: 'POST'
-    });
-    return res.data || res;
-  }
-};
-
-export const bigDataApi = {
-  getOverview: async () => {
-    const res = await apiRequest('/analytics/big-data/overview');
-    return res.data || res;
-  },
-  getSearchTrends: async () => {
-    const res = await apiRequest('/analytics/big-data/search-trends');
-    return res.data || res;
-  },
-  getHdfsLakeMetrics: async () => {
-    const res = await apiRequest('/analytics/big-data/hdfs-lake-metrics');
-    return res.data || res;
-  }
-};
-
 export const fulfillmentApi = {
   searchShipments: async (params = {}) => {
     const searchParams = new URLSearchParams();

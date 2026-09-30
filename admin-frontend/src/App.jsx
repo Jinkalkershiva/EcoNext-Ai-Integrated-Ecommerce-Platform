@@ -23,8 +23,6 @@ import { ImportWizardPage } from './pages/ImportWizardPage';
 import { QueryConsolePage } from './pages/QueryConsolePage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
-import LiveSourcesPage from './pages/LiveSourcesPage';
-import BigDataAnalyticsPage from './pages/BigDataAnalyticsPage';
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children, requiredPermission = null }) => {
@@ -187,22 +185,6 @@ export const App = () => {
                 element={
                   <ProtectedRoute requiredPermission="AUDIT_VIEW">
                     <QueryConsolePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="sources"
-                element={
-                  <ProtectedRoute requiredPermission="IMPORT_RUN">
-                    <LiveSourcesPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="big-data"
-                element={
-                  <ProtectedRoute requiredPermission="ANALYTICS_VIEW">
-                    <BigDataAnalyticsPage />
                   </ProtectedRoute>
                 }
               />
