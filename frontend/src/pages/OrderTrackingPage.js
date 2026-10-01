@@ -830,16 +830,25 @@ export const OrderTrackingPage = () => {
                 {selectedOrder.items?.map((item) => {
                   const product = item.product || {};
                   const itemSubtotal = Number(item.price_at_purchase || product.current_price || 0) * item.quantity;
-                  const imgUrl = product.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=300&q=80';
+                  const imgUrl = product.image_url;
 
                   return (
                     <div key={item.id} className="tracking-item-row">
                       <div className="tracking-item-left">
-                        <img
-                          src={imgUrl}
-                          alt={product.name || 'Product'}
-                          className="tracking-item-img"
-                        />
+                        {imgUrl ? (
+                          <img
+                            src={imgUrl}
+                            alt={product.name || 'Product'}
+                            className="tracking-item-img"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div className="tracking-item-img-placeholder">
+                            Image unavailable
+                          </div>
+                        )}
                         <div className="tracking-item-details">
                           <span className="tracking-item-name">{product.name || 'Eco-Certified Product'}</span>
                           <span className="tracking-item-qty">

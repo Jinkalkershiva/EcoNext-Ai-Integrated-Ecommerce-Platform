@@ -251,8 +251,6 @@ async function request(path, options = {}) {
     fullUrl = `${ORDER_OPS_API_BASE}${path.replace(/^\/order-ops/, '')}`;
   } else if (typeof path === 'string' && path.startsWith('/notifications')) {
     fullUrl = `${NOTIFICATION_API_BASE}${path.replace(/^\/notifications/, '')}`;
-  } else if (typeof path === 'string' && path.startsWith('/payments')) {
-    fullUrl = `${PAYMENT_API_BASE}${path.replace(/^\/payments/, '')}`;
   } else {
     fullUrl = `${API_BASE_URL}${path}`;
   }

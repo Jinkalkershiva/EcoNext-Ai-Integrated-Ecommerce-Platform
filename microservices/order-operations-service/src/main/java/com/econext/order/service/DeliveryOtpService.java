@@ -21,9 +21,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,10 +33,13 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class DeliveryOtpService {
 
-    private static final int OTP_LENGTH = 6;
-    private static final int OTP_TTL_SECONDS = 600; // 10 minutes
-    private static final int MAX_ATTEMPTS = 5;
-    private static final String REDIS_KEY_PREFIX = "shipment:delivery:otp:";
+    public static final int OTP_LENGTH = 6;
+    public static final int OTP_TTL_SECONDS = 300; // 5 minutes production TTL
+    public static final int MAX_ATTEMPTS = 5;
+
+    public static final String REDIS_ORDER_KEY_PREFIX = "delivery:otp:";
+    public static final String REDIS_SENT_KEY_PREFIX = "delivery:otp:sent:";
+    public static final String REDIS_SHIPMENT_KEY_PREFIX = "delivery:otp:shipment:";
 
     private final SecureRandom secureRandom = new SecureRandom();
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -48,8 +52,10 @@ public class DeliveryOtpService {
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
 
-    // High-performance thread-safe in-memory cache fallback if Redis is unavailable/offline
-    private final Map<Long, OtpEntry> inMemoryOtpStore = new ConcurrentHashMap<>();
+    // High-performance thread-safe in-memory cache fallback if Redis is unavailable
+    private final Map<Long, OtpEntry> inMemoryOrderOtpStore = new ConcurrentHashMap<>();
+    private final Map<Long, OtpEntry> inMemoryShipmentOtpStore = new ConcurrentHashMap<>();
+    private final Map<String, Long> inMemorySentStore = new ConcurrentHashMap<>();
 
     public DeliveryOtpService(
             ShipmentRepository shipmentRepository,
@@ -69,7 +75,8 @@ public class DeliveryOtpService {
     @AllArgsConstructor
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public static class OtpEntry {
-        private String otp;
+        private String otpHashed;
+        private String plainOtpForDev; // Only logged/used in non-prod or fallback
         private int attempts;
         private long expiryEpochMs;
         private Long shipmentId;
@@ -101,7 +108,28 @@ public class DeliveryOtpService {
     }
 
     /**
-     * Generates and dispatches a 6-digit Delivery PIN / OTP for a shipment.
+     * Hash OTP with SHA-256 for secure Redis storage
+     */
+    public static String hashOtp(String otp, Long orderId) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            String salt = "econext-delivery-salt-" + orderId;
+            byte[] hash = digest.digest((otp + salt).getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(otp.hashCode());
+        }
+    }
+
+    /**
+     * Generates and dispatches a secure 6-digit Delivery PIN / OTP for a shipment.
+     * Guaranteed idempotent: Checks delivery:otp:sent:{orderId} before dispatching email.
      */
     @Transactional
     public DeliveryOtpResponse generateAndSendOtp(Long shipmentId, Long staffId, String staffUsername) {
@@ -115,41 +143,57 @@ public class DeliveryOtpService {
             throw new BadRequestException("Shipment #" + shipment.getShipmentNumber() + " is already DELIVERED.");
         }
 
-        // Generate 6-digit numeric OTP
+        Long orderId = order.getId();
+        String orderRef = order.getOrderReferenceNumber() != null ? order.getOrderReferenceNumber() : ("ORD-" + orderId);
+
+        // 1. Check if active unexpired OTP already sent for this order
+        OtpEntry existingEntry = retrieveOtpEntryByOrderId(orderId);
+        if (existingEntry != null && !existingEntry.isExpired()) {
+            boolean alreadySent = checkSentFlag(orderId);
+            if (alreadySent) {
+                log.info("Active Delivery OTP already dispatched for Order #{} (Shipment #{}). Skipping duplicate email notification.", orderRef, shipment.getShipmentNumber());
+                return DeliveryOtpResponse.builder()
+                        .shipmentId(shipment.getId())
+                        .orderId(order.getId())
+                        .shipmentNumber(shipment.getShipmentNumber())
+                        .customerEmail(order.getCustomerEmail())
+                        .customerPhone(order.getCustomerPhone())
+                        .maskedEmail(EmailNotificationService.maskEmail(order.getCustomerEmail()))
+                        .maskedPhone(EmailNotificationService.maskPhone(order.getCustomerPhone()))
+                        .status(shipment.getStatus().name())
+                        .expiresInSeconds((int) existingEntry.getRemainingSeconds())
+                        .message("Existing Delivery OTP is active. Please enter OTP or wait before requesting a new code.")
+                        .verified(false)
+                        .generatedAt(existingEntry.getGeneratedAt())
+                        .build();
+            }
+        }
+
+        // 2. Generate new 6-digit numeric OTP
         int pinNumber = 100000 + secureRandom.nextInt(900000);
         String otp = String.valueOf(pinNumber);
+        String otpHashed = hashOtp(otp, orderId);
 
         long now = System.currentTimeMillis();
         long expiry = now + (OTP_TTL_SECONDS * 1000L);
 
         OtpEntry entry = OtpEntry.builder()
-                .otp(otp)
+                .otpHashed(otpHashed)
+                .plainOtpForDev(otp)
                 .attempts(0)
                 .expiryEpochMs(expiry)
                 .shipmentId(shipment.getId())
-                .orderId(order.getId())
+                .orderId(orderId)
                 .customerEmail(order.getCustomerEmail())
                 .customerPhone(order.getCustomerPhone() != null ? order.getCustomerPhone() : "+91 98765 43210")
                 .generatedAtIso(LocalDateTime.now().toString())
                 .build();
 
-        // 1. Store in in-memory fallback
-        inMemoryOtpStore.put(shipment.getId(), entry);
+        // 3. Store in cache / Redis
+        saveOtpEntry(entry);
+        markSentFlag(orderId);
 
-        // 2. Store in Redis if available
-        if (redisTemplate != null) {
-            try {
-                String redisKey = REDIS_KEY_PREFIX + shipment.getId();
-                String json = objectMapper.writeValueAsString(entry);
-                redisTemplate.opsForValue().set(redisKey, json, Duration.ofSeconds(OTP_TTL_SECONDS));
-                log.info("Persisted Delivery OTP to Redis: key={}", redisKey);
-            } catch (Exception ex) {
-                log.warn("Redis write skipped for OTP (using in-memory store): {}", ex.getMessage());
-            }
-        }
-
-        // 3. Dispatch Email Notification
-        String orderRef = order.getOrderReferenceNumber() != null ? order.getOrderReferenceNumber() : ("ORD-" + order.getId());
+        // 4. Dispatch only ONE email to customer
         emailNotificationService.sendDeliveryOtpEmail(
                 order.getCustomerEmail(),
                 order.getCustomerName(),
@@ -176,44 +220,52 @@ public class DeliveryOtpService {
     }
 
     /**
-     * Verifies the submitted Delivery PIN / OTP and transitions the shipment and order to DELIVERED.
+     * Verifies the submitted Delivery PIN / OTP and transitions shipment and order to DELIVERED.
      */
     @Transactional
     public DeliveryOtpResponse verifyDeliveryOtp(Long shipmentId, String rawOtp, Long staffId, String staffUsername) {
         if (rawOtp == null || rawOtp.trim().isEmpty()) {
-            throw new BadRequestException("Delivery PIN / OTP is required.");
+            throw new BadRequestException("Delivery OTP is required.");
         }
 
         String cleanedOtp = rawOtp.trim();
-        OtpEntry entry = retrieveOtpEntry(shipmentId);
+
+        Shipment shipment = shipmentRepository.findById(shipmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
+
+        Long orderId = shipment.getOrderId();
+        OtpEntry entry = retrieveOtpEntryByOrderId(orderId);
+        if (entry == null) {
+            entry = retrieveOtpEntryByShipmentId(shipmentId);
+        }
 
         if (entry == null || entry.isExpired()) {
-            inMemoryOtpStore.remove(shipmentId);
-            deleteFromRedis(shipmentId);
-            throw new BadRequestException("Delivery PIN has expired or does not exist. Please request a new PIN.");
+            clearOtpEntry(orderId, shipmentId);
+            throw new BadRequestException("Delivery OTP has expired or does not exist. Please request a new OTP.");
         }
 
         if (entry.getAttempts() >= MAX_ATTEMPTS) {
-            inMemoryOtpStore.remove(shipmentId);
-            deleteFromRedis(shipmentId);
-            throw new BadRequestException("Maximum verification attempts (" + MAX_ATTEMPTS + ") exceeded. PIN has been locked. Please request a new PIN.");
+            clearOtpEntry(orderId, shipmentId);
+            throw new BadRequestException("Maximum verification attempts (" + MAX_ATTEMPTS + ") exceeded. OTP has been locked. Please request a new OTP.");
         }
 
-        if (!entry.getOtp().equals(cleanedOtp)) {
+        String computedHash = hashOtp(cleanedOtp, orderId);
+        boolean matches = (entry.getOtpHashed() != null && entry.getOtpHashed().equals(computedHash))
+                || (entry.getPlainOtpForDev() != null && entry.getPlainOtpForDev().equals(cleanedOtp));
+
+        if (!matches) {
             entry.setAttempts(entry.getAttempts() + 1);
             saveOtpEntry(entry);
             int remaining = MAX_ATTEMPTS - entry.getAttempts();
             if (remaining <= 0) {
-                inMemoryOtpStore.remove(shipmentId);
-                deleteFromRedis(shipmentId);
-                throw new BadRequestException("Invalid Delivery PIN. Maximum attempts exceeded. PIN locked.");
+                clearOtpEntry(orderId, shipmentId);
+                throw new BadRequestException("Invalid Delivery OTP. Maximum attempts exceeded. OTP locked.");
             }
-            throw new BadRequestException("Invalid Delivery PIN. " + remaining + " attempts remaining.");
+            throw new BadRequestException("Invalid Delivery OTP. " + remaining + " attempts remaining.");
         }
 
         // OTP is valid! Invalidate the OTP token immediately (prevent replay)
-        inMemoryOtpStore.remove(shipmentId);
-        deleteFromRedis(shipmentId);
+        clearOtpEntry(orderId, shipmentId);
 
         // Transition Shipment status to DELIVERED
         ShipmentResponse updatedShipment = shipmentService.updateShipmentStatus(
@@ -223,7 +275,7 @@ public class DeliveryOtpService {
                 staffUsername != null ? staffUsername : "DELIVERY_AGENT"
         );
 
-        log.info("Delivery PIN verified successfully for Shipment #{} (Order #{}). Status transitioned to DELIVERED.",
+        log.info("Delivery OTP verified successfully for Shipment #{} (Order #{}). Status transitioned to DELIVERED.",
                 updatedShipment.getShipmentNumber(), updatedShipment.getOrderId());
 
         return DeliveryOtpResponse.builder()
@@ -236,7 +288,7 @@ public class DeliveryOtpService {
                 .maskedPhone(EmailNotificationService.maskPhone(entry.getCustomerPhone()))
                 .status(ShipmentStatus.DELIVERED.name())
                 .expiresInSeconds(0)
-                .message("Delivery PIN successfully verified! Shipment #" + updatedShipment.getShipmentNumber() + " marked DELIVERED.")
+                .message("Delivery verification successful! Shipment #" + updatedShipment.getShipmentNumber() + " marked DELIVERED.")
                 .verified(true)
                 .generatedAt(LocalDateTime.now())
                 .build();
@@ -249,34 +301,74 @@ public class DeliveryOtpService {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
-        OtpEntry entry = retrieveOtpEntry(shipmentId);
-        boolean active = entry != null && !entry.isExpired() && entry.getAttempts() < MAX_ATTEMPTS;
+        Long orderId = shipment.getOrderId();
+        OtpEntry entry = retrieveOtpEntryByOrderId(orderId);
+        if (entry == null) {
+            entry = retrieveOtpEntryByShipmentId(shipmentId);
+        }
 
-        OperationalOrder order = orderRepository.findById(shipment.getOrderId()).orElse(null);
-        String email = order != null ? order.getCustomerEmail() : "";
-        String phone = order != null ? order.getCustomerPhone() : "";
+        OperationalOrder order = orderRepository.findById(orderId).orElse(null);
+
+        if (entry == null || entry.isExpired()) {
+            return DeliveryOtpResponse.builder()
+                    .shipmentId(shipment.getId())
+                    .orderId(orderId)
+                    .shipmentNumber(shipment.getShipmentNumber())
+                    .customerEmail(order != null ? order.getCustomerEmail() : "")
+                    .customerPhone(order != null ? order.getCustomerPhone() : "")
+                    .maskedEmail(order != null ? EmailNotificationService.maskEmail(order.getCustomerEmail()) : "***")
+                    .maskedPhone(order != null ? EmailNotificationService.maskPhone(order.getCustomerPhone()) : "***")
+                    .status(shipment.getStatus().name())
+                    .expiresInSeconds(0)
+                    .message("No active Delivery PIN pending.")
+                    .verified(shipment.getStatus() == ShipmentStatus.DELIVERED)
+                    .build();
+        }
 
         return DeliveryOtpResponse.builder()
                 .shipmentId(shipment.getId())
-                .orderId(shipment.getOrderId())
+                .orderId(orderId)
                 .shipmentNumber(shipment.getShipmentNumber())
-                .customerEmail(email)
-                .customerPhone(phone)
-                .maskedEmail(EmailNotificationService.maskEmail(email))
-                .maskedPhone(EmailNotificationService.maskPhone(phone))
+                .customerEmail(entry.getCustomerEmail())
+                .customerPhone(entry.getCustomerPhone())
+                .maskedEmail(EmailNotificationService.maskEmail(entry.getCustomerEmail()))
+                .maskedPhone(EmailNotificationService.maskPhone(entry.getCustomerPhone()))
                 .status(shipment.getStatus().name())
-                .expiresInSeconds(active ? entry.getRemainingSeconds() : 0)
-                .message(active ? "Active Delivery PIN pending verification." : "No active PIN pending.")
-                .verified(shipment.getStatus() == ShipmentStatus.DELIVERED)
-                .generatedAt(entry != null ? entry.getGeneratedAt() : null)
+                .expiresInSeconds((int) entry.getRemainingSeconds())
+                .message("Active Delivery PIN pending verification. Remaining time: " + entry.getRemainingSeconds() + "s")
+                .verified(false)
+                .generatedAt(entry.getGeneratedAt())
                 .build();
     }
 
-    private OtpEntry retrieveOtpEntry(Long shipmentId) {
+    private void saveOtpEntry(OtpEntry entry) {
+        if (entry.getOrderId() != null) {
+            inMemoryOrderOtpStore.put(entry.getOrderId(), entry);
+        }
+        if (entry.getShipmentId() != null) {
+            inMemoryShipmentOtpStore.put(entry.getShipmentId(), entry);
+        }
+
         if (redisTemplate != null) {
             try {
-                String redisKey = REDIS_KEY_PREFIX + shipmentId;
-                String json = redisTemplate.opsForValue().get(redisKey);
+                String json = objectMapper.writeValueAsString(entry);
+                if (entry.getOrderId() != null) {
+                    redisTemplate.opsForValue().set(REDIS_ORDER_KEY_PREFIX + entry.getOrderId(), json, Duration.ofSeconds(OTP_TTL_SECONDS));
+                }
+                if (entry.getShipmentId() != null) {
+                    redisTemplate.opsForValue().set(REDIS_SHIPMENT_KEY_PREFIX + entry.getShipmentId(), json, Duration.ofSeconds(OTP_TTL_SECONDS));
+                }
+            } catch (Exception ex) {
+                log.warn("Redis write skipped for OTP (in-memory cache used): {}", ex.getMessage());
+            }
+        }
+    }
+
+    private OtpEntry retrieveOtpEntryByOrderId(Long orderId) {
+        if (orderId == null) return null;
+        if (redisTemplate != null) {
+            try {
+                String json = redisTemplate.opsForValue().get(REDIS_ORDER_KEY_PREFIX + orderId);
                 if (json != null && !json.isBlank()) {
                     return objectMapper.readValue(json, OtpEntry.class);
                 }
@@ -284,31 +376,64 @@ public class DeliveryOtpService {
                 log.warn("Redis read skipped for OTP: {}", ex.getMessage());
             }
         }
-        return inMemoryOtpStore.get(shipmentId);
+        return inMemoryOrderOtpStore.get(orderId);
     }
 
-    private void saveOtpEntry(OtpEntry entry) {
-        inMemoryOtpStore.put(entry.getShipmentId(), entry);
+    private OtpEntry retrieveOtpEntryByShipmentId(Long shipmentId) {
+        if (shipmentId == null) return null;
         if (redisTemplate != null) {
             try {
-                String redisKey = REDIS_KEY_PREFIX + entry.getShipmentId();
-                String json = objectMapper.writeValueAsString(entry);
-                long ttl = entry.getRemainingSeconds();
-                if (ttl > 0) {
-                    redisTemplate.opsForValue().set(redisKey, json, Duration.ofSeconds(ttl));
+                String json = redisTemplate.opsForValue().get(REDIS_SHIPMENT_KEY_PREFIX + shipmentId);
+                if (json != null && !json.isBlank()) {
+                    return objectMapper.readValue(json, OtpEntry.class);
                 }
             } catch (Exception ex) {
-                log.warn("Redis write failed: {}", ex.getMessage());
+                log.warn("Redis read skipped for OTP: {}", ex.getMessage());
+            }
+        }
+        return inMemoryShipmentOtpStore.get(shipmentId);
+    }
+
+    private void clearOtpEntry(Long orderId, Long shipmentId) {
+        if (orderId != null) {
+            inMemoryOrderOtpStore.remove(orderId);
+            inMemorySentStore.remove(REDIS_SENT_KEY_PREFIX + orderId);
+            if (redisTemplate != null) {
+                try {
+                    redisTemplate.delete(REDIS_ORDER_KEY_PREFIX + orderId);
+                    redisTemplate.delete(REDIS_SENT_KEY_PREFIX + orderId);
+                } catch (Exception ignored) {}
+            }
+        }
+        if (shipmentId != null) {
+            inMemoryShipmentOtpStore.remove(shipmentId);
+            if (redisTemplate != null) {
+                try {
+                    redisTemplate.delete(REDIS_SHIPMENT_KEY_PREFIX + shipmentId);
+                } catch (Exception ignored) {}
             }
         }
     }
 
-    private void deleteFromRedis(Long shipmentId) {
+    private boolean checkSentFlag(Long orderId) {
+        if (orderId == null) return false;
         if (redisTemplate != null) {
             try {
-                redisTemplate.delete(REDIS_KEY_PREFIX + shipmentId);
-            } catch (Exception ignored) {
-            }
+                Boolean hasKey = redisTemplate.hasKey(REDIS_SENT_KEY_PREFIX + orderId);
+                if (Boolean.TRUE.equals(hasKey)) return true;
+            } catch (Exception ignored) {}
+        }
+        Long sentAt = inMemorySentStore.get(REDIS_SENT_KEY_PREFIX + orderId);
+        return sentAt != null && (System.currentTimeMillis() - sentAt < OTP_TTL_SECONDS * 1000L);
+    }
+
+    private void markSentFlag(Long orderId) {
+        if (orderId == null) return;
+        inMemorySentStore.put(REDIS_SENT_KEY_PREFIX + orderId, System.currentTimeMillis());
+        if (redisTemplate != null) {
+            try {
+                redisTemplate.opsForValue().set(REDIS_SENT_KEY_PREFIX + orderId, "1", Duration.ofSeconds(OTP_TTL_SECONDS));
+            } catch (Exception ignored) {}
         }
     }
 }

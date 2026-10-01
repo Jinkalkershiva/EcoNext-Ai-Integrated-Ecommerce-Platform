@@ -1,10 +1,6 @@
 package com.econext.order.service;
 
-import com.econext.order.dto.CreateShipmentRequest;
-import com.econext.order.dto.LogisticsTrackingResponse;
-import com.econext.order.dto.ShipmentItemResponse;
-import com.econext.order.dto.ShipmentResponse;
-import com.econext.order.dto.UpdateShipmentLocationRequest;
+import com.econext.order.dto.*;
 import com.econext.order.dto.event.ShipmentLocationUpdatedEvent;
 import com.econext.order.dto.event.ShipmentStatusUpdatedEvent;
 import com.econext.order.entity.*;
@@ -33,9 +29,11 @@ public class ShipmentService {
     private final ContainerRepository containerRepository;
     private final OperationalOrderRepository orderRepository;
     private final LogisticsTrackingEventRepository trackingEventRepository;
+    private final ShipmentEventRepository shipmentEventRepository;
     private final OrderStatusTransitionRepository transitionRepository;
     private final DjangoOrderSyncService djangoOrderSyncService;
-    private final com.econext.order.kafka.FulfillmentEventProducer fulfillmentEventProducer;
+    private final FulfillmentEventProducer fulfillmentEventProducer;
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     @org.springframework.context.annotation.Lazy
     private DeliveryOtpService deliveryOtpService;
@@ -55,8 +53,6 @@ public class ShipmentService {
 
     @Transactional
     public ShipmentResponse createShipment(CreateShipmentRequest request, Long staffId, String staffUsername) {
-        // idx-01: Shipment Service → Order Operations Service
-        // reason: Validate order existence and remaining unfulfilled item quantities.
         OperationalOrder order = orderRepository.findById(request.getOrderId())
                 .or(() -> orderRepository.findByDjangoOrderId(request.getOrderId()))
                 .orElseGet(() -> {
@@ -73,7 +69,6 @@ public class ShipmentService {
                     .orElseThrow(() -> new ResourceNotFoundException("Container not found with ID: " + request.getContainerId()));
         }
 
-        // Validate item allocation or auto-allocate all order items
         List<ShipmentItem> shipmentItems = new ArrayList<>();
         if (request.getItems() != null && !request.getItems().isEmpty()) {
             Map<Long, OperationalOrderItem> orderItemMap = order.getItems().stream()
@@ -98,7 +93,6 @@ public class ShipmentService {
                 shipmentItems.add(item);
             }
         } else if (order.getItems() != null && !order.getItems().isEmpty()) {
-            // Automatically allocate all order items
             for (OperationalOrderItem orderItem : order.getItems()) {
                 int alreadyAllocated = shipmentItemRepository.sumAllocatedQuantityByOrderItemId(orderItem.getId());
                 int remaining = Math.max(1, orderItem.getQuantity() - alreadyAllocated);
@@ -179,8 +173,21 @@ public class ShipmentService {
 
         Shipment saved = shipmentRepository.save(shipment);
 
-        // idx-02: Shipment Service → Tracking Event Repository
-        // reason: Persist initial shipment created tracking event.
+        String role = resolveStaffRole(staffUsername, ShipmentStatus.CREATED);
+
+        // 1. Save ShipmentEvent in shipment_events table
+        ShipmentEvent shipmentEvent = ShipmentEvent.builder()
+                .shipmentId(saved.getId())
+                .oldStatus(null)
+                .newStatus(ShipmentStatus.CREATED.name())
+                .changedBy(staffUsername != null ? staffUsername : "SYSTEM")
+                .changedRole(role)
+                .latitude(saved.getCurrentLatitude())
+                .longitude(saved.getCurrentLongitude())
+                .build();
+        shipmentEventRepository.save(shipmentEvent);
+
+        // 2. Save Tracking event for backwards compatibility
         LogisticsTrackingEvent tracking = LogisticsTrackingEvent.builder()
                 .shipmentId(saved.getId())
                 .containerId(container != null ? container.getId() : null)
@@ -192,14 +199,14 @@ public class ShipmentService {
                 .build();
         trackingEventRepository.save(tracking);
 
-        // idx-06: Order Operations Service → Kafka Topic (shipment.status.updated)
-        // reason: Broadcast initial shipment created event.
+        // 3. Publish Kafka event to shipment.status.updated
         fulfillmentEventProducer.publishShipmentStatusUpdated(ShipmentStatusUpdatedEvent.builder()
                 .shipmentId(saved.getId())
                 .shipmentNumber(saved.getShipmentNumber())
                 .orderId(saved.getOrderId())
-                .status(ShipmentStatus.CREATED.name())
-                .previousStatus(null)
+                .oldStatus(null)
+                .newStatus(ShipmentStatus.CREATED.name())
+                .location(origin)
                 .carrierName(saved.getCarrierName())
                 .trackingNumber(saved.getTrackingNumber())
                 .timestamp(LocalDateTime.now())
@@ -240,8 +247,21 @@ public class ShipmentService {
         shipment.setStatus(targetStatus);
         Shipment updated = shipmentRepository.save(shipment);
 
-        // idx-03: Shipment Service → Tracking Event Repository
-        // reason: Record shipment status transition audit log.
+        String role = resolveStaffRole(staffUsername, targetStatus);
+
+        // 1. Save ShipmentEvent in shipment_events table
+        ShipmentEvent shipmentEvent = ShipmentEvent.builder()
+                .shipmentId(updated.getId())
+                .oldStatus(currentStatus.name())
+                .newStatus(targetStatus.name())
+                .changedBy(staffUsername != null ? staffUsername : "STAFF")
+                .changedRole(role)
+                .latitude(updated.getCurrentLatitude())
+                .longitude(updated.getCurrentLongitude())
+                .build();
+        shipmentEventRepository.save(shipmentEvent);
+
+        // 2. Save Tracking event for backwards compatibility
         LogisticsTrackingEvent event = LogisticsTrackingEvent.builder()
                 .shipmentId(updated.getId())
                 .containerId(updated.getContainer() != null ? updated.getContainer().getId() : null)
@@ -249,27 +269,27 @@ public class ShipmentService {
                 .locationName(updated.getDestination())
                 .latitude(updated.getCurrentLatitude())
                 .longitude(updated.getCurrentLongitude())
-                .description("Shipment status updated to " + targetStatus.name() + " by " + (staffUsername != null ? staffUsername : "STAFF"))
+                .description("Shipment status updated from " + currentStatus.name() + " to " + targetStatus.name() + " by " + (staffUsername != null ? staffUsername : "STAFF"))
                 .build();
         trackingEventRepository.save(event);
 
-        // idx-06: Order Operations Service → Kafka Topic (shipment.status.updated)
-        // reason: Broadcast shipment status lifecycle transition for notifications and live tracking.
+        // 3. Publish Kafka event to shipment.status.updated
         fulfillmentEventProducer.publishShipmentStatusUpdated(ShipmentStatusUpdatedEvent.builder()
                 .shipmentId(updated.getId())
                 .shipmentNumber(updated.getShipmentNumber())
                 .orderId(updated.getOrderId())
-                .status(targetStatus.name())
-                .previousStatus(currentStatus.name())
+                .oldStatus(currentStatus.name())
+                .newStatus(targetStatus.name())
+                .location(updated.getDestination())
                 .carrierName(updated.getCarrierName())
                 .trackingNumber(updated.getTrackingNumber())
                 .timestamp(LocalDateTime.now())
                 .build());
 
-        // Update derived OperationalOrder status if applicable
+        // 4. Update derived OperationalOrder status and sync
         evaluateAndSyncOrderStatus(updated.getOrderId(), staffId, staffUsername);
 
-        // Automatically generate and dispatch secure Delivery OTP email when shipment is OUT_FOR_DELIVERY
+        // 5. Automatically generate and dispatch secure Delivery OTP email when shipment is OUT_FOR_DELIVERY
         if (targetStatus == ShipmentStatus.OUT_FOR_DELIVERY) {
             try {
                 if (deliveryOtpService != null) {
@@ -293,8 +313,6 @@ public class ShipmentService {
         shipment.setLastLocationUpdate(LocalDateTime.now());
         Shipment updated = shipmentRepository.save(shipment);
 
-        // idx-04: Shipment Service → Tracking Event Repository
-        // reason: Store physical shipment GPS location update and location milestone.
         LogisticsTrackingEvent event = LogisticsTrackingEvent.builder()
                 .shipmentId(updated.getId())
                 .containerId(updated.getContainer() != null ? updated.getContainer().getId() : null)
@@ -306,8 +324,6 @@ public class ShipmentService {
                 .build();
         trackingEventRepository.save(event);
 
-        // idx-07: Order Operations Service → Kafka Topic (shipment.location.updated)
-        // reason: Broadcast real-time physical vehicle GPS coordinate update.
         fulfillmentEventProducer.publishShipmentLocationUpdated(ShipmentLocationUpdatedEvent.builder()
                 .shipmentId(updated.getId())
                 .shipmentNumber(updated.getShipmentNumber())
@@ -346,9 +362,9 @@ public class ShipmentService {
                 newStatus = OrderStatus.OUT_FOR_DELIVERY;
             } else if (anyInTransit && order.getCurrentStatus() != OrderStatus.DELIVERED && order.getCurrentStatus() != OrderStatus.OUT_FOR_DELIVERY && order.getCurrentStatus() != OrderStatus.CANCELLED) {
                 newStatus = OrderStatus.IN_TRANSIT;
-            } else if (anyDispatched && (order.getCurrentStatus() == OrderStatus.PROCESSING || order.getCurrentStatus() == OrderStatus.PACKED)) {
+            } else if (anyDispatched && (order.getCurrentStatus() == OrderStatus.PROCESSING || order.getCurrentStatus() == OrderStatus.PACKED || order.getCurrentStatus() == OrderStatus.ORDER_CONFIRMED || order.getCurrentStatus() == OrderStatus.ORDER_PLACED)) {
                 newStatus = OrderStatus.SHIPPED;
-            } else if (anyPacked && order.getCurrentStatus() == OrderStatus.PROCESSING) {
+            } else if (anyPacked && (order.getCurrentStatus() == OrderStatus.PROCESSING || order.getCurrentStatus() == OrderStatus.ORDER_CONFIRMED || order.getCurrentStatus() == OrderStatus.ORDER_PLACED)) {
                 newStatus = OrderStatus.PACKED;
             }
 
@@ -392,14 +408,57 @@ public class ShipmentService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ShipmentResponse> searchShipments(Long orderId, ShipmentStatus status, Long containerId, String search, Pageable pageable) {
-        return shipmentRepository.searchShipments(orderId, status, containerId, search, pageable)
-                .map(this::mapToResponse);
+    public List<ShipmentEventResponse> getShipmentEvents(Long id) {
+        return shipmentEventRepository.findByShipmentIdOrderByCreatedAtAsc(id).stream()
+                .map(e -> ShipmentEventResponse.builder()
+                        .id(e.getId())
+                        .shipmentId(e.getShipmentId())
+                        .oldStatus(e.getOldStatus())
+                        .newStatus(e.getNewStatus())
+                        .changedBy(e.getChangedBy())
+                        .changedRole(e.getChangedRole())
+                        .latitude(e.getLatitude())
+                        .longitude(e.getLongitude())
+                        .createdAt(e.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public com.econext.order.dto.FulfillmentSummaryResponse getFulfillmentSummary(LocalDateTime fromTime, LocalDateTime toTime) {
-        // 1. Shipment Status Aggregations
+    public Page<ShipmentResponse> searchShipments(
+            Long orderId,
+            ShipmentStatus status,
+            Long containerId,
+            String warehouse,
+            String hub,
+            String state,
+            String city,
+            String pincode,
+            String carrier,
+            LocalDateTime fromTime,
+            LocalDateTime toTime,
+            String search,
+            Pageable pageable
+    ) {
+        return shipmentRepository.searchShipments(
+                orderId,
+                status,
+                containerId,
+                warehouse,
+                hub,
+                state,
+                city,
+                pincode,
+                carrier,
+                fromTime,
+                toTime,
+                search,
+                pageable
+        ).map(this::mapToResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public FulfillmentSummaryResponse getFulfillmentSummary(LocalDateTime fromTime, LocalDateTime toTime) {
         List<Object[]> shipmentCountsRaw = shipmentRepository.countShipmentsByStatus();
         Map<String, Long> shipmentStatusCounts = new LinkedHashMap<>();
         for (ShipmentStatus st : ShipmentStatus.values()) {
@@ -423,7 +482,6 @@ public class ShipmentService {
         long cancelledShipments = shipmentStatusCounts.getOrDefault("CANCELLED", 0L);
         long returnedShipments = shipmentStatusCounts.getOrDefault("RETURNED", 0L);
 
-        // 2. Container Aggregations
         List<Object[]> containerCountsRaw = containerRepository.countContainersByStatus();
         Map<String, Long> containerStatusCounts = new LinkedHashMap<>();
         for (ContainerStatus st : ContainerStatus.values()) {
@@ -437,7 +495,6 @@ public class ShipmentService {
         long totalContainers = containerRepository.count();
         long activeContainers = containerRepository.countActiveContainers();
 
-        // 3. Order Status Aggregations
         List<Object[]> orderCountsRaw = orderRepository.countOrdersByStatus();
         Map<String, Long> orderStatusCounts = new LinkedHashMap<>();
         for (OrderStatus st : OrderStatus.values()) {
@@ -448,42 +505,8 @@ public class ShipmentService {
                 orderStatusCounts.put(((OrderStatus) row[0]).name(), ((Number) row[1]).longValue());
             }
         }
-        long totalOrders = orderRepository.count();
 
-        // 4. GPS & Telemetry Tracking
-        long totalTrackingEvents = trackingEventRepository.count();
-        long shipmentsWithGps = shipmentRepository.countShipmentsWithGps();
-        long shipmentsWithRecentGps = shipmentRepository.countShipmentsWithRecentGps(LocalDateTime.now().minusHours(24));
-
-        // 5. Recent Active In-Transit Loads & GPS updates
-        List<ShipmentResponse> inTransitList = shipmentRepository.findInTransitShipments(org.springframework.data.domain.PageRequest.of(0, 8))
-                .stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
-
-        List<ShipmentResponse> recentGpsList = shipmentRepository.findRecentGpsUpdates(org.springframework.data.domain.PageRequest.of(0, 8))
-                .stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
-
-        // 6. Recent Activity Stream
-        List<LogisticsTrackingResponse> recentActivity = trackingEventRepository.findRecentEvents(org.springframework.data.domain.PageRequest.of(0, 10))
-                .stream()
-                .map(e -> LogisticsTrackingResponse.builder()
-                        .id(e.getId())
-                        .shipmentId(e.getShipmentId())
-                        .containerId(e.getContainerId())
-                        .status(e.getStatus())
-                        .locationName(e.getLocationName())
-                        .latitude(e.getLatitude())
-                        .longitude(e.getLongitude())
-                        .description(e.getDescription())
-                        .timestamp(e.getTimestamp())
-                        .build())
-                .collect(Collectors.toList());
-
-        return com.econext.order.dto.FulfillmentSummaryResponse.builder()
-                .totalOrders(totalOrders)
+        return FulfillmentSummaryResponse.builder()
                 .totalShipments(totalShipments)
                 .activeShipments(activeShipments)
                 .pendingShipments(pendingShipments)
@@ -495,61 +518,76 @@ public class ShipmentService {
                 .returnedShipments(returnedShipments)
                 .totalContainers(totalContainers)
                 .activeContainers(activeContainers)
-                .totalTrackingEvents(totalTrackingEvents)
-                .shipmentsWithGps(shipmentsWithGps)
-                .shipmentsWithRecentGps(shipmentsWithRecentGps)
                 .shipmentStatusCounts(shipmentStatusCounts)
                 .containerStatusCounts(containerStatusCounts)
                 .orderStatusCounts(orderStatusCounts)
-                .inTransitShipmentsList(inTransitList)
-                .recentGpsUpdates(recentGpsList)
-                .recentActivityStream(recentActivity)
                 .build();
     }
 
-    private ShipmentResponse mapToResponse(Shipment s) {
-        List<ShipmentItemResponse> itemDtos = s.getItems() != null ? s.getItems().stream()
-                .map(it -> ShipmentItemResponse.builder()
-                        .id(it.getId())
-                        .orderItemId(it.getOrderItemId())
-                        .productId(it.getProductId())
-                        .productName(it.getProductName())
-                        .quantity(it.getQuantity())
-                        .createdAt(it.getCreatedAt())
+    private String resolveStaffRole(String staffUsername, ShipmentStatus targetStatus) {
+        if (targetStatus == ShipmentStatus.OUT_FOR_DELIVERY || targetStatus == ShipmentStatus.DELIVERED) {
+            return "Delivery Agent";
+        }
+        if (targetStatus == ShipmentStatus.IN_TRANSIT || targetStatus == ShipmentStatus.ARRIVED_AT_HUB) {
+            return "Logistics Linehaul Staff";
+        }
+        if (targetStatus == ShipmentStatus.PACKED || targetStatus == ShipmentStatus.DISPATCHED) {
+            return "Warehouse Staff";
+        }
+        if (staffUsername != null && staffUsername.toUpperCase().contains("ADMIN")) {
+            return "Admin";
+        }
+        return "Operations Staff";
+    }
+
+    private ShipmentResponse mapToResponse(Shipment shipment) {
+        List<ShipmentItemResponse> itemResponses = shipment.getItems() != null ? shipment.getItems().stream()
+                .map(item -> ShipmentItemResponse.builder()
+                        .id(item.getId())
+                        .orderItemId(item.getOrderItemId())
+                        .productId(item.getProductId())
+                        .productName(item.getProductName())
+                        .quantity(item.getQuantity())
                         .build())
                 .collect(Collectors.toList()) : Collections.emptyList();
 
-        // Direct Shipment GPS takes precedence; fallback to Container GPS if assigned
-        java.math.BigDecimal lat = s.getCurrentLatitude() != null
-                ? s.getCurrentLatitude()
-                : (s.getContainer() != null ? s.getContainer().getCurrentLatitude() : null);
-        java.math.BigDecimal lon = s.getCurrentLongitude() != null
-                ? s.getCurrentLongitude()
-                : (s.getContainer() != null ? s.getContainer().getCurrentLongitude() : null);
-        LocalDateTime locUpdate = s.getLastLocationUpdate() != null
-                ? s.getLastLocationUpdate()
-                : (s.getContainer() != null ? s.getContainer().getLastLocationUpdate() : null);
+        List<ShipmentEventResponse> eventResponses = shipmentEventRepository != null
+                ? shipmentEventRepository.findByShipmentIdOrderByCreatedAtAsc(shipment.getId()).stream()
+                .map(e -> ShipmentEventResponse.builder()
+                        .id(e.getId())
+                        .shipmentId(e.getShipmentId())
+                        .oldStatus(e.getOldStatus())
+                        .newStatus(e.getNewStatus())
+                        .changedBy(e.getChangedBy())
+                        .changedRole(e.getChangedRole())
+                        .latitude(e.getLatitude())
+                        .longitude(e.getLongitude())
+                        .createdAt(e.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList())
+                : Collections.emptyList();
 
         return ShipmentResponse.builder()
-                .id(s.getId())
-                .shipmentNumber(s.getShipmentNumber())
-                .orderId(s.getOrderId())
-                .containerId(s.getContainer() != null ? s.getContainer().getId() : null)
-                .containerCode(s.getContainer() != null ? s.getContainer().getContainerCode() : null)
-                .status(s.getStatus())
-                .carrierName(s.getCarrierName())
-                .trackingNumber(s.getTrackingNumber())
-                .vehicleNumber(s.getVehicleNumber())
-                .origin(s.getOrigin())
-                .destination(s.getDestination())
-                .route(s.getRoute())
-                .estimatedDelivery(s.getEstimatedDelivery())
-                .currentLatitude(lat)
-                .currentLongitude(lon)
-                .lastLocationUpdate(locUpdate)
-                .items(itemDtos)
-                .createdAt(s.getCreatedAt())
-                .updatedAt(s.getUpdatedAt())
+                .id(shipment.getId())
+                .shipmentNumber(shipment.getShipmentNumber())
+                .orderId(shipment.getOrderId())
+                .containerId(shipment.getContainer() != null ? shipment.getContainer().getId() : null)
+                .containerCode(shipment.getContainer() != null ? shipment.getContainer().getContainerCode() : null)
+                .status(shipment.getStatus())
+                .carrierName(shipment.getCarrierName())
+                .trackingNumber(shipment.getTrackingNumber())
+                .vehicleNumber(shipment.getVehicleNumber())
+                .origin(shipment.getOrigin())
+                .destination(shipment.getDestination())
+                .route(shipment.getRoute())
+                .estimatedDelivery(shipment.getEstimatedDelivery())
+                .currentLatitude(shipment.getCurrentLatitude())
+                .currentLongitude(shipment.getCurrentLongitude())
+                .lastLocationUpdate(shipment.getLastLocationUpdate())
+                .items(itemResponses)
+                .events(eventResponses)
+                .createdAt(shipment.getCreatedAt())
+                .updatedAt(shipment.getUpdatedAt())
                 .build();
     }
 }

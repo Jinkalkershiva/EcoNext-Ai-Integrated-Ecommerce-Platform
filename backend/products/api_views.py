@@ -30,18 +30,21 @@ from site_analytics.kafka_producer import publish_product_view_event, publish_se
 logger = logging.getLogger(__name__)
 
 
-def product_queryset():
+def product_queryset(include_archived=False):
     """Base queryset with the joins ProductSerializer needs.
 
     ProductSerializer nests eight related objects per product. Without these
     joins a 50-product page issued hundreds of queries; this collapses it to a
     small constant number.
     """
-    return (
+    qs = (
         Product.objects
         .select_related('category', 'subcategory', 'skin_or_body_fit', 'season', 'occasion')
         .prefetch_related('age_groups', 'gender_categories', 'eco_tags')
     )
+    if not include_archived:
+        qs = qs.exclude(status='ARCHIVED')
+    return qs
 
 
 # Only these orderings are accepted, so a caller cannot order by an arbitrary

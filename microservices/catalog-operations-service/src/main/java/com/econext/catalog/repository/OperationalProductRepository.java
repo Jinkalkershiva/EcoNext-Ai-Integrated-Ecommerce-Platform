@@ -49,4 +49,8 @@ public interface OperationalProductRepository extends JpaRepository<OperationalP
 
     @Query("SELECT p.category.name, COUNT(p) FROM OperationalProduct p GROUP BY p.category.name")
     List<Object[]> countProductsByCategory();
+
+    @Query("SELECT p FROM OperationalProduct p WHERE p.imageUrl IS NOT NULL AND p.imageUrl <> '' AND " +
+           "(:search IS NULL OR :search = '' OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%')))")
+    List<OperationalProduct> findProductsWithImages(@Param("search") String search, Pageable pageable);
 }

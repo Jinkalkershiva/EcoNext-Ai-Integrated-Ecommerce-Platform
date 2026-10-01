@@ -74,7 +74,7 @@ export const AdminPage = () => {
     carbon_footprint_reduction_pct: 35,
     is_featured: false,
     description: '',
-    image_url: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=600&q=80',
+    image_url: '',
   });
 
   // Category Modal
@@ -548,7 +548,7 @@ export const AdminPage = () => {
                   carbon_footprint_reduction_pct: 35,
                   is_featured: false,
                   description: '',
-                  image_url: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=600&q=80',
+                  image_url: '',
                 });
                 setIsProductModalOpen(true);
               }}

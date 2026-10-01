@@ -75,15 +75,7 @@ export const HomePage = () => {
     { key: 'unisex', title: 'EcoNext Unisex', desc: 'Universal sustainable lifestyle picks', icon: '✨' },
   ];
 
-  const featuredProduct = products[0] || {
-    id: 1,
-    name: 'Bamboo Fibre Reusable Thermal Flask',
-    current_price: 1299,
-    image_url:
-      'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=600&q=80',
-    description:
-      'Double-walled vacuum insulated, certified organic bamboo exterior with zero plastic packaging.',
-  };
+  const featuredProduct = products.length > 0 ? products[0] : null;
 
   // Marquee Band Items
   const marqueeItems = [
@@ -168,92 +160,140 @@ export const HomePage = () => {
           { value: '0 kg', label: 'Net Carbon Footprint' },
         ]}
         visual={
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-            <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 'var(--radius-md)' }}>
-              <img
-                src={
-                  featuredProduct.image_url ||
-                  'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=600&q=80'
-                }
-                alt={featuredProduct.name}
-                style={{
-                  width: '100%',
-                  aspectRatio: '16/11',
-                  objectFit: 'cover',
-                  display: 'block',
-                  borderRadius: 'var(--radius-md)',
-                }}
-              />
-              <div style={{ position: 'absolute', top: '10px', left: '10px' }}>
-                <Badge variant="eco" size="sm" icon={<Leaf size={11} />}>
-                  Eco Verified Pick
-                </Badge>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '4px' }}>
-              <div>
-                <h3
-                  style={{
-                    fontSize: '1.05rem',
-                    fontWeight: 700,
-                    margin: 0,
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)',
-                  }}
-                  onClick={() => navigateTo(`product/${featuredProduct.id}`)}
-                >
-                  {featuredProduct.name}
-                </h3>
-                <div
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '1.2rem',
-                    fontWeight: 700,
-                    color: 'var(--color-price)',
-                    marginTop: '4px',
-                  }}
-                >
-                  ₹
-                  {Number(featuredProduct.current_price || 0).toLocaleString('en-IN', {
-                    minimumFractionDigits: 2,
-                  })}
+          featuredProduct ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 'var(--radius-md)' }}>
+                {featuredProduct.image_url ? (
+                  <img
+                    src={featuredProduct.image_url}
+                    alt={featuredProduct.name}
+                    style={{
+                      width: '100%',
+                      aspectRatio: '16/11',
+                      objectFit: 'cover',
+                      display: 'block',
+                      borderRadius: 'var(--radius-md)',
+                    }}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: '100%',
+                      aspectRatio: '16/11',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: 'var(--bg-surface-sunken)',
+                      color: 'var(--text-muted)',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: '0.9rem',
+                      fontWeight: 500,
+                    }}
+                  >
+                    Image unavailable
+                  </div>
+                )}
+                <div style={{ position: 'absolute', top: '10px', left: '10px' }}>
+                  <Badge variant="eco" size="sm" icon={<Leaf size={11} />}>
+                    Eco Verified Pick
+                  </Badge>
                 </div>
               </div>
 
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => addToCart(featuredProduct, 1)}
-                icon={<ShoppingBag size={15} />}
-              >
-                Add
-              </Button>
-            </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '4px' }}>
+                <div>
+                  <h3
+                    style={{
+                      fontSize: '1.05rem',
+                      fontWeight: 700,
+                      margin: 0,
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)',
+                    }}
+                    onClick={() => navigateTo(`product/${featuredProduct.id}`)}
+                  >
+                    {featuredProduct.name}
+                  </h3>
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '1.2rem',
+                      fontWeight: 700,
+                      color: 'var(--color-price)',
+                      marginTop: '4px',
+                    }}
+                  >
+                    ₹
+                    {Number(featuredProduct.current_price || 0).toLocaleString('en-IN', {
+                      minimumFractionDigits: 2,
+                    })}
+                  </div>
+                </div>
 
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => addToCart(featuredProduct, 1)}
+                  icon={<ShoppingBag size={15} />}
+                >
+                  Add
+                </Button>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  padding: 'var(--space-2) var(--space-3)',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                  border: '1px solid var(--border-subtle)',
+                  marginTop: '4px',
+                }}
+              >
+                <ShieldCheck size={18} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Best Price Guarantee
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    AI Forecast: Buy today for lowest weekly rate
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
             <div
               style={{
                 display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
                 alignItems: 'center',
-                gap: 'var(--space-2)',
-                padding: 'var(--space-2) var(--space-3)',
-                borderRadius: 'var(--radius-sm)',
+                padding: 'var(--space-6)',
                 backgroundColor: 'var(--bg-surface-sunken)',
-                border: '1px solid var(--border-subtle)',
-                marginTop: '4px',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px dashed var(--border-subtle)',
+                textAlign: 'center',
+                minHeight: '260px',
+                gap: 'var(--space-3)',
               }}
             >
-              <ShieldCheck size={18} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  Best Price Guarantee
-                </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  AI Forecast: Buy today for lowest weekly rate
-                </div>
-              </div>
+              <Leaf size={40} style={{ color: 'var(--color-primary)' }} />
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                Eco-Verified Catalog
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '280px' }}>
+                Explore database-verified sustainable products curated with ESG metrics.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => navigateTo('products')}>
+                Browse Catalog
+              </Button>
             </div>
-          </div>
+          )
         }
       />
 

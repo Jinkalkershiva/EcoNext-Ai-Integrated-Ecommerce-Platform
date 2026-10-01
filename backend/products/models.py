@@ -78,6 +78,10 @@ class Product(models.Model):
     popularity_score = models.FloatField(default=0.0)
     sustainability_score = models.FloatField(default=0.0)
     auto_tagged = models.BooleanField(default=False)
+    
+    # Whitelist & Lifecycle Status fields
+    is_whitelisted = models.BooleanField(default=False, db_index=True)
+    status = models.CharField(max_length=20, default='ACTIVE', db_index=True)  # ACTIVE, ARCHIVED, DRAFT, OUT_OF_STOCK
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -90,6 +94,8 @@ class Product(models.Model):
         indexes = [
             models.Index(fields=['category', 'created_at']),
             models.Index(fields=['name']),
+            models.Index(fields=['status']),
+            models.Index(fields=['is_whitelisted']),
         ]
 
 

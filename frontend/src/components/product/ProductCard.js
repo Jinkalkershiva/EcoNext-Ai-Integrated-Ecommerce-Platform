@@ -43,19 +43,25 @@ export const ProductCard = ({ product, onViewDetails, onAddToCart, children }) =
     setIsFavorited(!isFavorited);
   };
 
-  const fallbackImage = `https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=400&q=80`;
+  const dbImageUrl = product.image_url || product.imageUrl;
 
   return (
     <div className="product-card">
       {/* Media Image */}
       <div className="product-card-media" onClick={handleCardClick}>
-        <img
-          src={!imageError && (product.image_url || product.imageUrl) ? (product.image_url || product.imageUrl) : fallbackImage}
-          alt={product.name || 'Eco Product'}
-          className="product-card-image"
-          loading="lazy"
-          onError={() => setImageError(true)}
-        />
+        {!imageError && dbImageUrl ? (
+          <img
+            src={dbImageUrl}
+            alt={product.name || 'Eco Product'}
+            className="product-card-image"
+            loading="lazy"
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <div className="product-card-image-placeholder">
+            Image unavailable
+          </div>
+        )}
 
         {/* Badges Overlay */}
         <div className="product-card-badges">

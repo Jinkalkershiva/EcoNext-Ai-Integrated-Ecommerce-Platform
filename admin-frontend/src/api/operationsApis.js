@@ -107,6 +107,52 @@ export const catalogOpsApi = {
     }
   },
 
+  toggleWhitelist: async (id, isWhitelisted) => {
+    try {
+      const res = await apiRequest(`/admin/products/${id}/whitelist/`, {
+        method: 'POST',
+        body: { is_whitelisted: isWhitelisted }
+      });
+      return res.product || res.data || res;
+    } catch {
+      const res = await apiRequest(`/admin/products/${id}/`, {
+        method: 'PATCH',
+        body: { is_whitelisted: isWhitelisted }
+      });
+      return res.product || res.data || res;
+    }
+  },
+
+  archiveProduct: async (id) => {
+    try {
+      const res = await apiRequest(`/admin/products/${id}/archive/`, {
+        method: 'POST'
+      });
+      return res.product || res.data || res;
+    } catch {
+      const res = await apiRequest(`/admin/products/${id}/`, {
+        method: 'PATCH',
+        body: { status: 'ARCHIVED' }
+      });
+      return res.product || res.data || res;
+    }
+  },
+
+  restoreProduct: async (id) => {
+    try {
+      const res = await apiRequest(`/admin/products/${id}/restore/`, {
+        method: 'POST'
+      });
+      return res.product || res.data || res;
+    } catch {
+      const res = await apiRequest(`/admin/products/${id}/`, {
+        method: 'PATCH',
+        body: { status: 'ACTIVE' }
+      });
+      return res.product || res.data || res;
+    }
+  },
+
   searchProductImages: async (query = '', category = '') => {
     const params = new URLSearchParams();
     if (query) params.append('query', query);
@@ -457,6 +503,14 @@ export const fulfillmentApi = {
     if (params.orderId) searchParams.append('orderId', params.orderId);
     if (params.status && params.status !== 'ALL') searchParams.append('status', params.status);
     if (params.containerId) searchParams.append('containerId', params.containerId);
+    if (params.warehouse) searchParams.append('warehouse', params.warehouse);
+    if (params.hub) searchParams.append('hub', params.hub);
+    if (params.state) searchParams.append('state', params.state);
+    if (params.city) searchParams.append('city', params.city);
+    if (params.pincode) searchParams.append('pincode', params.pincode);
+    if (params.carrier) searchParams.append('carrier', params.carrier);
+    if (params.fromTime) searchParams.append('fromTime', params.fromTime);
+    if (params.toTime) searchParams.append('toTime', params.toTime);
     if (params.search) searchParams.append('search', params.search);
     if (params.page !== undefined) searchParams.append('page', params.page);
     if (params.size !== undefined) searchParams.append('size', params.size);
@@ -504,6 +558,31 @@ export const fulfillmentApi = {
   getShipmentTracking: async (id) => {
     const res = await apiRequest(`/order-ops/shipments/${id}/tracking`);
     return res.data || res || [];
+  },
+
+  getShipmentEvents: async (id) => {
+    const res = await apiRequest(`/order-ops/shipments/${id}/events`);
+    return res.data || res || [];
+  },
+
+  sendDeliveryOtp: async (shipmentId) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/delivery-otp/send`, {
+      method: 'POST'
+    });
+    return res.data || res;
+  },
+
+  verifyDeliveryOtp: async (shipmentId, otp) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/delivery-otp/verify`, {
+      method: 'POST',
+      body: { otp }
+    });
+    return res.data || res;
+  },
+
+  getDeliveryOtpStatus: async (shipmentId) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/delivery-otp/status`);
+    return res.data || res;
   },
 
   searchContainers: async (params = {}) => {

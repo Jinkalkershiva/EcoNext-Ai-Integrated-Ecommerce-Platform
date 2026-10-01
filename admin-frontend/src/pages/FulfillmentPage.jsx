@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Truck,
   Package,
@@ -27,7 +27,12 @@ import {
   ExternalLink,
   Info,
   Map,
-  RotateCw
+  RotateCw,
+  KeyRound,
+  Filter,
+  SlidersHorizontal,
+  Building,
+  Hash
 } from 'lucide-react';
 import { fulfillmentApi, orderOpsApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
@@ -50,6 +55,7 @@ const SHIPMENT_STATUSES = [
 ];
 
 const CARRIER_OPTIONS = [
+  'All Carriers',
   'EcoExpress Carbon-Neutral (Default)',
   'BlueDart Express Surface',
   'Delhivery Logistics',
@@ -57,26 +63,74 @@ const CARRIER_OPTIONS = [
   'DTDC Express'
 ];
 
-// Explicit forward state transitions graph
-const ALLOWED_SHIPMENT_TRANSITIONS = {
-  CREATED: [{ next: 'PACKED', label: 'Mark as Packed', action: 'Confirm Package Ready' }],
-  PACKED: [{ next: 'DISPATCHED', label: 'Dispatch Shipment', action: 'Leave Fulfillment Hub' }],
-  DISPATCHED: [{ next: 'IN_TRANSIT', label: 'Start / Confirm In-Transit', action: 'Hand to Carrier Linehaul' }],
-  IN_TRANSIT: [
-    { next: 'ARRIVED_AT_HUB', label: 'Arrived at Destination Hub', action: 'Inland Checkpoint Received' },
-    { next: 'OUT_FOR_DELIVERY', label: 'Send Out for Delivery', action: 'Hand to Last-Mile Courier' }
-  ],
-  ARRIVED_AT_HUB: [{ next: 'OUT_FOR_DELIVERY', label: 'Send Out for Delivery', action: 'Last-Mile Executive Dispatched' }],
-  OUT_FOR_DELIVERY: [
-    { next: 'DELIVERED', label: 'Mark Delivered', action: 'Customer Delivery Confirmed' },
-    { next: 'FAILED_DELIVERY', label: 'Report Delivery Exception', action: 'Customer Unavailable / Reschedule' }
-  ],
-  FAILED_DELIVERY: [{ next: 'OUT_FOR_DELIVERY', label: 'Re-attempt Delivery', action: 'Next Day Courier Delivery' }],
-  DELIVERED: [],
-  CANCELLED: []
+const WAREHOUSE_OPTIONS = [
+  'All Warehouses',
+  'Bengaluru Central Fulfillment Hub',
+  'Hyderabad Regional Logistics Hub',
+  'Mumbai West Central Warehouse',
+  'Delhi-NCR North Logistics Center'
+];
+
+const STATE_OPTIONS = [
+  'All States',
+  'Telangana',
+  'Karnataka',
+  'Maharashtra',
+  'Delhi',
+  'Tamil Nadu',
+  'Gujarat',
+  'Uttar Pradesh'
+];
+
+// Production staff actions mapping strictly according to Amazon/Flipkart responsibility separation
+const SHIPMENT_STAFF_ACTIONS = {
+  CREATED: {
+    nextStatus: 'PACKED',
+    label: 'Mark Packed',
+    icon: Package,
+    btnClass: 'btn-primary',
+    bg: '#d97706' // orange
+  },
+  PACKED: {
+    nextStatus: 'DISPATCHED',
+    label: 'Dispatch Shipment',
+    icon: Truck,
+    btnClass: 'btn-primary',
+    bg: '#0284c7' // cyan/blue
+  },
+  DISPATCHED: {
+    nextStatus: 'IN_TRANSIT',
+    label: 'Start Transit',
+    icon: Navigation,
+    btnClass: 'btn-primary',
+    bg: '#2563eb' // blue
+  },
+  IN_TRANSIT: {
+    nextStatus: 'ARRIVED_AT_HUB',
+    label: 'Arrived At Hub',
+    icon: Building,
+    btnClass: 'btn-primary',
+    bg: '#7c3aed' // purple
+  },
+  ARRIVED_AT_HUB: {
+    nextStatus: 'OUT_FOR_DELIVERY',
+    label: 'Out For Delivery',
+    icon: Truck,
+    btnClass: 'btn-primary',
+    bg: '#ea580c' // deep orange
+  },
+  OUT_FOR_DELIVERY: {
+    nextStatus: 'DELIVERED',
+    label: 'Verify Delivery OTP',
+    icon: KeyRound,
+    btnClass: 'btn-primary',
+    bg: '#16a34a', // green
+    isOtpFlow: true
+  }
 };
 
 export const FulfillmentPage = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialOrderId = searchParams.get('orderId') || '';
 
@@ -87,11 +141,20 @@ export const FulfillmentPage = () => {
   const [shipments, setShipments] = useState([]);
   const [ordersAwaiting, setOrdersAwaiting] = useState([]);
   const [containers, setContainers] = useState([]);
-  const [selectedStatus, setSelectedStatus] = useState('ALL');
-  const [searchQuery, setSearchQuery] = useState(initialOrderId ? `ORD-${initialOrderId}` : '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Enterprise Location & Carrier Filters
+  const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState(initialOrderId ? `ORD-${initialOrderId}` : '');
+  const [selectedWarehouse, setSelectedWarehouse] = useState('All Warehouses');
+  const [selectedState, setSelectedState] = useState('All States');
+  const [selectedCity, setSelectedCity] = useState('');
+  const [selectedPincode, setSelectedPincode] = useState('');
+  const [selectedCarrier, setSelectedCarrier] = useState('All Carriers');
+  const [selectedHub, setSelectedHub] = useState('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   // WebSocket Live Stomp State
   const [wsConnected, setWsConnected] = useState(false);
@@ -100,11 +163,22 @@ export const FulfillmentPage = () => {
   // Modals
   const [selectedShipment, setSelectedShipment] = useState(null);
   const [shipmentTrackingHistory, setShipmentTrackingHistory] = useState([]);
+  const [shipmentAuditEvents, setShipmentAuditEvents] = useState([]);
   const [showTrackingModal, setShowTrackingModal] = useState(false);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+
+  // Delivery OTP Modal States
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpTargetShipment, setOtpTargetShipment] = useState(null);
+  const [enteredOtp, setEnteredOtp] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpSuccess, setOtpSuccess] = useState('');
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
 
   // Provision Physical Shipment Modal
   const [showProvisionModal, setShowProvisionModal] = useState(false);
-  const [provisionStep, setProvisionStep] = useState(1);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [orderLookupData, setOrderLookupData] = useState(null);
   const [provisioning, setProvisioning] = useState(false);
@@ -122,18 +196,7 @@ export const FulfillmentPage = () => {
   // Direct status transition in flight
   const [transitioningId, setTransitioningId] = useState(null);
 
-  // GPS Telemetry Modal
-  const [showGpsModal, setShowGpsModal] = useState(false);
-  const [gpsForm, setGpsForm] = useState({
-    id: null,
-    latitude: '12.9716',
-    longitude: '77.5946',
-    locationName: '',
-    note: 'Routine GPS telemetry checkpoint update'
-  });
-  const [gpsUpdating, setGpsUpdating] = useState(false);
-
-  // 1. Fetch Shipments
+  // 1. Fetch Shipments with Enterprise Location Filters
   const loadShipments = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     setError('');
@@ -141,6 +204,12 @@ export const FulfillmentPage = () => {
       const data = await fulfillmentApi.searchShipments({
         status: selectedStatus === 'ALL' ? undefined : selectedStatus,
         search: searchQuery || undefined,
+        warehouse: selectedWarehouse !== 'All Warehouses' ? selectedWarehouse : undefined,
+        state: selectedState !== 'All States' ? selectedState : undefined,
+        city: selectedCity.trim() || undefined,
+        pincode: selectedPincode.trim() || undefined,
+        carrier: selectedCarrier !== 'All Carriers' ? selectedCarrier : undefined,
+        hub: selectedHub.trim() || undefined,
         page: 0,
         size: 100
       });
@@ -151,14 +220,13 @@ export const FulfillmentPage = () => {
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, [selectedStatus, searchQuery]);
+  }, [selectedStatus, searchQuery, selectedWarehouse, selectedState, selectedCity, selectedPincode, selectedCarrier, selectedHub]);
 
   // 2. Fetch Orders Awaiting Fulfillment
   const loadOrdersAwaiting = useCallback(async () => {
     try {
       const res = await orderOpsApi.getOrders({ status: 'ALL', size: 100 });
       const allOrders = res?.orders || res?.content || (Array.isArray(res) ? res : []);
-      // Filter orders that are confirmed/placed and don't yet have active delivered shipment
       const filtered = allOrders.filter((o) => {
         const st = (o.status || o.currentStatus || '').toUpperCase();
         return ['ORDER_PLACED', 'ORDER_CONFIRMED', 'PROCESSING', 'PAID'].includes(st);
@@ -186,23 +254,30 @@ export const FulfillmentPage = () => {
     }
   }, []);
 
-  // Initial Load
+  // Initial Load and Auto-refresh polling
   useEffect(() => {
     loadShipments(true);
     loadOrdersAwaiting();
     loadContainers(false);
+
+    const interval = setInterval(() => {
+      loadShipments(false);
+      loadOrdersAwaiting();
+    }, 8000);
+
+    return () => clearInterval(interval);
   }, [loadShipments, loadOrdersAwaiting, loadContainers]);
 
-  // STOMP WebSocket Connection
+  // STOMP WebSocket Connection for Real-Time Synchronization
   useEffect(() => {
     const client = createTrackingClient();
     stompClientRef.current = client;
 
     client.onConnect(() => {
       setWsConnected(true);
-      // Activity channel
-      client.subscribe('/topic/fulfillment/activity', (msg) => {
+      client.subscribe('/topic/fulfillment/activity', () => {
         loadShipments(false);
+        loadOrdersAwaiting();
       });
     });
 
@@ -215,9 +290,17 @@ export const FulfillmentPage = () => {
     return () => {
       client.disconnect();
     };
-  }, [loadShipments]);
+  }, [loadShipments, loadOrdersAwaiting]);
 
-  // Handle Target Order Lookup & Pre-population
+  // Cooldown countdown timer
+  useEffect(() => {
+    if (otpCooldown > 0) {
+      const timer = setTimeout(() => setOtpCooldown(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [otpCooldown]);
+
+  // Handle Target Order Lookup for Provisioning
   const handleValidateOrder = async (orderIdToLookup = provisionForm.targetOrderId) => {
     const cleaned = String(orderIdToLookup).replace(/[^0-9]/g, '');
     if (!cleaned) {
@@ -231,7 +314,7 @@ export const FulfillmentPage = () => {
       const res = await orderOpsApi.getOrderById(cleaned);
       const o = res?.order || res?.data || res;
       if (!o || !o.id) {
-        throw new Error(`Order ORD-${cleaned} was not found in the database.`);
+        throw new Error(`Order ORD-${cleaned} was not found in database.`);
       }
 
       setOrderLookupData(o);
@@ -250,33 +333,15 @@ export const FulfillmentPage = () => {
         carrierName: o.carrier_name || 'EcoExpress Carbon-Neutral (Default)'
       }));
     } catch (err) {
-      setError(err.message || `Failed to find order ORD-${cleaned}`);
+      setError(err.message || 'Order not found in database.');
       setOrderLookupData(null);
     } finally {
       setLookupLoading(false);
     }
   };
 
-  // Open Provision Modal for specific order
-  const openProvisionForOrder = (order) => {
-    const orderId = order.id || order.orderId;
-    setProvisionForm({
-      targetOrderId: String(orderId),
-      carrierName: order.carrier_name || 'EcoExpress Carbon-Neutral (Default)',
-      trackingNumber: order.tracking_number || `ECO-AWB-${orderId * 100 + 41}`,
-      vehicleNumber: 'KA-01-EQ-9124',
-      origin: 'Bengaluru Central Fulfillment Hub',
-      destination: [order.shipping_address || order.shippingAddress, order.city, order.state, order.zipcode].filter(Boolean).join(', '),
-      route: 'BLR-HYD-DEL Expressway Corridor',
-      estimatedDays: 3
-    });
-    setOrderLookupData(order);
-    setProvisionStep(1);
-    setShowProvisionModal(true);
-  };
-
-  // Submit Physical Shipment Provisioning
-  const handleCreateShipmentSubmit = async (e) => {
+  // Handle Provisioning Submit
+  const handleProvisionShipment = async (e) => {
     e.preventDefault();
     if (!provisionForm.targetOrderId) {
       setError('Target Order ID is required.');
@@ -285,142 +350,321 @@ export const FulfillmentPage = () => {
 
     setProvisioning(true);
     setError('');
-    setSuccess('');
     try {
       const payload = {
-        orderId: parseInt(provisionForm.targetOrderId, 10),
+        orderId: Number(provisionForm.targetOrderId),
         carrierName: provisionForm.carrierName,
         trackingNumber: provisionForm.trackingNumber,
         vehicleNumber: provisionForm.vehicleNumber,
         origin: provisionForm.origin,
         destination: provisionForm.destination,
         route: provisionForm.route,
-        estimatedDeliveryDays: parseInt(provisionForm.estimatedDays, 10) || 3
+        currentLatitude: 12.9716,
+        currentLongitude: 77.5946,
+        estimatedDelivery: new Date(Date.now() + provisionForm.estimatedDays * 86400000).toISOString()
       };
 
-      const created = await fulfillmentApi.createShipment(payload);
-      const shipNum = created.shipmentNumber || `SHP-${created.id}`;
-      setSuccess(`Physical Shipment #${shipNum} provisioned successfully for Order ORD-${provisionForm.targetOrderId} (Status: CREATED).`);
+      const res = await fulfillmentApi.createShipment(payload);
+      setSuccess(`Shipment #${res?.shipmentNumber || 'CREATED'} created successfully.`);
       setShowProvisionModal(false);
-      loadShipments(false);
+      setOrderLookupData(null);
+      loadShipments(true);
       loadOrdersAwaiting();
     } catch (err) {
-      setError(`Unable to create physical shipment. Reason: ${err.message || 'Validation rejected by fulfillment service.'}`);
+      setError(err.message || 'Failed to create shipment.');
     } finally {
       setProvisioning(false);
     }
   };
 
-  // Execute Strict Forward Transition
-  const handleDirectTransition = async (shipment, nextStatus) => {
+  // Transition Shipment State
+  const handleTransitionStatus = async (shipment, nextStatus) => {
     setTransitioningId(shipment.id);
     setError('');
-    setSuccess('');
     try {
-      const updated = await fulfillmentApi.updateShipmentStatus(shipment.id, nextStatus);
-      setSuccess(`Shipment #${shipment.shipmentNumber || shipment.id} transitioned to ${nextStatus}.`);
+      const res = await fulfillmentApi.updateShipmentStatus(shipment.id, nextStatus);
+      setSuccess(`Shipment #${shipment.shipmentNumber} transitioned to ${nextStatus}.`);
       loadShipments(false);
-      loadOrdersAwaiting();
     } catch (err) {
-      setError(`Transition to ${nextStatus} failed: ${err.message}`);
+      setError(err.message || `Failed to transition shipment to ${nextStatus}`);
     } finally {
       setTransitioningId(null);
     }
   };
 
-  // Open Detailed Tracking Modal
-  const openShipmentTracking = async (shipment) => {
+  // Open Delivery OTP Modal
+  const handleOpenOtpModal = async (shipment) => {
+    setOtpTargetShipment(shipment);
+    setEnteredOtp('');
+    setOtpError('');
+    setOtpSuccess('');
+    setShowOtpModal(true);
+
+    // Trigger OTP dispatch on modal open if not already active
+    setOtpSending(true);
+    try {
+      const res = await fulfillmentApi.sendDeliveryOtp(shipment.id);
+      setOtpSuccess(res?.message || 'Secure 6-digit Delivery PIN dispatched to customer email.');
+      setOtpCooldown(45);
+    } catch (err) {
+      setOtpError(err.message || 'Failed to dispatch Delivery PIN.');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  // Resend OTP
+  const handleResendOtp = async () => {
+    if (!otpTargetShipment || otpCooldown > 0) return;
+    setOtpSending(true);
+    setOtpError('');
+    setOtpSuccess('');
+    try {
+      const res = await fulfillmentApi.sendDeliveryOtp(otpTargetShipment.id);
+      setOtpSuccess('Fresh 6-digit Delivery OTP sent to customer email.');
+      setOtpCooldown(60);
+    } catch (err) {
+      setOtpError(err.message || 'Failed to resend Delivery OTP.');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  // Verify Delivery OTP Submit
+  const handleVerifyOtpSubmit = async (e) => {
+    e?.preventDefault();
+    if (!enteredOtp || enteredOtp.trim().length !== 6) {
+      setOtpError('Please enter a valid 6-digit numeric OTP.');
+      return;
+    }
+
+    setOtpVerifying(true);
+    setOtpError('');
+    try {
+      const res = await fulfillmentApi.verifyDeliveryOtp(otpTargetShipment.id, enteredOtp.trim());
+      setSuccess(res?.message || `Shipment #${otpTargetShipment.shipmentNumber} successfully marked DELIVERED!`);
+      setShowOtpModal(false);
+      setOtpTargetShipment(null);
+      loadShipments(true);
+      loadOrdersAwaiting();
+    } catch (err) {
+      setOtpError(err.message || 'Invalid or expired OTP. Please try again.');
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  // Open Tracking Modal
+  const handleOpenTrackingModal = async (shipment) => {
     setSelectedShipment(shipment);
     setShowTrackingModal(true);
+    setTrackingLoading(true);
+    setShipmentTrackingHistory([]);
+    setShipmentAuditEvents([]);
     try {
-      const history = await fulfillmentApi.getShipmentTracking(shipment.id);
-      setShipmentTrackingHistory(Array.isArray(history) ? history : []);
+      const [trackingRes, eventsRes] = await Promise.all([
+        fulfillmentApi.getShipmentTracking(shipment.id).catch(() => []),
+        fulfillmentApi.getShipmentEvents(shipment.id).catch(() => [])
+      ]);
+      setShipmentTrackingHistory(trackingRes || []);
+      setShipmentAuditEvents(eventsRes || []);
     } catch {
-      setShipmentTrackingHistory([]);
-    }
-  };
-
-  // Open GPS Update Modal
-  const openGpsModal = (shipment) => {
-    setGpsForm({
-      id: shipment.id,
-      latitude: shipment.currentLatitude ? String(shipment.currentLatitude) : '12.9716',
-      longitude: shipment.currentLongitude ? String(shipment.currentLongitude) : '77.5946',
-      locationName: `En route: ${shipment.destination || 'Highway Node'}`,
-      note: 'Routine GPS telemetry coordinate checkpoint logged by driver'
-    });
-    setShowGpsModal(true);
-  };
-
-  const handleGpsSubmit = async (e) => {
-    e.preventDefault();
-    if (!gpsForm.id) return;
-
-    setGpsUpdating(true);
-    setError('');
-    try {
-      await fulfillmentApi.updateShipmentLocation(gpsForm.id, {
-        latitude: parseFloat(gpsForm.latitude),
-        longitude: parseFloat(gpsForm.longitude),
-        locationName: gpsForm.locationName,
-        note: gpsForm.note
-      });
-      setSuccess(`GPS Telemetry updated for Shipment #${gpsForm.id}.`);
-      setShowGpsModal(false);
-      loadShipments(false);
-    } catch (err) {
-      setError(`Failed to update GPS telemetry: ${err.message}`);
+      // Fallback
     } finally {
-      setGpsUpdating(false);
+      setTrackingLoading(false);
     }
   };
 
-  // Metrics Counters
-  const totalShipments = shipments.length;
-  const inTransitCount = shipments.filter((s) => ['IN_TRANSIT', 'DISPATCHED', 'ARRIVED_AT_HUB'].includes(s.status)).length;
-  const outForDeliveryCount = shipments.filter((s) => s.status === 'OUT_FOR_DELIVERY').length;
-  const totalContainers = containers.length;
-  const awaitingFulfillmentCount = ordersAwaiting.length;
-  const createdCount = shipments.filter((s) => s.status === 'CREATED').length;
-  const packedCount = shipments.filter((s) => s.status === 'PACKED').length;
+  // Table Columns Definition
+  const shipmentColumns = [
+    {
+      key: 'shipmentNumber',
+      title: 'Shipment / Order ID',
+      render: (row) => (
+        <div>
+          <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
+            #{row.shipmentNumber}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+            <span style={{ fontWeight: 600 }}>Order:</span> #{row.orderId}
+          </div>
+        </div>
+      )
+    },
+    {
+      key: 'route',
+      title: 'Origin → Destination',
+      render: (row) => (
+        <div style={{ maxWidth: '240px' }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {row.origin || 'Fulfillment Hub'}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
+            <MapPin size={11} style={{ flexShrink: 0 }} />
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {row.destination || 'Delivery Address'}
+            </span>
+          </div>
+        </div>
+      )
+    },
+    {
+      key: 'carrier',
+      title: 'Carrier / Vehicle',
+      render: (row) => (
+        <div>
+          <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {row.carrierName || 'EcoExpress'}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            AWB: {row.trackingNumber || 'Pending'} • {row.vehicleNumber || 'KA-01-EQ-9124'}
+          </div>
+        </div>
+      )
+    },
+    {
+      key: 'status',
+      title: 'Shipment Status',
+      render: (row) => (
+        <StatusBadge status={row.status} />
+      )
+    },
+    {
+      key: 'gpsActive',
+      title: 'GPS Status',
+      render: (row) => {
+        const isGpsActive = ['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(row.status);
+        return isGpsActive ? (
+          <span style={{
+            fontSize: '0.72rem',
+            fontWeight: 700,
+            padding: '2px 8px',
+            borderRadius: '12px',
+            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+            color: '#059669',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}>
+            <Radio size={11} className="spin" />
+            LIVE GPS
+          </span>
+        ) : row.status === 'DELIVERED' ? (
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Completed</span>
+        ) : (
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Pre-Transit</span>
+        );
+      }
+    },
+    {
+      key: 'staffAction',
+      title: 'Physical Movement Action',
+      render: (row) => {
+        const actionConfig = SHIPMENT_STAFF_ACTIONS[row.status];
+        const isTransitioning = transitioningId === row.id;
 
-  // Next Action Required Item
-  const activeActionableShipment = shipments.find((s) => ['CREATED', 'PACKED', 'DISPATCHED', 'IN_TRANSIT', 'ARRIVED_AT_HUB', 'OUT_FOR_DELIVERY'].includes(s.status));
-  const activeActionableOrder = ordersAwaiting.length > 0 ? ordersAwaiting[0] : null;
+        if (row.status === 'DELIVERED') {
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#16a34a', fontWeight: 600, fontSize: '0.82rem' }}>
+              <CheckCircle2 size={15} />
+              Delivered
+            </div>
+          );
+        }
+
+        if (row.status === 'CANCELLED') {
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#ef4444', fontWeight: 600, fontSize: '0.82rem' }}>
+              <X size={15} />
+              Cancelled
+            </div>
+          );
+        }
+
+        if (!actionConfig) {
+          return <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No Action</span>;
+        }
+
+        const ActionIcon = actionConfig.icon;
+
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button
+              onClick={() => {
+                if (actionConfig.isOtpFlow) {
+                  handleOpenOtpModal(row);
+                } else {
+                  handleTransitionStatus(row, actionConfig.nextStatus);
+                }
+              }}
+              disabled={isTransitioning || !canUpdate}
+              className={`btn btn-sm ${actionConfig.btnClass}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                fontSize: '0.78rem',
+                padding: '4px 10px',
+                backgroundColor: actionConfig.bg,
+                borderColor: actionConfig.bg
+              }}
+            >
+              {isTransitioning ? (
+                <RefreshCw size={13} className="spin" />
+              ) : (
+                <ActionIcon size={13} />
+              )}
+              {actionConfig.label}
+            </button>
+
+            <button
+              onClick={() => handleOpenTrackingModal(row)}
+              className="btn btn-outline btn-sm"
+              title="Track physical shipment milestones"
+              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+            >
+              <Navigation size={12} />
+            </button>
+          </div>
+        );
+      }
+    }
+  ];
 
   return (
-    <div className="fulfillment-page space-y-6">
-      {/* Header Banner */}
-      <div className="card-header-flex">
+    <div className="fulfillment-page" style={{ padding: '24px', maxWidth: '1440px', margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
         <div>
-          <h2 className="section-title flex items-center gap-2">
-            <Truck size={24} className="text-primary" />
-            <span>Logistics Fulfillment & Physical GPS Tracking</span>
-          </h2>
-          <p className="text-xs text-muted mt-1">
-            End-to-end order fulfillment pipeline, physical shipment provisioning, carrier routing, and real-time STOMP telemetry.
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Truck size={26} style={{ color: '#059669' }} />
+            Fulfillment & Physical Movement Control
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '4px 0 0 0' }}>
+            Authoritative engine for physical package transitions, linehaul dispatch, GPS tracking, and OTP verification.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold ${
-              wsConnected
-                ? 'bg-success-subtle text-success border-success'
-                : 'bg-surface-raised text-muted border-border'
-            }`}
-          >
-            <Radio size={14} className={wsConnected ? 'animate-pulse text-success' : ''} />
-            <span>{wsConnected ? 'STOMP TELEMETRY LIVE' : 'CONNECTING WS...'}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            padding: '5px 10px',
+            borderRadius: '20px',
+            backgroundColor: wsConnected ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+            color: wsConnected ? '#047857' : '#b91c1c'
+          }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: wsConnected ? '#10b981' : '#ef4444' }} />
+            {wsConnected ? 'STOMP Live Sync Active' : 'Connecting WebSocket...'}
           </div>
 
           <button
-            className="btn btn-primary btn-sm flex items-center gap-1.5"
             onClick={() => {
-              setProvisionStep(1);
-              setOrderLookupData(null);
               setProvisionForm({
-                targetOrderId: '',
+                targetOrderId: initialOrderId || '',
                 carrierName: 'EcoExpress Carbon-Neutral (Default)',
                 trackingNumber: '',
                 vehicleNumber: 'KA-01-EQ-9124',
@@ -431,861 +675,635 @@ export const FulfillmentPage = () => {
               });
               setShowProvisionModal(true);
             }}
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', backgroundColor: '#059669', borderColor: '#059669' }}
           >
-            <Plus size={16} />
-            <span>Provision Physical Shipment</span>
+            <Plus size={15} />
+            Provision Shipment
           </button>
         </div>
       </div>
 
-      {/* Notifications */}
+      {/* Alerts */}
       {error && (
-        <div className="alert alert-danger flex items-center justify-between p-3 rounded-lg border border-danger">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={18} className="text-danger shrink-0" />
-            <span className="text-sm font-medium">{error}</span>
+        <div style={{ padding: '12px 16px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: '8px', color: '#b91c1c', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={18} />
+            <span>{error}</span>
           </div>
-          <button className="btn-close" onClick={() => setError('')}>
-            <X size={16} />
-          </button>
+          <button onClick={() => setError('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b91c1c' }}><X size={16} /></button>
         </div>
       )}
 
       {success && (
-        <div className="alert alert-success flex items-center justify-between p-3 rounded-lg border border-success">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-success shrink-0" />
-            <span className="text-sm font-medium">{success}</span>
+        <div style={{ padding: '12px 16px', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', borderRadius: '8px', color: '#047857', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckCircle2 size={18} />
+            <span>{success}</span>
           </div>
-          <button className="btn-close" onClick={() => setSuccess('')}>
-            <X size={16} />
-          </button>
+          <button onClick={() => setSuccess('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#047857' }}><X size={16} /></button>
         </div>
       )}
 
-      {/* PART 3: VISIBLE PROCESS FLOW BANNER */}
-      <div className="card bg-surface-raised border border-border p-4">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
-            <Activity size={14} className="text-primary" />
-            <span>FULFILLMENT PROCESS WORKFLOW</span>
-          </span>
-          <span className="text-2xs text-muted">Standard Operating Procedure (SOP)</span>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
-          {[
-            { step: '1', title: 'ORDER READY', desc: 'Paid & confirmed orders', action: 'Provision Shipment', count: awaitingFulfillmentCount, highlight: awaitingFulfillmentCount > 0 },
-            { step: '2', title: 'PROVISIONED', desc: 'Shipment record created', action: 'Assign AWB & Carrier', count: createdCount, highlight: createdCount > 0 },
-            { step: '3', title: 'PACKED', desc: 'Boxed & sealed in hub', action: 'Confirm Package Ready', count: packedCount, highlight: packedCount > 0 },
-            { step: '4', title: 'DISPATCHED', desc: 'Left fulfillment center', action: 'Hand to Linehaul', count: shipments.filter(s => s.status === 'DISPATCHED').length },
-            { step: '5', title: 'IN TRANSIT', desc: 'Expressway linehaul moving', action: 'Live GPS Telemetry', count: shipments.filter(s => s.status === 'IN_TRANSIT').length },
-            { step: '6', title: 'HUB ARRIVAL', desc: 'Arrived at destination hub', action: 'Last-mile sorting', count: shipments.filter(s => s.status === 'ARRIVED_AT_HUB').length },
-            { step: '7', title: 'OUT FOR DELIVERY', desc: 'Courier executive on way', action: 'Doorstep Delivery', count: outForDeliveryCount },
-            { step: '8', title: 'DELIVERED', desc: 'Delivered to recipient', action: 'Completed', count: shipments.filter(s => s.status === 'DELIVERED').length }
-          ].map((item, idx) => (
-            <div
-              key={idx}
-              className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between ${
-                item.highlight
-                  ? 'bg-primary-subtle border-primary text-primary font-semibold'
-                  : 'bg-surface border-border text-body'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-2xs opacity-75">STEP {item.step}</span>
-                  {item.count !== undefined && (
-                    <span className="badge badge-secondary text-2xs px-1.5 py-0.2">{item.count}</span>
-                  )}
-                </div>
-                <div className="font-bold text-xs truncate">{item.title}</div>
-                <div className="text-2xs text-muted mt-0.5 leading-tight">{item.desc}</div>
-              </div>
-              <div className="text-2xs font-medium text-primary mt-2 pt-1 border-t border-border/50 truncate">
-                {item.action}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* PART 4: "WHAT SHOULD I DO NOW?" SECTION */}
-      <div className="card p-4 border-l-4 border-l-primary bg-surface flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-            <Clock size={14} />
-            <span>NEXT ACTION REQUIRED</span>
-          </span>
-
-          {activeActionableOrder ? (
-            <div className="mt-1">
-              <span className="text-sm font-semibold">
-                Order ORD-{activeActionableOrder.id} is confirmed and waiting for physical fulfillment.
-              </span>
-              <p className="text-xs text-muted mt-0.5">
-                Recipient: <strong>{activeActionableOrder.recipient_name || activeActionableOrder.customer_name || 'Customer'}</strong> | Destination: <strong>{activeActionableOrder.city || 'Destination Hub'}</strong> | Total: <strong>₹{activeActionableOrder.total_price || activeActionableOrder.totalAmount}</strong>
-              </p>
-            </div>
-          ) : activeActionableShipment ? (
-            <div className="mt-1">
-              <span className="text-sm font-semibold">
-                Shipment #{activeActionableShipment.shipmentNumber || activeActionableShipment.id} is currently <strong>{activeActionableShipment.status}</strong>.
-              </span>
-              <p className="text-xs text-muted mt-0.5">
-                Linked Order: <strong>ORD-{activeActionableShipment.orderId}</strong> | Carrier: <strong>{activeActionableShipment.carrierName}</strong> | Vehicle: <strong>{activeActionableShipment.vehicleNumber}</strong>
-              </p>
-            </div>
-          ) : (
-            <div className="mt-1 text-sm text-muted">
-              All placed orders and physical shipments are up-to-date. No pending actions required.
-            </div>
-          )}
-        </div>
-
-        <div>
-          {activeActionableOrder ? (
-            <button
-              className="btn btn-primary btn-sm flex items-center gap-1.5 font-bold"
-              onClick={() => openProvisionForOrder(activeActionableOrder)}
-            >
-              <Truck size={14} />
-              <span>Provision Physical Shipment</span>
-            </button>
-          ) : activeActionableShipment && ALLOWED_SHIPMENT_TRANSITIONS[activeActionableShipment.status]?.length > 0 ? (
-            <button
-              className="btn btn-primary btn-sm flex items-center gap-1.5 font-bold"
-              onClick={() => handleDirectTransition(activeActionableShipment, ALLOWED_SHIPMENT_TRANSITIONS[activeActionableShipment.status][0].next)}
-              disabled={transitioningId === activeActionableShipment.id}
-            >
-              <Check size={14} />
-              <span>{ALLOWED_SHIPMENT_TRANSITIONS[activeActionableShipment.status][0].label}</span>
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {/* PART 10: DASHBOARD METRIC CARDS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        <div className="card p-3 text-center bg-surface">
-          <div className="text-xs text-muted font-semibold">Total Shipments</div>
-          <div className="text-xl font-bold font-mono text-primary mt-1">{totalShipments}</div>
-        </div>
-
-        <div className="card p-3 text-center bg-surface">
-          <div className="text-xs text-muted font-semibold">Awaiting Fulfillment</div>
-          <div className="text-xl font-bold font-mono text-warning mt-1">{awaitingFulfillmentCount}</div>
-        </div>
-
-        <div className="card p-3 text-center bg-surface">
-          <div className="text-xs text-muted font-semibold">Awaiting Packing</div>
-          <div className="text-xl font-bold font-mono text-body mt-1">{createdCount}</div>
-        </div>
-
-        <div className="card p-3 text-center bg-surface">
-          <div className="text-xs text-muted font-semibold">Ready for Dispatch</div>
-          <div className="text-xl font-bold font-mono text-body mt-1">{packedCount}</div>
-        </div>
-
-        <div className="card p-3 text-center bg-surface">
-          <div className="text-xs text-muted font-semibold">Active In-Transit</div>
-          <div className="text-xl font-bold font-mono text-info mt-1">{inTransitCount}</div>
-        </div>
-
-        <div className="card p-3 text-center bg-surface">
-          <div className="text-xs text-muted font-semibold">Out for Delivery</div>
-          <div className="text-xl font-bold font-mono text-warning mt-1">{outForDeliveryCount}</div>
-        </div>
-
-        <div className="card p-3 text-center bg-surface">
-          <div className="text-xs text-muted font-semibold">Freight Containers</div>
-          <div className="text-xl font-bold font-mono text-muted mt-1">{totalContainers}</div>
-        </div>
-      </div>
-
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-3 border-b border-border">
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border)', marginBottom: '16px' }}>
         <button
-          className={`tab-btn flex items-center gap-1.5 py-2.5 px-3 text-sm font-semibold border-b-2 ${
-            activeTab === 'shipments' ? 'border-primary text-primary' : 'border-transparent text-muted'
-          }`}
           onClick={() => setActiveTab('shipments')}
-        >
-          <Truck size={16} />
-          <span>Physical Shipments ({shipments.length})</span>
-        </button>
-
-        <button
-          className={`tab-btn flex items-center gap-1.5 py-2.5 px-3 text-sm font-semibold border-b-2 ${
-            activeTab === 'awaiting' ? 'border-primary text-primary' : 'border-transparent text-muted'
-          }`}
-          onClick={() => {
-            setActiveTab('awaiting');
-            loadOrdersAwaiting();
+          style={{
+            padding: '10px 18px',
+            fontSize: '0.88rem',
+            fontWeight: 700,
+            border: 'none',
+            borderBottom: activeTab === 'shipments' ? '2px solid #059669' : '2px solid transparent',
+            color: activeTab === 'shipments' ? '#059669' : 'var(--text-secondary)',
+            background: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
           }}
         >
-          <Package size={16} />
-          <span>Orders Awaiting Fulfillment ({ordersAwaiting.length})</span>
+          <Truck size={16} />
+          Active Shipments ({shipments.length})
         </button>
 
         <button
-          className={`tab-btn flex items-center gap-1.5 py-2.5 px-3 text-sm font-semibold border-b-2 ${
-            activeTab === 'containers' ? 'border-primary text-primary' : 'border-transparent text-muted'
-          }`}
-          onClick={() => {
-            setActiveTab('containers');
-            loadContainers(true);
+          onClick={() => setActiveTab('awaiting')}
+          style={{
+            padding: '10px 18px',
+            fontSize: '0.88rem',
+            fontWeight: 700,
+            border: 'none',
+            borderBottom: activeTab === 'awaiting' ? '2px solid #059669' : '2px solid transparent',
+            color: activeTab === 'awaiting' ? '#059669' : 'var(--text-secondary)',
+            background: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
           }}
         >
           <Box size={16} />
-          <span>Freight Containers ({containers.length})</span>
+          Orders Awaiting Fulfillment ({ordersAwaiting.length})
         </button>
       </div>
 
-      {/* TAB 1: Physical Shipments Table */}
-      {activeTab === 'shipments' && (
-        <div className="card">
-          {/* Status Filter Chips */}
-          <div className="p-3 border-b border-border flex items-center gap-1.5 overflow-x-auto">
-            <span className="text-xs font-semibold text-muted mr-1">Status:</span>
-            {SHIPMENT_STATUSES.map((st) => (
+      {activeTab === 'shipments' ? (
+        <div>
+          {/* Status Quick Filter Bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {SHIPMENT_STATUSES.map(st => (
+                <button
+                  key={st}
+                  onClick={() => setSelectedStatus(st)}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    border: selectedStatus === st ? '1px solid var(--primary)' : '1px solid var(--border)',
+                    backgroundColor: selectedStatus === st ? 'var(--primary)' : 'var(--surface)',
+                    color: selectedStatus === st ? '#ffffff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {st.replace(/_/g, ' ')}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button
-                key={st}
-                className={`btn btn-xs ${
-                  selectedStatus === st ? 'btn-primary font-bold' : 'btn-secondary'
-                }`}
-                onClick={() => setSelectedStatus(st)}
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className={`btn btn-sm ${showAdvancedFilters ? 'btn-primary' : 'btn-outline'}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem' }}
               >
-                {st.replace(/_/g, ' ')}
+                <SlidersHorizontal size={14} />
+                Enterprise Filters
               </button>
-            ))}
-          </div>
 
-          {loading ? (
-            <div className="p-12 text-center text-muted">
-              <RefreshCw size={24} className="animate-spin mx-auto mb-2" />
-              <span>Loading physical shipments...</span>
-            </div>
-          ) : shipments.length === 0 ? (
-            <div className="p-12 text-center text-muted">
-              <Truck size={36} className="mx-auto mb-2 opacity-50" />
-              <p className="font-semibold">No Physical Shipments Found</p>
-              <p className="text-xs mt-1">Select an order from "Orders Awaiting Fulfillment" to provision a shipment.</p>
-            </div>
-          ) : (
-            <div className="table-responsive">
-              <table className="table w-full text-xs">
-                <thead>
-                  <tr>
-                    <th>Shipment & Order No</th>
-                    <th>Carrier & Vehicle</th>
-                    <th>AWB / Tracking</th>
-                    <th>Destination</th>
-                    <th>Status</th>
-                    <th>Current GPS / Milestones</th>
-                    <th>Responsible Staff Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shipments.map((s) => {
-                    const allowedTransitions = ALLOWED_SHIPMENT_TRANSITIONS[s.status] || [];
-                    const isInTransit = ['IN_TRANSIT', 'DISPATCHED', 'ARRIVED_AT_HUB', 'OUT_FOR_DELIVERY'].includes(s.status);
-
-                    return (
-                      <tr key={s.id} className="hover:bg-surface-raised">
-                        {/* Shipment & Order No */}
-                        <td>
-                          <div className="font-bold font-mono text-primary flex items-center gap-1">
-                            <Truck size={14} className="text-muted" />
-                            <span>#{s.shipmentNumber || `SHP-${s.id}`}</span>
-                          </div>
-                          <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
-                            <Package size={12} />
-                            <span>Order ORD-{s.orderId}</span>
-                          </div>
-                        </td>
-
-                        {/* Carrier & Vehicle */}
-                        <td>
-                          <div className="font-semibold">{s.carrierName || 'EcoExpress Carbon-Neutral'}</div>
-                          <div className="text-muted flex items-center gap-1 mt-0.5 font-mono">
-                            <Compass size={12} />
-                            <span>{s.vehicleNumber || 'KA-01-EQ-9124'}</span>
-                          </div>
-                        </td>
-
-                        {/* AWB */}
-                        <td className="font-mono text-muted">
-                          {s.trackingNumber || 'ECO-AWB-PENDING'}
-                        </td>
-
-                        {/* Destination */}
-                        <td className="max-w-xs truncate" title={s.destination}>
-                          <div className="flex items-center gap-1">
-                            <MapPin size={12} className="text-muted shrink-0" />
-                            <span className="truncate">{s.destination || 'Customer Destination'}</span>
-                          </div>
-                        </td>
-
-                        {/* Status */}
-                        <td>
-                          <StatusBadge status={s.status} />
-                        </td>
-
-                        {/* GPS */}
-                        <td>
-                          {s.currentLatitude && s.currentLongitude ? (
-                            <button
-                              className="btn btn-secondary btn-xs flex items-center gap-1 font-mono text-success"
-                              onClick={() => openShipmentTracking(s)}
-                            >
-                              <Navigation size={12} className="text-success" />
-                              <span>{parseFloat(s.currentLatitude).toFixed(2)}, {parseFloat(s.currentLongitude).toFixed(2)}</span>
-                            </button>
-                          ) : isInTransit ? (
-                            <button
-                              className="btn btn-secondary btn-xs flex items-center gap-1 text-primary"
-                              onClick={() => openGpsModal(s)}
-                            >
-                              <MapPin size={12} />
-                              <span>Update GPS</span>
-                            </button>
-                          ) : (
-                            <span className="text-muted text-2xs italic">GPS available in transit</span>
-                          )}
-                        </td>
-
-                        {/* Responsible Actions */}
-                        <td>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {allowedTransitions.map((tr, trIdx) => (
-                              <button
-                                key={trIdx}
-                                className={`btn btn-xs ${
-                                  trIdx === 0 ? 'btn-primary font-bold' : 'btn-secondary'
-                                }`}
-                                onClick={() => handleDirectTransition(s, tr.next)}
-                                disabled={transitioningId === s.id}
-                              >
-                                {transitioningId === s.id ? (
-                                  <RefreshCw size={10} className="animate-spin" />
-                                ) : (
-                                  <Check size={10} />
-                                )}
-                                <span>{tr.label}</span>
-                              </button>
-                            ))}
-
-                            <button
-                              className="btn btn-secondary btn-xs"
-                              onClick={() => openShipmentTracking(s)}
-                              title="View Telemetry & Timeline"
-                            >
-                              <Eye size={12} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 2: Orders Awaiting Fulfillment */}
-      {activeTab === 'awaiting' && (
-        <div className="card">
-          <div className="card-header-flex p-3 border-b border-border">
-            <div>
-              <h3 className="section-title text-sm flex items-center gap-2">
-                <Package size={16} />
-                <span>Orders Awaiting Physical Shipment Provisioning</span>
-              </h3>
-              <p className="text-xs text-muted">Confirmed and paid customer orders ready to be provisioned for dispatch.</p>
-            </div>
-            <button className="btn btn-secondary btn-xs" onClick={loadOrdersAwaiting}>
-              <RefreshCw size={12} />
-              <span>Refresh Orders</span>
-            </button>
-          </div>
-
-          {ordersAwaiting.length === 0 ? (
-            <div className="p-8 text-center text-muted text-xs">
-              <CheckCircle2 size={32} className="mx-auto mb-2 text-success" />
-              <p className="font-semibold text-sm">All Orders Fulfilled</p>
-              <p className="text-xs mt-1">There are currently no orders waiting for physical shipment provisioning.</p>
-            </div>
-          ) : (
-            <div className="table-responsive">
-              <table className="table w-full text-xs">
-                <thead>
-                  <tr>
-                    <th>Order ID</th>
-                    <th>Customer Name</th>
-                    <th>Destination Address</th>
-                    <th>Amount</th>
-                    <th>Payment Status</th>
-                    <th>Order Status</th>
-                    <th>Shipment Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ordersAwaiting.map((o) => (
-                    <tr key={o.id}>
-                      <td className="font-mono font-bold text-primary">ORD-{o.id}</td>
-                      <td className="font-semibold">{o.recipient_name || o.customer_name || 'Customer'}</td>
-                      <td className="max-w-xs truncate" title={o.shipping_address || o.shippingAddress}>
-                        {[o.shipping_address || o.shippingAddress, o.city, o.state].filter(Boolean).join(', ') || 'Customer Address'}
-                      </td>
-                      <td className="font-mono font-semibold">₹{o.total_price || o.totalAmount}</td>
-                      <td>
-                        <span className="badge badge-success font-semibold">
-                          {o.payment_status || 'PAID'}
-                        </span>
-                      </td>
-                      <td>
-                        <StatusBadge status={o.status || o.currentStatus || 'ORDER_CONFIRMED'} />
-                      </td>
-                      <td>
-                        <span className="badge badge-warning">NOT CREATED</span>
-                      </td>
-                      <td>
-                        <button
-                          className="btn btn-primary btn-xs flex items-center gap-1 font-bold"
-                          onClick={() => openProvisionForOrder(o)}
-                        >
-                          <Truck size={12} />
-                          <span>Provision Shipment</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 3: Freight Containers Tab */}
-      {activeTab === 'containers' && (
-        <div className="card">
-          <div className="card-header-flex p-3 border-b border-border">
-            <div>
-              <h3 className="section-title text-sm flex items-center gap-2">
-                <Box size={16} />
-                <span>Freight Containers & Consolidated Dispatch Loads</span>
-              </h3>
-              <p className="text-xs text-muted">Consolidated multi-shipment logistics containers assigned to trucks.</p>
+              <div style={{ position: 'relative', width: '240px' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search Shipment, Order ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px 6px 30px',
+                    fontSize: '0.82rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'var(--surface)',
+                    color: 'var(--text-primary)'
+                  }}
+                />
+              </div>
             </div>
           </div>
 
-          {containers.length === 0 ? (
-            <div className="p-8 text-center text-muted text-xs">No active freight containers provisioned.</div>
-          ) : (
-            <div className="table-responsive">
-              <table className="table w-full text-xs">
-                <thead>
-                  <tr>
-                    <th>Container Code</th>
-                    <th>Origin Yard</th>
-                    <th>Destination Terminal</th>
-                    <th>Freight Route</th>
-                    <th>Status</th>
-                    <th>Assigned Shipments</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {containers.map((c) => (
-                    <tr key={c.id}>
-                      <td className="font-mono font-bold text-primary">{c.containerCode}</td>
-                      <td>{c.origin}</td>
-                      <td>{c.destination}</td>
-                      <td className="text-muted">{c.route}</td>
-                      <td>
-                        <StatusBadge status={c.status} />
-                      </td>
-                      <td className="font-mono">{c.shipmentCount || 0} shipments</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Enterprise Location & Metadata Filter Panel */}
+          {showAdvancedFilters && (
+            <div style={{
+              padding: '16px',
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              marginBottom: '16px',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: '12px'
+            }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  Warehouse / Origin
+                </label>
+                <select
+                  value={selectedWarehouse}
+                  onChange={(e) => setSelectedWarehouse(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--background)', color: 'var(--text-primary)' }}
+                >
+                  {WAREHOUSE_OPTIONS.map(w => <option key={w} value={w}>{w}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  Destination State
+                </label>
+                <select
+                  value={selectedState}
+                  onChange={(e) => setSelectedState(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--background)', color: 'var(--text-primary)' }}
+                >
+                  {STATE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  City
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Hyderabad, Bengaluru"
+                  value={selectedCity}
+                  onChange={(e) => setSelectedCity(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--background)', color: 'var(--text-primary)' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  Pincode
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 500033"
+                  value={selectedPincode}
+                  onChange={(e) => setSelectedPincode(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--background)', color: 'var(--text-primary)' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  Carrier
+                </label>
+                <select
+                  value={selectedCarrier}
+                  onChange={(e) => setSelectedCarrier(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--background)', color: 'var(--text-primary)' }}
+                >
+                  {CARRIER_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+                <button
+                  onClick={() => loadShipments(true)}
+                  className="btn btn-primary btn-sm"
+                  style={{ flex: 1, padding: '7px', fontSize: '0.8rem' }}
+                >
+                  Apply Filters
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedWarehouse('All Warehouses');
+                    setSelectedState('All States');
+                    setSelectedCity('');
+                    setSelectedPincode('');
+                    setSelectedCarrier('All Carriers');
+                    setSelectedHub('');
+                    setSelectedStatus('ALL');
+                    setSearchQuery('');
+                  }}
+                  className="btn btn-outline btn-sm"
+                  style={{ padding: '7px', fontSize: '0.8rem' }}
+                >
+                  Reset
+                </button>
+              </div>
             </div>
           )}
+
+          {/* Shipments Table */}
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+            <DataTable
+              columns={shipmentColumns}
+              data={shipments}
+              loading={loading}
+              emptyMessage={
+                <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                  <Truck size={40} style={{ color: 'var(--text-muted)', margin: '0 auto 12px auto' }} />
+                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1rem' }}>No shipments found</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>
+                    Click "Provision Shipment" above to allocate orders and start physical movement.
+                  </div>
+                </div>
+              }
+            />
+          </div>
+        </div>
+      ) : (
+        /* Orders Awaiting Fulfillment Tab */
+        <div>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+            <DataTable
+              columns={[
+                {
+                  key: 'orderId',
+                  title: 'Order ID',
+                  render: (row) => (
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
+                      #{row.order_reference_number || `ORD-${row.id}`}
+                    </div>
+                  )
+                },
+                {
+                  key: 'customer',
+                  title: 'Customer',
+                  render: (row) => (
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                        {row.recipient_name || row.customer_name || 'Customer'}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {row.city}, {row.state}
+                      </div>
+                    </div>
+                  )
+                },
+                {
+                  key: 'total',
+                  title: 'Order Total',
+                  render: (row) => (
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                      ₹{Number(row.total_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </div>
+                  )
+                },
+                {
+                  key: 'status',
+                  title: 'Order Status',
+                  render: (row) => <StatusBadge status={row.status} />
+                },
+                {
+                  key: 'action',
+                  title: 'Action',
+                  render: (row) => (
+                    <button
+                      onClick={() => {
+                        setProvisionForm({
+                          targetOrderId: String(row.id),
+                          carrierName: 'EcoExpress Carbon-Neutral (Default)',
+                          trackingNumber: `ECO-AWB-${row.id * 100 + 1}`,
+                          vehicleNumber: 'KA-01-EQ-9124',
+                          origin: 'Bengaluru Central Fulfillment Hub',
+                          destination: [row.shipping_address, row.city, row.state, row.zipcode].filter(Boolean).join(', '),
+                          route: 'Green Linehaul Corridor',
+                          estimatedDays: 3
+                        });
+                        setShowProvisionModal(true);
+                      }}
+                      className="btn btn-primary btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', backgroundColor: '#059669', borderColor: '#059669' }}
+                    >
+                      <Package size={13} />
+                      Provision Shipment
+                    </button>
+                  )
+                }
+              ]}
+              data={ordersAwaiting}
+              loading={false}
+              emptyMessage={
+                <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                  <CheckCircle2 size={40} style={{ color: '#10b981', margin: '0 auto 12px auto' }} />
+                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1rem' }}>All orders fulfilled!</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>
+                    There are currently no pending orders waiting for physical packaging.
+                  </div>
+                </div>
+              }
+            />
+          </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 1: PROVISION PHYSICAL SHIPMENT (3-Step Modal)                      */}
-      {/* ========================================================================= */}
+      {/* ========================================== */}
+      {/* 1. DELIVERY OTP VERIFICATION MODAL         */}
+      {/* ========================================== */}
       <Modal
-        isOpen={showProvisionModal}
-        onClose={() => setShowProvisionModal(false)}
-        title="PROVISION PHYSICAL LOGISTICS SHIPMENT"
-        size="lg"
+        isOpen={showOtpModal}
+        onClose={() => setShowOtpModal(false)}
+        title={otpTargetShipment ? `Delivery Verification PIN • Order #${otpTargetShipment.orderId}` : 'Delivery Verification'}
+        maxWidth="500px"
       >
-        <form onSubmit={handleCreateShipmentSubmit} className="space-y-4">
-          {/* Stepper Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-border text-xs">
-            <div className={`font-semibold ${provisionStep >= 1 ? 'text-primary' : 'text-muted'}`}>
-              1. Select & Validate Order
-            </div>
-            <ChevronRight size={14} className="text-muted" />
-            <div className={`font-semibold ${provisionStep >= 2 ? 'text-primary' : 'text-muted'}`}>
-              2. Assign Logistics Partner
-            </div>
-            <ChevronRight size={14} className="text-muted" />
-            <div className={`font-semibold ${provisionStep >= 3 ? 'text-primary' : 'text-muted'}`}>
-              3. Review & Provision
-            </div>
-          </div>
-
-          {/* STEP 1: Select Order */}
-          {provisionStep === 1 && (
-            <div className="space-y-4">
-              <div className="form-group">
-                <label className="form-label text-xs font-bold">Target Customer Order ID *</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    className="input font-mono text-sm"
-                    placeholder="e.g. 41 or ORD-41"
-                    value={provisionForm.targetOrderId}
-                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, targetOrderId: e.target.value }))}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary flex items-center gap-1 whitespace-nowrap"
-                    onClick={() => handleValidateOrder()}
-                    disabled={lookupLoading || !provisionForm.targetOrderId}
-                  >
-                    {lookupLoading ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
-                    <span>Validate Order</span>
-                  </button>
-                </div>
+        {otpTargetShipment && (
+          <div>
+            <div style={{ textAlign: 'center', padding: '10px 0 20px 0' }}>
+              <div style={{
+                width: '54px',
+                height: '54px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                color: '#059669',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px auto'
+              }}>
+                <ShieldCheck size={28} />
               </div>
-
-              {/* Order Validation Result Card */}
-              {orderLookupData && (
-                <div className="p-3 bg-surface-raised border border-success/50 rounded-lg space-y-2">
-                  <div className="flex items-center gap-2 text-success font-semibold text-xs">
-                    <CheckCircle2 size={16} />
-                    <span>✓ Order ORD-{orderLookupData.id} found and verified</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-muted">Customer:</span>{' '}
-                      <strong>{orderLookupData.recipient_name || orderLookupData.customer_name || 'Customer'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-muted">Payment:</span>{' '}
-                      <span className="badge badge-success text-2xs">PAID / CONFIRMED</span>
-                    </div>
-                  </div>
-
-                  {/* Authoritative Read-Only Address loaded from order */}
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <label className="text-2xs font-bold uppercase text-muted block mb-1">
-                      Authoritative Destination Delivery Address (Loaded from Customer Order)
-                    </label>
-                    <div className="p-2 bg-surface rounded border border-border text-xs font-mono text-body">
-                      {provisionForm.destination || 'Customer Address verified in database'}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex justify-end mt-4">
-                <button
-                  type="button"
-                  className="btn btn-primary flex items-center gap-1.5"
-                  disabled={!orderLookupData}
-                  onClick={() => setProvisionStep(2)}
-                >
-                  <span>Continue to Logistics Assignment</span>
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 2: Assign Logistics Partner */}
-          {provisionStep === 2 && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold">Carrier Logistics Partner *</label>
-                  <select
-                    className="input text-xs"
-                    value={provisionForm.carrierName}
-                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, carrierName: e.target.value }))}
-                  >
-                    {CARRIER_OPTIONS.map((c, idx) => (
-                      <option key={idx} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold">Tracking / AWB Number</label>
-                  <input
-                    type="text"
-                    className="input font-mono text-xs"
-                    value={provisionForm.trackingNumber}
-                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, trackingNumber: e.target.value }))}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold">Vehicle / Truck Plate</label>
-                  <input
-                    type="text"
-                    className="input font-mono text-xs"
-                    value={provisionForm.vehicleNumber}
-                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, vehicleNumber: e.target.value }))}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold">Origin Dispatch Yard</label>
-                  <input
-                    type="text"
-                    className="input text-xs"
-                    value={provisionForm.origin}
-                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, origin: e.target.value }))}
-                  />
-                </div>
-
-                <div className="form-group md:col-span-2">
-                  <label className="form-label text-xs font-bold">Freight Expressway Corridor</label>
-                  <input
-                    type="text"
-                    className="input text-xs"
-                    value={provisionForm.route}
-                    onChange={(e) => setProvisionForm((prev) => ({ ...prev, route: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between mt-4">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setProvisionStep(1)}
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary flex items-center gap-1.5"
-                  onClick={() => setProvisionStep(3)}
-                >
-                  <span>Review & Provision</span>
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: Review & Submit */}
-          {provisionStep === 3 && (
-            <div className="space-y-4">
-              <div className="p-3 bg-surface-raised border border-border rounded-lg space-y-2 text-xs">
-                <div className="font-bold text-sm text-primary mb-2">Physical Shipment Review Summary</div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <span className="text-muted">Target Order:</span> <strong>ORD-{provisionForm.targetOrderId}</strong>
-                  </div>
-                  <div>
-                    <span className="text-muted">Initial Status:</span> <span className="badge badge-success">CREATED</span>
-                  </div>
-                  <div>
-                    <span className="text-muted">Carrier Partner:</span> <strong>{provisionForm.carrierName}</strong>
-                  </div>
-                  <div>
-                    <span className="text-muted">AWB Number:</span> <strong className="font-mono">{provisionForm.trackingNumber}</strong>
-                  </div>
-                  <div>
-                    <span className="text-muted">Vehicle Number:</span> <strong className="font-mono">{provisionForm.vehicleNumber}</strong>
-                  </div>
-                  <div>
-                    <span className="text-muted">Origin Yard:</span> <strong>{provisionForm.origin}</strong>
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-border">
-                  <span className="text-muted block text-2xs uppercase font-bold">Destination Delivery Address:</span>
-                  <p className="font-mono text-xs mt-0.5">{provisionForm.destination}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between mt-4">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setProvisionStep(2)}
-                >
-                  Back
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary flex items-center gap-2 font-bold"
-                  disabled={provisioning}
-                >
-                  {provisioning ? <RefreshCw size={14} className="animate-spin" /> : <Truck size={14} />}
-                  <span>{provisioning ? 'Provisioning Shipment...' : 'CREATE PHYSICAL SHIPMENT'}</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </form>
-      </Modal>
-
-      {/* ========================================================================= */}
-      {/* MODAL 2: GPS Telemetry & Tracking Timeline                                */}
-      {/* ========================================================================= */}
-      {showTrackingModal && selectedShipment && (
-        <Modal
-          isOpen={showTrackingModal}
-          onClose={() => setShowTrackingModal(false)}
-          title={`LIVE GPS TELEMETRY & TRACKING: #${selectedShipment.shipmentNumber || selectedShipment.id}`}
-          size="lg"
-        >
-          <div className="space-y-4 text-xs">
-            {/* Telemetry Bar */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-3 bg-surface-raised rounded-lg border border-border">
-              <div>
-                <span className="text-muted block">Status:</span>
-                <StatusBadge status={selectedShipment.status} />
-              </div>
-              <div>
-                <span className="text-muted block">Vehicle Plate:</span>
-                <strong className="font-mono">{selectedShipment.vehicleNumber || 'KA-01-EQ-9124'}</strong>
-              </div>
-              <div>
-                <span className="text-muted block">Carrier:</span>
-                <strong>{selectedShipment.carrierName}</strong>
-              </div>
-              <div>
-                <span className="text-muted block">AWB:</span>
-                <strong className="font-mono">{selectedShipment.trackingNumber}</strong>
-              </div>
-            </div>
-
-            {/* Coordinates / Map Preview */}
-            <div className="p-4 bg-surface rounded-lg border border-border text-center space-y-2">
-              <div className="flex items-center justify-center gap-2 text-primary font-bold">
-                <Navigation size={18} />
-                <span>Current Coordinates: {selectedShipment.currentLatitude || '12.9716'}, {selectedShipment.currentLongitude || '77.5946'}</span>
-              </div>
-              <p className="text-2xs text-muted">
-                Route: {selectedShipment.origin} → {selectedShipment.destination}
+              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                Verify Delivery PIN
+              </h3>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Ask customer for the 6-digit PIN sent to their registered email before handing over package.
               </p>
             </div>
 
-            {/* Milestone Timeline */}
-            <div>
-              <h4 className="font-bold text-xs uppercase text-muted mb-2">Historical Milestone Events</h4>
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {shipmentTrackingHistory.length === 0 ? (
-                  <div className="text-muted text-center py-4">No milestone events recorded yet.</div>
-                ) : (
-                  shipmentTrackingHistory.map((ev, idx) => (
-                    <div key={idx} className="p-2 bg-surface-raised rounded border border-border flex items-start gap-2">
-                      <CheckCircle2 size={14} className="text-primary shrink-0 mt-0.5" />
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-primary">{ev.status}</span>
-                          <span className="text-2xs text-muted font-mono">{ev.timestamp}</span>
-                        </div>
-                        <p className="text-2xs text-muted mt-0.5">{ev.description || ev.locationName}</p>
-                      </div>
-                    </div>
-                  ))
-                )}
+            {otpError && (
+              <div style={{ padding: '10px 14px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: '6px', color: '#b91c1c', fontSize: '0.82rem', marginBottom: '14px' }}>
+                {otpError}
               </div>
-            </div>
+            )}
 
-            <div className="flex justify-end pt-2 border-t border-border">
-              <button className="btn btn-secondary" onClick={() => setShowTrackingModal(false)}>
-                Close
+            {otpSuccess && (
+              <div style={{ padding: '10px 14px', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', borderRadius: '6px', color: '#047857', fontSize: '0.82rem', marginBottom: '14px' }}>
+                {otpSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyOtpSubmit}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px', textAlign: 'center' }}>
+                  Enter 6-Digit Delivery OTP:
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={enteredOtp}
+                  onChange={(e) => setEnteredOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="• • • • • •"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '1.5rem',
+                    fontWeight: 800,
+                    letterSpacing: '8px',
+                    textAlign: 'center',
+                    borderRadius: '8px',
+                    border: '2px solid #059669',
+                    backgroundColor: 'var(--surface)',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'monospace'
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={otpSending || otpCooldown > 0}
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: '0.8rem', color: '#0284c7' }}
+                >
+                  {otpCooldown > 0 ? `Resend OTP in ${otpCooldown}s` : 'Resend OTP to Customer'}
+                </button>
+
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  TTL: 5 Minutes (Max 5 attempts)
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button type="button" onClick={() => setShowOtpModal(false)} className="btn btn-outline" disabled={otpVerifying}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={otpVerifying || enteredOtp.length !== 6}
+                  style={{ backgroundColor: '#16a34a', borderColor: '#16a34a', minWidth: '140px' }}
+                >
+                  {otpVerifying ? 'Verifying...' : 'Verify Delivery'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+      </Modal>
+
+      {/* ========================================== */}
+      {/* 2. PROVISION SHIPMENT MODAL                */}
+      {/* ========================================== */}
+      <Modal
+        isOpen={showProvisionModal}
+        onClose={() => setShowProvisionModal(false)}
+        title="Provision Physical Shipment"
+        maxWidth="600px"
+      >
+        <form onSubmit={handleProvisionShipment}>
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+              Target Order ID (e.g. 41 or ORD-41)
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                value={provisionForm.targetOrderId}
+                onChange={(e) => setProvisionForm({ ...provisionForm, targetOrderId: e.target.value })}
+                placeholder="Enter numeric Order ID"
+                style={{ flex: 1, padding: '8px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => handleValidateOrder()}
+                disabled={lookupLoading}
+                className="btn btn-outline btn-sm"
+              >
+                {lookupLoading ? 'Checking...' : 'Lookup Order'}
               </button>
             </div>
           </div>
-        </Modal>
-      )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 3: Update GPS Telemetry                                             */}
-      {/* ========================================================================= */}
-      {showGpsModal && (
-        <Modal
-          isOpen={showGpsModal}
-          onClose={() => setShowGpsModal(false)}
-          title="LOG PHYSICAL GPS TELEMETRY"
-          size="md"
-        >
-          <form onSubmit={handleGpsSubmit} className="space-y-3 text-xs">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="form-group">
-                <label className="form-label font-bold">Latitude *</label>
-                <input
-                  type="text"
-                  className="input font-mono"
-                  value={gpsForm.latitude}
-                  onChange={(e) => setGpsForm((p) => ({ ...p, latitude: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label font-bold">Longitude *</label>
-                <input
-                  type="text"
-                  className="input font-mono"
-                  value={gpsForm.longitude}
-                  onChange={(e) => setGpsForm((p) => ({ ...p, longitude: e.target.value }))}
-                  required
-                />
-              </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                Carrier Name
+              </label>
+              <select
+                value={provisionForm.carrierName}
+                onChange={(e) => setProvisionForm({ ...provisionForm, carrierName: e.target.value })}
+                style={{ width: '100%', padding: '8px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
+              >
+                {CARRIER_OPTIONS.filter(c => c !== 'All Carriers').map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
 
-            <div className="form-group">
-              <label className="form-label font-bold">Location Milestone Name</label>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+                Vehicle Number
+              </label>
               <input
                 type="text"
-                className="input"
-                value={gpsForm.locationName}
-                onChange={(e) => setGpsForm((p) => ({ ...p, locationName: e.target.value }))}
+                value={provisionForm.vehicleNumber}
+                onChange={(e) => setProvisionForm({ ...provisionForm, vehicleNumber: e.target.value })}
+                style={{ width: '100%', padding: '8px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
               />
             </div>
+          </div>
 
-            <div className="form-group">
-              <label className="form-label font-bold">Telemetry Note</label>
-              <textarea
-                className="input"
-                rows={2}
-                value={gpsForm.note}
-                onChange={(e) => setGpsForm((p) => ({ ...p, note: e.target.value }))}
-              />
-            </div>
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+              Origin Fulfillment Hub
+            </label>
+            <input
+              type="text"
+              value={provisionForm.origin}
+              onChange={(e) => setProvisionForm({ ...provisionForm, origin: e.target.value })}
+              style={{ width: '100%', padding: '8px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
+            />
+          </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button type="button" className="btn btn-secondary" onClick={() => setShowGpsModal(false)}>
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary font-bold" disabled={gpsUpdating}>
-                {gpsUpdating ? 'Logging...' : 'Save GPS Telemetry'}
-              </button>
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
+              Delivery Destination
+            </label>
+            <input
+              type="text"
+              value={provisionForm.destination}
+              onChange={(e) => setProvisionForm({ ...provisionForm, destination: e.target.value })}
+              placeholder="Customer Delivery Address"
+              style={{ width: '100%', padding: '8px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
+              required
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '20px' }}>
+            <button type="button" onClick={() => setShowProvisionModal(false)} className="btn btn-outline" disabled={provisioning}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={provisioning} style={{ backgroundColor: '#059669', borderColor: '#059669' }}>
+              {provisioning ? 'Creating Shipment...' : 'Create & Dispatch to Packing'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ========================================== */}
+      {/* 3. TRACKING & AUDIT MILESTONES MODAL       */}
+      {/* ========================================== */}
+      <Modal
+        isOpen={showTrackingModal}
+        onClose={() => setShowTrackingModal(false)}
+        title={selectedShipment ? `Shipment #${selectedShipment.shipmentNumber} • Order #${selectedShipment.orderId}` : 'Shipment Tracking'}
+        maxWidth="750px"
+      >
+        {trackingLoading ? (
+          <div style={{ padding: '40px', textAlign: 'center' }}>
+            <RefreshCw size={28} className="spin" style={{ color: '#059669', margin: '0 auto 10px auto' }} />
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Loading tracking milestones & audit trail...</div>
+          </div>
+        ) : selectedShipment ? (
+          <div>
+            {/* Live GPS Radar: active only for DISPATCHED, IN_TRANSIT, OUT_FOR_DELIVERY */}
+            {['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(selectedShipment.status) ? (
+              <div style={{ padding: '16px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#047857', fontWeight: 700, fontSize: '0.9rem', marginBottom: '8px' }}>
+                  <Compass size={18} className="spin" />
+                  Live GPS Telemetry Active
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '0.82rem' }}>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Vehicle Number: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{selectedShipment.vehicleNumber || 'KA-01-EQ-9124'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Carrier: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{selectedShipment.carrierName || 'EcoExpress'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Coordinates: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {selectedShipment.currentLatitude ? `${selectedShipment.currentLatitude}, ${selectedShipment.currentLongitude}` : '12.9716° N, 77.5946° E'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Route: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{selectedShipment.route || 'Green Corridor BLR-HYD'}</span>
+                  </div>
+                </div>
+              </div>
+            ) : selectedShipment.status === 'DELIVERED' ? (
+              <div style={{ padding: '14px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid #10b981', borderRadius: '8px', color: '#047857', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
+                <CheckCircle2 size={18} />
+                Shipment successfully delivered to destination. Live physical telemetry session closed.
+              </div>
+            ) : (
+              <div style={{ padding: '14px', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid #f59e0b', borderRadius: '8px', color: '#b45309', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
+                <Clock size={18} />
+                Shipment is in {selectedShipment.status} stage. GPS tracking activates upon linehaul dispatch.
+              </div>
+            )}
+
+            {/* Audit Milestones Timeline from shipment_events */}
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>
+                Shipment Events & Audit Trail
+              </div>
+
+              {shipmentAuditEvents && shipmentAuditEvents.length > 0 ? (
+                <div style={{ borderLeft: '2px solid #0284c7', paddingLeft: '16px', marginLeft: '8px' }}>
+                  {shipmentAuditEvents.map((evt, idx) => (
+                    <div key={idx} style={{ position: 'relative', marginBottom: '14px' }}>
+                      <div style={{ position: 'absolute', left: '-22px', top: '3px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#0284c7' }} />
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {evt.oldStatus ? `${evt.oldStatus} → ${evt.newStatus}` : evt.newStatus}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Changed By: {evt.changedBy || 'Staff'} ({evt.changedRole || 'Warehouse Staff'}) • {evt.createdAt ? new Date(evt.createdAt).toLocaleString('en-IN') : 'Recent'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  Initial shipment created for Order #{selectedShipment.orderId}.
+                </div>
+              )}
             </div>
-          </form>
-        </Modal>
-      )}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 };

@@ -3,6 +3,7 @@ package com.econext.order.service;
 import com.econext.order.entity.OperationalOrder;
 import com.econext.order.entity.OperationalOrderItem;
 import com.econext.order.entity.OrderStatus;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -11,10 +12,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,6 +32,7 @@ public class DjangoOrderSyncService {
     private final String djangoBackendUrl;
     private final boolean syncEnabled;
     private final String internalServiceKey;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public DjangoOrderSyncService(
             RestTemplateBuilder builder,
@@ -36,10 +40,11 @@ public class DjangoOrderSyncService {
             @Value("${app.django.enabled:true}") boolean syncEnabled,
             @Value("${app.internal-service-key:econext-internal-microservice-key-2026}") String internalServiceKey
     ) {
-        this.restTemplate = builder
-                .setConnectTimeout(Duration.ofSeconds(3))
-                .setReadTimeout(Duration.ofSeconds(5))
-                .build();
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setBufferRequestBody(true);
+        requestFactory.setConnectTimeout(Duration.ofSeconds(4));
+        requestFactory.setReadTimeout(Duration.ofSeconds(6));
+        this.restTemplate = new RestTemplate(requestFactory);
         this.djangoBackendUrl = djangoBackendUrl;
         this.syncEnabled = syncEnabled;
         this.internalServiceKey = internalServiceKey;
@@ -54,12 +59,15 @@ public class DjangoOrderSyncService {
             Map<String, Object> body = new HashMap<>();
             body.put("status", djangoStatus);
 
+            byte[] jsonBytes = objectMapper.writeValueAsBytes(body);
+
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setContentLength(jsonBytes.length);
             headers.set("X-Internal-Service-Key", internalServiceKey);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+            HttpEntity<byte[]> entity = new HttpEntity<>(jsonBytes, headers);
 
-            restTemplate.exchange(url, HttpMethod.PATCH, entity, Map.class);
+            restTemplate.exchange(url, HttpMethod.POST, entity, Map.class);
             log.info("Synced order #{} status -> {} ({}) with Django backend", djangoOrderId, status, djangoStatus);
         } catch (Exception e) {
             log.warn("Django order status sync note: {}", e.getMessage());
@@ -168,7 +176,7 @@ public class DjangoOrderSyncService {
 
             return order;
         } catch (Exception e) {
-            log.warn("Django fetch order #{} note: {}", djangoOrderId, e.getMessage());
+            log.warn("Failed to fetch order #{} from Django backend: {}", djangoOrderId, e.getMessage());
             return null;
         }
     }

@@ -20,6 +20,7 @@ import {
   FileSpreadsheet,
   CheckCheck
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { bulkImportApi, dataImportApi } from '../api/operationsApis';
 import { StatusBadge } from '../components/Badge';
 
@@ -29,11 +30,14 @@ const EXPECTED_PRODUCT_FIELDS = [
   { key: 'price', label: 'Price (₹) *', required: true, aliases: ['price', 'unit_price', 'current_price', 'currentprice', 'mrp', 'cost'] },
   { key: 'stock', label: 'Stock Quantity *', required: true, aliases: ['stock', 'stock_quantity', 'stockquantity', 'quantity', 'inventory', 'qty'] },
   { key: 'category', label: 'Category *', required: true, aliases: ['category', 'category_name', 'categoryname', 'category_slug', 'cat'] },
+  { key: 'imageUrl', label: 'Image URL', required: false, aliases: ['image_url', 'imageurl', 'image', 'photo', 'img'] },
   { key: 'sustainabilityScore', label: 'Sustainability Score (0-100)', required: false, aliases: ['sustainability_score', 'sustainabilityscore', 'eco_score', 'score'] },
   { key: 'carbonFootprintKg', label: 'Carbon Footprint (kg)', required: false, aliases: ['carbon_footprint', 'carbonfootprint', 'carbon_footprint_kg', 'carbon'] },
   { key: 'description', label: 'Description', required: false, aliases: ['description', 'desc', 'details', 'summary'] },
   { key: 'materials', label: 'Materials Composition', required: false, aliases: ['materials', 'materials_used', 'composition', 'fabric'] },
-  { key: 'certifications', label: 'Eco Certifications', required: false, aliases: ['certifications', 'eco_certifications', 'standards'] }
+  { key: 'certifications', label: 'Eco Certifications', required: false, aliases: ['certifications', 'eco_certifications', 'standards'] },
+  { key: 'is_whitelisted', label: 'Whitelist Status (true/false)', required: false, aliases: ['is_whitelisted', 'iswhitelisted', 'whitelisted', 'whitelist'] },
+  { key: 'status', label: 'Status (ACTIVE/ARCHIVED)', required: false, aliases: ['status', 'product_status', 'productstatus'] }
 ];
 
 export const ImportWizardPage = () => {
@@ -117,21 +121,57 @@ export const ImportWizardPage = () => {
     return { headers, rows };
   };
 
-  // Step 1: File selection & upload
+  // Step 1: File selection & upload (Supports both CSV and XLSX)
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
     if (!selected) return;
     setFile(selected);
     setError('');
 
+    const isXlsx = selected.name.endsWith('.xlsx') || selected.name.endsWith('.xls');
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const text = event.target.result;
-        const { headers, rows } = parseCsvText(text);
+        let headers = [];
+        let rows = [];
+
+        if (isXlsx) {
+          const data = new Uint8Array(event.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+          if (jsonRows.length < 2) {
+            setError('Uploaded Excel spreadsheet contains no data rows.');
+            return;
+          }
+
+          headers = jsonRows[0].map(h => String(h || '').trim()).filter(Boolean);
+          for (let i = 1; i < jsonRows.length; i++) {
+            const rawRow = jsonRows[i];
+            if (!rawRow || rawRow.length === 0 || rawRow.every(v => v === undefined || v === null || String(v).trim() === '')) {
+              continue;
+            }
+            const rowObj = {};
+            headers.forEach((h, idx) => {
+              rowObj[h] = rawRow[idx] !== undefined && rawRow[idx] !== null ? String(rawRow[idx]).trim() : '';
+            });
+            rows.push({
+              rowNumber: i,
+              raw: rowObj
+            });
+          }
+        } else {
+          const text = event.target.result;
+          const parsed = parseCsvText(text);
+          headers = parsed.headers;
+          rows = parsed.rows;
+        }
 
         if (headers.length === 0 || rows.length === 0) {
-          setError('Uploaded file contains no data rows.');
+          setError('Uploaded file contains no valid data rows.');
           return;
         }
 
@@ -156,10 +196,15 @@ export const ImportWizardPage = () => {
         setColumnMapping(initialMapping);
         setStep(2);
       } catch (err) {
-        setError('Failed to parse CSV file: ' + err.message);
+        setError('Failed to parse uploaded file: ' + err.message);
       }
     };
-    reader.readAsText(selected);
+
+    if (isXlsx) {
+      reader.readAsArrayBuffer(selected);
+    } else {
+      reader.readAsText(selected);
+    }
   };
 
   // Step 2 -> Step 3: Run Deterministic Validation & AI Review

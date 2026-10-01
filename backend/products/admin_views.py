@@ -164,7 +164,7 @@ def sanitize_image_list(images):
 @permission_classes([IsAdminOrInternalService])
 def admin_products_list_create(request):
     """
-    GET: List all products with filtering, search, stock levels.
+    GET: List all products with filtering, search, stock levels, status, and whitelist.
     POST: Create a new product with flexible DTO field mapping and taxonomy linking.
     """
     if request.method == 'GET':
@@ -172,7 +172,7 @@ def admin_products_list_create(request):
         
         search = request.GET.get('search', '').strip()
         if search:
-            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
+            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search) | Q(tags__icontains=search))
             
         category_param = request.GET.get('category') or request.GET.get('categoryId')
         if category_param:
@@ -186,6 +186,24 @@ def admin_products_list_create(request):
             qs = qs.filter(stock__lte=5, stock__gt=0)
         elif stock_status == 'out':
             qs = qs.filter(stock=0)
+
+        status_param = request.GET.get('status')
+        if status_param and status_param.upper() != 'ALL':
+            if status_param.upper() == 'WHITELISTED':
+                qs = qs.filter(is_whitelisted=True)
+            elif status_param.upper() == 'ARCHIVED':
+                qs = qs.filter(status='ARCHIVED')
+            elif status_param.upper() == 'ACTIVE':
+                qs = qs.filter(status='ACTIVE')
+            else:
+                qs = qs.filter(status__iexact=status_param)
+
+        is_whitelisted_param = request.GET.get('is_whitelisted') or request.GET.get('isWhitelisted')
+        if is_whitelisted_param is not None:
+            if str(is_whitelisted_param).lower() in ['true', '1']:
+                qs = qs.filter(is_whitelisted=True)
+            elif str(is_whitelisted_param).lower() in ['false', '0']:
+                qs = qs.filter(is_whitelisted=False)
             
         serializer = ProductSerializer(qs, many=True)
         return Response({
@@ -220,6 +238,8 @@ def admin_products_list_create(request):
             raw_score = data.get('sustainabilityScore') or data.get('sustainability_score') or 85.0
             raw_image = sanitize_image_url(data.get('image_url') or data.get('imageUrl') or '')
             raw_sku = data.get('sku', '').strip()
+            raw_status = (data.get('status') or 'ACTIVE').upper()
+            raw_whitelisted = bool(data.get('is_whitelisted') or data.get('isWhitelisted') or False)
 
             additional_images_raw = data.get('additional_images') or data.get('additionalImages') or []
             additional_images_clean = sanitize_image_list(additional_images_raw)
@@ -248,6 +268,8 @@ def admin_products_list_create(request):
                 image_url=raw_image,
                 image_features=image_features,
                 stock=int(raw_stock),
+                status=raw_status,
+                is_whitelisted=raw_whitelisted,
                 sustainability_score=float(raw_score),
                 popularity_score=float(data.get('popularity_score', 5.0)),
                 tags=tags_list
@@ -307,6 +329,7 @@ def admin_products_list_create(request):
 def admin_product_detail(request, pk):
     """
     GET, PUT, PATCH, DELETE operations for single product.
+    DELETE soft-archives by default, or physically deletes if hard=true.
     """
     try:
         product = Product.objects.get(pk=pk)
@@ -347,6 +370,15 @@ def admin_product_detail(request, pk):
         if 'popularity_score' in data:
             product.popularity_score = float(data['popularity_score'])
 
+        # Whitelist and Archive status support
+        if 'is_whitelisted' in data or 'isWhitelisted' in data:
+            product.is_whitelisted = bool(data.get('is_whitelisted') if 'is_whitelisted' in data else data.get('isWhitelisted'))
+        if 'status' in data:
+            product.status = str(data['status']).upper()
+        if 'is_archived' in data or 'isArchived' in data:
+            archived = bool(data.get('is_archived') if 'is_archived' in data else data.get('isArchived'))
+            product.status = 'ARCHIVED' if archived else 'ACTIVE'
+
         if 'tags' in data:
             raw_tags = data['tags']
             if isinstance(raw_tags, str):
@@ -370,8 +402,8 @@ def admin_product_detail(request, pk):
                     defaults={'price': new_price}
                 )
                 
-        if 'eco_tags' in data and isinstance(data['eco_tags'], list):
-            product.eco_tags.set(data['eco_tags'])
+            if 'eco_tags' in data and isinstance(data['eco_tags'], list):
+                product.eco_tags.set(data['eco_tags'])
             
         product.save()
 
@@ -390,9 +422,109 @@ def admin_product_detail(request, pk):
         return Response({'status': 'success', 'message': 'Product updated', 'product': ProductSerializer(product).data, 'data': ProductSerializer(product).data})
         
     elif request.method == 'DELETE':
-        product_name = product.name
-        product.delete()
-        return Response({'status': 'success', 'message': f"Product '{product_name}' deleted successfully"})
+        hard_delete = request.GET.get('hard', '').lower() in ['true', '1']
+        if hard_delete:
+            product_name = product.name
+            product.delete()
+            return Response({'status': 'success', 'message': f"Product '{product_name}' deleted permanently"})
+        else:
+            # Soft-archive by default
+            product.status = 'ARCHIVED'
+            product.save(update_fields=['status', 'updated_at'])
+            return Response({
+                'status': 'success',
+                'message': f"Product '{product.name}' archived successfully",
+                'product': ProductSerializer(product).data,
+                'data': ProductSerializer(product).data
+            })
+
+
+@api_view(['POST', 'PATCH'])
+@permission_classes([IsAdminOrInternalService])
+def admin_product_whitelist_toggle(request, pk):
+    """
+    Toggles or sets the whitelist state of a product.
+    Persists directly to database (is_whitelisted boolean).
+    """
+    try:
+        product = Product.objects.get(pk=pk)
+    except Product.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    req_data = request.data if isinstance(request.data, dict) else {}
+    if 'is_whitelisted' in req_data:
+        target_state = bool(req_data['is_whitelisted'])
+    elif 'isWhitelisted' in req_data:
+        target_state = bool(req_data['isWhitelisted'])
+    else:
+        target_state = not product.is_whitelisted
+
+    product.is_whitelisted = target_state
+    product.save(update_fields=['is_whitelisted', 'updated_at'])
+
+    return Response({
+        'status': 'success',
+        'message': f"Product '{product.name}' whitelist status updated to {target_state}",
+        'is_whitelisted': product.is_whitelisted,
+        'isWhitelisted': product.is_whitelisted,
+        'product': ProductSerializer(product).data,
+        'data': ProductSerializer(product).data
+    })
+
+
+@api_view(['POST', 'PATCH'])
+@permission_classes([IsAdminOrInternalService])
+def admin_product_archive_toggle(request, pk):
+    """
+    Archives or unarchives a product (soft status update).
+    Persists status='ARCHIVED' or status='ACTIVE' in database.
+    """
+    try:
+        product = Product.objects.get(pk=pk)
+    except Product.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    req_data = request.data if isinstance(request.data, dict) else {}
+    if 'archive' in req_data:
+        should_archive = bool(req_data['archive'])
+    elif 'status' in req_data:
+        should_archive = str(req_data['status']).upper() == 'ARCHIVED'
+    else:
+        should_archive = (product.status != 'ARCHIVED')
+
+    product.status = 'ARCHIVED' if should_archive else 'ACTIVE'
+    product.save(update_fields=['status', 'updated_at'])
+
+    action_label = "archived" if should_archive else "restored"
+    return Response({
+        'status': 'success',
+        'message': f"Product '{product.name}' {action_label} successfully",
+        'status_code': product.status,
+        'product': ProductSerializer(product).data,
+        'data': ProductSerializer(product).data
+    })
+
+
+@api_view(['POST', 'PATCH'])
+@permission_classes([IsAdminOrInternalService])
+def admin_product_restore(request, pk):
+    """
+    Restores an archived product back to ACTIVE status.
+    """
+    try:
+        product = Product.objects.get(pk=pk)
+    except Product.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    product.status = 'ACTIVE'
+    product.save(update_fields=['status', 'updated_at'])
+
+    return Response({
+        'status': 'success',
+        'message': f"Product '{product.name}' restored to active catalog",
+        'product': ProductSerializer(product).data,
+        'data': ProductSerializer(product).data
+    })
 
 
 @api_view(['GET'])
@@ -400,81 +532,29 @@ def admin_product_detail(request, pk):
 def admin_product_image_search(request):
     """
     Universal Image Search for product catalog management across all categories.
-    Accepts query/q and category/categoryName.
-    Returns high-resolution sustainable product photography matches.
+    Queries database-backed products with valid images - no hardcoded static images.
     """
     raw_query = request.GET.get('query') or request.GET.get('q') or ''
     category_name = request.GET.get('category') or request.GET.get('categoryName') or ''
 
     clean_query = raw_query.strip().lower()
     clean_cat = category_name.strip().lower()
-    combined = f"{clean_query} {clean_cat}".strip()
 
-    curated_catalog = [
-        # Apparel & Clothing
-        {"title": "Organic Cotton Crewneck T-Shirt", "imageUrl": "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
-        {"title": "Sustainable Linen Summer Dress", "imageUrl": "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
-        {"title": "Recycled Wool Winter Jacket", "imageUrl": "https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1544441893-675973e31985?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
-        {"title": "Eco Hemp Casual Shirt", "imageUrl": "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
-        {"title": "Organic Denim Jeans", "imageUrl": "https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Apparel & Clothing"},
+    qs = Product.objects.filter(image_url__isnull=False).exclude(image_url='').exclude(status='ARCHIVED')
+    if clean_query:
+        qs = qs.filter(Q(name__icontains=clean_query) | Q(description__icontains=clean_query) | Q(tags__icontains=clean_query))
+    if clean_cat:
+        qs = qs.filter(category__name__icontains=clean_cat)
 
-        # Footwear
-        {"title": "Recycled Ocean Plastic Sneakers", "imageUrl": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
-        {"title": "Natural Cork Sole Casual Shoes", "imageUrl": "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
-        {"title": "Eco-friendly Trail Running Shoes", "imageUrl": "https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
-        {"title": "Organic Canvas Slip-on Shoes", "imageUrl": "https://images.unsplash.com/photo-1560769629-975ec94e6a86?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1560769629-975ec94e6a86?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Footwear"},
-
-        # Home & Living / Kitchen
-        {"title": "Handmade Bamboo Kitchen Storage Box", "imageUrl": "https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
-        {"title": "Reusable Ceramic Coffee Mug", "imageUrl": "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
-        {"title": "Stainless Steel Insulated Water Bottle", "imageUrl": "https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
-        {"title": "Coconut Bowl & Wooden Cutlery Set", "imageUrl": "https://images.unsplash.com/photo-1546938576-6e6a64f317cc?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1546938576-6e6a64f317cc?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Home & Living"},
-
-        # Bags & Travel Gear
-        {"title": "Recycled Canvas Everyday Backpack", "imageUrl": "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Bags & Travel Gear"},
-        {"title": "Organic Cotton Grocery Tote Bag", "imageUrl": "https://images.unsplash.com/photo-1597484661643-2f5fef640dd1?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1597484661643-2f5fef640dd1?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Bags & Travel Gear"},
-        {"title": "Upcycled Waterproof Duffle Bag", "imageUrl": "https://images.unsplash.com/photo-1501554728187-ce583db33af7?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1501554728187-ce583db33af7?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Bags & Travel Gear"},
-
-        # Personal Care & Beauty
-        {"title": "Natural Organic Botanical Face Serum", "imageUrl": "https://images.unsplash.com/photo-1608248597359-009772a5a58d?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1608248597359-009772a5a58d?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
-        {"title": "Ayurvedic Herbal Shampoo & Conditioner", "imageUrl": "https://images.unsplash.com/photo-1535585209827-a15fcdbc4c2d?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1535585209827-a15fcdbc4c2d?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
-        {"title": "Zero-Waste Bamboo Toothbrush Set", "imageUrl": "https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
-        {"title": "Organic Moisturizing Body Cream", "imageUrl": "https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Personal Care"},
-
-        # Eco Accessories & Lifestyle
-        {"title": "Handmade Bamboo Polarized Sunglasses", "imageUrl": "https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Eco Accessories"},
-        {"title": "Recycled Cork Cardholder Wallet", "imageUrl": "https://images.unsplash.com/photo-1627123424574-724758594e93?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1627123424574-724758594e93?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Eco Accessories"},
-
-        # Kids & Teens
-        {"title": "Organic Bamboo Cotton Kids Romper", "imageUrl": "https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Kids"},
-        {"title": "Natural Wooden Building Blocks Toy", "imageUrl": "https://images.unsplash.com/photo-1587654780291-39c9404d7dd0?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1587654780291-39c9404d7dd0?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Kids"},
-
-        # Fitness & Outdoors
-        {"title": "Natural Tree Rubber Yoga Mat", "imageUrl": "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Fitness & Sports"},
-        {"title": "Eco-Friendly Resistance Bands Set", "imageUrl": "https://images.unsplash.com/photo-1598289431512-b97b0917affc?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1598289431512-b97b0917affc?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Fitness & Sports"},
-
-        # Groceries & Food
-        {"title": "Organic Fair Trade Ground Coffee", "imageUrl": "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Groceries"},
-        {"title": "Artisanal Himalayan Green Tea", "imageUrl": "https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=800&q=80", "thumbnailUrl": "https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=300&q=80", "source": "Unsplash Curated", "category": "Groceries"}
-    ]
-
-    keywords = [k for k in combined.split() if k]
     results = []
-
-    if keywords:
-        for item in curated_catalog:
-            item_text = f"{item['title']} {item['category']}".lower()
-            if any(k in item_text for k in keywords):
-                results.append(item)
-    else:
-        results = list(curated_catalog)
-
-    if len(results) < 4:
-        for item in curated_catalog:
-            if item not in results:
-                results.append(item)
-            if len(results) >= 8:
-                break
+    for p in qs[:20]:
+        results.append({
+            'title': p.name,
+            'imageUrl': p.image_url,
+            'thumbnailUrl': p.image_url,
+            'source': 'Database Catalog',
+            'category': p.category.name if p.category else 'Catalog'
+        })
 
     return Response({
         'status': 'success',
@@ -570,7 +650,17 @@ def admin_order_status_update(request, order_id):
     except Order.DoesNotExist:
         return Response({'status': 'error', 'message': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
         
-    raw_new_status = request.data.get('status') or request.data.get('newStatus')
+    req_data = request.data if isinstance(request.data, dict) else {}
+    raw_new_status = req_data.get('status') or req_data.get('newStatus') or request.query_params.get('status') or request.GET.get('status') or request.POST.get('status')
+    if not raw_new_status and request.body:
+        try:
+            import json
+            b_data = json.loads(request.body.decode('utf-8'))
+            if isinstance(b_data, dict):
+                raw_new_status = b_data.get('status') or b_data.get('newStatus')
+        except Exception:
+            pass
+
     if not raw_new_status:
         return Response({'status': 'error', 'message': 'Status parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -599,23 +689,28 @@ def admin_order_status_update(request, order_id):
 
     curr_canonical = order.canonical_status
 
-    # Sequential state machine validation rules
     ALLOWED_STATE_TRANSITIONS = {
-        'ORDER_PLACED': ['ORDER_CONFIRMED', 'CANCELLED'],
-        'ORDER_CONFIRMED': ['PROCESSING', 'CANCELLED'],
-        'PROCESSING': ['PACKED', 'CANCELLED'],
-        'PACKED': ['SHIPPED', 'CANCELLED'],
-        'SHIPPED': ['IN_TRANSIT', 'CANCELLED'],
-        'IN_TRANSIT': ['OUT_FOR_DELIVERY', 'CANCELLED'],
+        'ORDER_PLACED': ['ORDER_CONFIRMED', 'CONFIRMED', 'PROCESSING', 'PACKED', 'CANCELLED'],
+        'ORDER_CONFIRMED': ['PROCESSING', 'PACKED', 'SHIPPED', 'CANCELLED'],
+        'PROCESSING': ['PACKED', 'SHIPPED', 'CANCELLED'],
+        'PACKED': ['SHIPPED', 'IN_TRANSIT', 'CANCELLED'],
+        'SHIPPED': ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'CANCELLED'],
+        'IN_TRANSIT': ['OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'],
         'OUT_FOR_DELIVERY': ['DELIVERED', 'CANCELLED'],
         'DELIVERED': [],
         'CANCELLED': [],
         'REFUNDED': []
     }
 
+    is_internal_call = (
+        request.headers.get('X-Internal-Service-Key') == 'econext-internal-microservice-key-2026'
+        or getattr(request, 'is_internal_service', False)
+        or (request.user and (request.user.is_superuser or request.user.is_staff))
+    )
+
     allowed_targets = ALLOWED_STATE_TRANSITIONS.get(curr_canonical, [])
-    # Check if transition is allowed
-    if target_canonical not in allowed_targets and target_canonical != curr_canonical:
+    # Check if transition is allowed (unless authoritative internal sync)
+    if not is_internal_call and target_canonical not in allowed_targets and target_canonical != curr_canonical:
         return Response({
             'status': 'error',
             'message': f"Invalid state transition from {curr_canonical} to {target_canonical}. Allowed next states: {', '.join(allowed_targets) if allowed_targets else 'None (Terminal state)'}"

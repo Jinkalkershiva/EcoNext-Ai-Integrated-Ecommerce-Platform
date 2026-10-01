@@ -140,12 +140,14 @@ class Order(models.Model):
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='order_items')
+    product_name = models.CharField(max_length=255, blank=True, default='')
     quantity = models.IntegerField()
     price_at_purchase = models.DecimalField(max_digits=10, decimal_places=2)
     
     def __str__(self):
-        return f"{self.product.name} x {self.quantity} in Order #{self.order.id}"
+        pname = self.product.name if self.product else (self.product_name or 'Product')
+        return f"{pname} x {self.quantity} in Order #{self.order.id}"
     
     def get_subtotal(self):
         return self.price_at_purchase * self.quantity
@@ -315,3 +317,26 @@ class LogisticsTrackingEvent(models.Model):
     def __str__(self):
         target = f"Shipment #{self.shipment_id}" if self.shipment_id else f"Container #{self.container_id}"
         return f"[{self.status}] {target} at {self.location_name} ({self.timestamp})"
+
+
+class ShipmentEvent(models.Model):
+    shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, related_name='events')
+    old_status = models.CharField(max_length=50, blank=True, default='')
+    new_status = models.CharField(max_length=50)
+    changed_by = models.CharField(max_length=100, blank=True, default='System')
+    changed_role = models.CharField(max_length=100, blank=True, default='Warehouse Staff')
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'shipment_events'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['shipment'], name='idx_shpevt_shipment_id'),
+            models.Index(fields=['created_at'], name='idx_shpevt_created_at'),
+        ]
+
+    def __str__(self):
+        return f"Shipment #{self.shipment_id}: {self.old_status} -> {self.new_status} by {self.changed_by} ({self.changed_role}) at {self.created_at}"
+

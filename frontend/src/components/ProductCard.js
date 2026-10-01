@@ -43,21 +43,33 @@ export const ProductCard = ({ product, onAddCart, onViewDetails, children }) => 
     >
       {/* Image Container */}
       <motion.div className={styles.imageContainer}>
-        <motion.img
-          src={product.image_url || 'https://via.placeholder.com/250'}
-          alt={product.name}
-          className={styles.image}
-          variants={imageVariants}
-          whileHover="hover"
-          whileTap="whileTap"
-          onLoad={() => setIsImageLoaded(true)}
-        />
-        {!isImageLoaded && (
-          <motion.div
-            className={styles.skeleton}
-            animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-          />
+        {product.image_url ? (
+          <>
+            <motion.img
+              src={product.image_url}
+              alt={product.name}
+              className={styles.image}
+              variants={imageVariants}
+              whileHover="hover"
+              whileTap="whileTap"
+              onLoad={() => setIsImageLoaded(true)}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                setIsImageLoaded(true);
+              }}
+            />
+            {!isImageLoaded && (
+              <motion.div
+                className={styles.skeleton}
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              />
+            )}
+          </>
+        ) : (
+          <div className={styles.imagePlaceholder}>
+            Image unavailable
+          </div>
         )}
 
         {/* Badge */}

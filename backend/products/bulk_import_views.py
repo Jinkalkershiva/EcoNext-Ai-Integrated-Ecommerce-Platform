@@ -346,6 +346,13 @@ def execute_bulk_import(request):
             if image_url and not (image_url.startswith('http://') or image_url.startswith('https://') or image_url.startswith('//')):
                 image_url = ''
 
+            # Whitelist & Status
+            raw_whitelist = data.get('is_whitelisted', data.get('isWhitelisted', False))
+            is_whitelisted = str(raw_whitelist).lower() in ['true', '1', 'yes'] if isinstance(raw_whitelist, str) else bool(raw_whitelist)
+            
+            raw_status = str(data.get('status', 'ACTIVE')).strip().upper()
+            status_val = raw_status if raw_status in ['ACTIVE', 'ARCHIVED', 'LOW_STOCK', 'OUT_OF_STOCK'] else 'ACTIVE'
+
             # Create Product
             product = Product.objects.create(
                 name=name,
@@ -355,6 +362,8 @@ def execute_bulk_import(request):
                 image_url=image_url,
                 description=description,
                 sustainability_score=sust_score,
+                is_whitelisted=is_whitelisted,
+                status=status_val,
                 tags=[f"SKU:{sku}", category.name.lower(), "bulk-import"]
             )
 

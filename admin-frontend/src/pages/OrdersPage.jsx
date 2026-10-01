@@ -8,7 +8,6 @@ import {
   Clock,
   AlertTriangle,
   XCircle,
-  RotateCcw,
   Search,
   Filter,
   Eye,
@@ -21,87 +20,22 @@ import {
   Calendar,
   ShieldCheck,
   FileText,
-  Send,
   RefreshCw,
   IndianRupee,
   X,
   Check,
   ChevronRight,
-  Sparkles,
-  Ban
+  ExternalLink,
+  Ban,
+  Activity,
+  Layers,
+  Compass
 } from 'lucide-react';
-import { orderOpsApi } from '../api/operationsApis';
+import { orderOpsApi, fulfillmentApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { StatusBadge } from '../components/Badge';
 import { useAuth } from '../context/AuthContext';
-
-// Sequential forward-only state machine transition map
-const ALLOWED_NEXT_STATUSES = {
-  ORDER_PLACED: ['ORDER_CONFIRMED', 'CANCELLED'],
-  ORDER_CONFIRMED: ['PROCESSING', 'CANCELLED'],
-  PROCESSING: ['PACKED', 'CANCELLED'],
-  PACKED: ['SHIPPED', 'CANCELLED'],
-  SHIPPED: ['IN_TRANSIT', 'CANCELLED'],
-  IN_TRANSIT: ['OUT_FOR_DELIVERY', 'CANCELLED'],
-  OUT_FOR_DELIVERY: ['DELIVERED', 'CANCELLED'],
-  DELIVERED: [],
-  CANCELLED: [],
-  RETURNED: []
-};
-
-// Distinct semantic action button configurations
-const ACTION_BUTTON_CONFIG = {
-  ORDER_PLACED: {
-    nextStatus: 'ORDER_CONFIRMED',
-    label: 'Confirm Order',
-    bgColor: '#2563eb', // blue
-    hoverColor: '#1d4ed8',
-    icon: CheckCircle2
-  },
-  ORDER_CONFIRMED: {
-    nextStatus: 'PROCESSING',
-    label: 'Start Processing',
-    bgColor: '#7c3aed', // purple
-    hoverColor: '#6d28d9',
-    icon: Package
-  },
-  PROCESSING: {
-    nextStatus: 'PACKED',
-    label: 'Pack Order',
-    bgColor: '#d97706', // orange
-    hoverColor: '#b45309',
-    icon: Package
-  },
-  PACKED: {
-    nextStatus: 'SHIPPED',
-    label: 'Ship Order',
-    bgColor: '#0891b2', // cyan
-    hoverColor: '#0e7490',
-    icon: Truck
-  },
-  SHIPPED: {
-    nextStatus: 'IN_TRANSIT',
-    label: 'Mark In Transit',
-    bgColor: '#2563eb', // blue
-    hoverColor: '#1d4ed8',
-    icon: Truck
-  },
-  IN_TRANSIT: {
-    nextStatus: 'OUT_FOR_DELIVERY',
-    label: 'Out for Delivery',
-    bgColor: '#ea580c', // orange
-    hoverColor: '#c2410c',
-    icon: Truck
-  },
-  OUT_FOR_DELIVERY: {
-    nextStatus: 'DELIVERED',
-    label: 'Mark Delivered',
-    bgColor: '#16a34a', // green
-    hoverColor: '#15803d',
-    icon: CheckCircle2
-  }
-};
 
 const ORDER_LIFECYCLE_STEPS = [
   { key: 'ORDER_PLACED', label: 'Order Placed', icon: Clock },
@@ -112,15 +46,6 @@ const ORDER_LIFECYCLE_STEPS = [
   { key: 'IN_TRANSIT', label: 'In Transit', icon: Truck },
   { key: 'OUT_FOR_DELIVERY', label: 'Out for Delivery', icon: Truck },
   { key: 'DELIVERED', label: 'Delivered', icon: CheckCircle2 }
-];
-
-const CARRIER_OPTIONS = [
-  'EcoExpress Carbon-Neutral (Default)',
-  'BlueDart Express Direct',
-  'Delhivery Surface Logistics',
-  'DTDC Air Courier',
-  'Shadowfax Hyperlocal',
-  'FedEx India Priority'
 ];
 
 /**
@@ -160,6 +85,12 @@ const normalizeOrder = (o) => {
     timestamp: h.timestamp || h.created_at
   }));
 
+  // Linked shipment detection
+  const firstShp = (o.shipments && o.shipments.length > 0) ? o.shipments[0] : null;
+  const shipmentId = o.shipment_id || o.shipmentId || (firstShp ? firstShp.id : null);
+  const shipmentNumber = o.shipment_number || o.shipmentNumber || (firstShp ? (firstShp.shipmentNumber || firstShp.shipment_number) : null);
+  const shipmentStatus = o.shipment_status || o.shipmentStatus || (firstShp ? (firstShp.status || 'CREATED') : (o.shipments?.length ? 'PROVISIONED' : null));
+
   return {
     ...o,
     id: o.id,
@@ -179,6 +110,9 @@ const normalizeOrder = (o) => {
     country: o.country || 'India',
     carrierName: o.carrier_name || o.carrierName || 'EcoExpress Carbon-Neutral',
     trackingNumber: o.tracking_number || o.trackingNumber || `ECO-AWB-${o.id + 100000}`,
+    shipmentId,
+    shipmentNumber,
+    shipmentStatus,
     createdAt: o.created_at || o.createdAt,
     updatedAt: o.updated_at || o.updatedAt,
     items: normalizedItems,
@@ -189,7 +123,7 @@ const normalizeOrder = (o) => {
 export const OrdersPage = () => {
   const navigate = useNavigate();
   const { hasPermission, isAdmin } = useAuth();
-  const canUpdate = isAdmin() || hasPermission('ORDER_STATUS_UPDATE');
+  const canCancel = isAdmin() || hasPermission('ORDER_STATUS_UPDATE');
 
   const [orders, setOrders] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState('ALL');
@@ -197,18 +131,32 @@ export const OrdersPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [updating, setUpdating] = useState(false);
-  const [quickUpdatingId, setQuickUpdatingId] = useState(null);
 
-  // Transition / Details Modal
+  // Modals
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [confirmStep, setConfirmStep] = useState(false);
-  const [transitionForm, setTransitionForm] = useState({
-    newStatus: '',
-    reasonNote: '',
-    trackingNumber: '',
-    carrierName: 'EcoExpress Carbon-Neutral (Default)'
+
+  // Tracking Modal
+  const [showTrackingModal, setShowTrackingModal] = useState(false);
+  const [trackingShipment, setTrackingShipment] = useState(null);
+  const [trackingEvents, setTrackingEvents] = useState([]);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+
+  // Cancellation Modal
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState(null);
+  const [cancelReason, setCancelReason] = useState('Customer requested order cancellation');
+  const [cancelling, setCancelling] = useState(false);
+
+  // Summary Metrics
+  const [summary, setSummary] = useState({
+    totalOrders: 0,
+    confirmedOrders: 0,
+    processingOrders: 0,
+    shippedOrders: 0,
+    deliveredOrders: 0,
+    cancelledOrders: 0,
+    totalRevenue: 0
   });
 
   const loadOrders = useCallback(async (showSpinner = true) => {
@@ -224,6 +172,35 @@ export const OrdersPage = () => {
       const rawList = data.content || (Array.isArray(data) ? data : (data.orders || data.data || []));
       const normalizedList = rawList.map(normalizeOrder).filter(Boolean);
       setOrders(normalizedList);
+
+      // Compute client-side aggregations
+      const total = normalizedList.length;
+      let confirmed = 0;
+      let processing = 0;
+      let shipped = 0;
+      let delivered = 0;
+      let cancelled = 0;
+      let rev = 0;
+
+      normalizedList.forEach(o => {
+        rev += Number(o.totalAmount || 0);
+        const st = o.currentStatus;
+        if (st === 'ORDER_CONFIRMED' || st === 'ORDER_PLACED') confirmed++;
+        else if (st === 'PROCESSING' || st === 'PACKED') processing++;
+        else if (st === 'SHIPPED' || st === 'IN_TRANSIT' || st === 'OUT_FOR_DELIVERY') shipped++;
+        else if (st === 'DELIVERED') delivered++;
+        else if (st === 'CANCELLED') cancelled++;
+      });
+
+      setSummary({
+        totalOrders: total,
+        confirmedOrders: confirmed,
+        processingOrders: processing,
+        shippedOrders: shipped,
+        deliveredOrders: delivered,
+        cancelledOrders: cancelled,
+        totalRevenue: rev
+      });
     } catch (err) {
       if (showSpinner) {
         setError(err.message || 'Failed to load orders from backend');
@@ -250,263 +227,281 @@ export const OrdersPage = () => {
     };
   }, [loadOrders]);
 
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    loadOrders(true);
+  // Handle View Order Details
+  const handleViewOrder = (order) => {
+    setSelectedOrder(order);
+    setShowOrderModal(true);
   };
 
-  const openOrderDetails = async (order) => {
-    setError('');
-    setConfirmStep(false);
+  // Handle Open Fulfillment
+  const handleOpenFulfillment = (order) => {
+    navigate(`/fulfillment?orderId=${order.id}`);
+  };
+
+  // Handle Track Shipment
+  const handleTrackShipment = async (order) => {
+    setTrackingShipment(null);
+    setTrackingEvents([]);
+    setTrackingLoading(true);
+    setShowTrackingModal(true);
     try {
-      const raw = await orderOpsApi.getOrderById(order.id);
-      const fullOrder = normalizeOrder(raw?.order || raw?.data || raw || order);
-      setSelectedOrder(fullOrder);
-      const allowed = ALLOWED_NEXT_STATUSES[fullOrder.currentStatus] || [];
-      setTransitionForm({
-        newStatus: allowed.length > 0 ? allowed[0] : '',
-        reasonNote: '',
-        trackingNumber: fullOrder.trackingNumber || `ECO-AWB-${fullOrder.id + 100000}`,
-        carrierName: fullOrder.carrierName || 'EcoExpress Carbon-Neutral (Default)'
-      });
-      setShowOrderModal(true);
+      let shpData = null;
+      if (order.shipmentId) {
+        shpData = await fulfillmentApi.getShipmentById(order.shipmentId);
+      } else {
+        const list = await fulfillmentApi.getShipmentsByOrderId(order.id);
+        if (list && list.length > 0) {
+          shpData = list[0];
+        }
+      }
+
+      if (shpData) {
+        setTrackingShipment(shpData);
+        // Load shipment events
+        try {
+          const events = await fulfillmentApi.getShipmentEvents(shpData.id);
+          setTrackingEvents(events || []);
+        } catch {
+          setTrackingEvents([]);
+        }
+      } else {
+        setTrackingShipment({
+          orderId: order.id,
+          shipmentNumber: order.shipmentNumber || 'Pending Provisioning',
+          status: 'NOT_PROVISIONED',
+          carrierName: order.carrierName,
+          trackingNumber: order.trackingNumber,
+          destination: `${order.shippingAddress}, ${order.city}, ${order.state}`
+        });
+      }
     } catch (err) {
-      setError(err.message || 'Failed to load order details');
+      setError(err.message || 'Failed to fetch shipment tracking details');
+    } finally {
+      setTrackingLoading(false);
     }
   };
 
-  const handleStatusTransition = async (e) => {
-    e.preventDefault();
-    if (!selectedOrder || !transitionForm.newStatus) return;
-    
-    if (!confirmStep) {
-      setConfirmStep(true);
-      return;
-    }
+  // Handle Request Cancellation
+  const handleOpenCancelModal = (order) => {
+    setOrderToCancel(order);
+    setCancelReason('Customer requested cancellation');
+    setShowCancelModal(true);
+  };
 
-    setUpdating(true);
+  const handleConfirmCancellation = async () => {
+    if (!orderToCancel) return;
+    setCancelling(true);
     setError('');
-    setSuccess('');
     try {
-      const updatedRaw = await orderOpsApi.updateOrderStatus(selectedOrder.id, transitionForm);
-      const updated = normalizeOrder(updatedRaw?.order || updatedRaw?.data || updatedRaw || selectedOrder);
-      const refNum = selectedOrder.orderReferenceNumber || selectedOrder.id;
-      setSuccess(`Order #${refNum} transitioned to ${transitionForm.newStatus.replace(/_/g, ' ')}. Notification dispatched.`);
-      setSelectedOrder(updated);
-      setConfirmStep(false);
+      await orderOpsApi.updateOrderStatus(orderToCancel.id, {
+        status: 'CANCELLED',
+        reasonNote: cancelReason || 'Order cancelled by staff request'
+      });
+      setSuccess(`Order #${orderToCancel.orderReferenceNumber} was cancelled successfully.`);
+      setShowCancelModal(false);
+      setOrderToCancel(null);
       loadOrders(false);
     } catch (err) {
-      setError(err.message || 'Failed to update order status');
+      setError(err.message || 'Failed to cancel order.');
     } finally {
-      setUpdating(false);
+      setCancelling(false);
     }
   };
 
-  // Quick direct inline advance to next lifecycle stage
-  const handleQuickAdvance = async (order, targetStatus = null) => {
-    const allowed = ALLOWED_NEXT_STATUSES[order.currentStatus] || [];
-    if (allowed.length === 0) return;
-    const nextStatus = targetStatus || allowed[0];
-
-    setQuickUpdatingId(order.id);
-    setError('');
-    setSuccess('');
-    try {
-      await orderOpsApi.updateOrderStatus(order.id, {
-        status: nextStatus,
-        newStatus: nextStatus,
-        carrierName: order.carrierName || 'EcoExpress Carbon-Neutral',
-        trackingNumber: order.trackingNumber || `ECO-AWB-${order.id + 100000}`,
-        reasonNote: `Stage advanced to ${nextStatus.replace(/_/g, ' ')}`
-      });
-      setSuccess(`Order #${order.orderReferenceNumber} advanced to ${nextStatus.replace(/_/g, ' ')}.`);
-      loadOrders(false);
-    } catch (err) {
-      setError(err.message || `Failed to advance order #${order.orderReferenceNumber}`);
-    } finally {
-      setQuickUpdatingId(null);
-    }
-  };
-
-  const statusFilters = [
-    { key: 'ALL', label: 'All Orders', icon: Package },
-    { key: 'ORDER_PLACED', label: 'Placed', icon: Clock },
-    { key: 'ORDER_CONFIRMED', label: 'Confirmed', icon: CheckCircle2 },
-    { key: 'PROCESSING', label: 'Processing', icon: Package },
-    { key: 'PACKED', label: 'Packed', icon: Package },
-    { key: 'SHIPPED', label: 'Shipped', icon: Truck },
-    { key: 'IN_TRANSIT', label: 'In Transit', icon: Truck },
-    { key: 'OUT_FOR_DELIVERY', label: 'Out for Delivery', icon: Truck },
-    { key: 'DELIVERED', label: 'Delivered', icon: CheckCircle2 },
-    { key: 'CANCELLED', label: 'Cancelled', icon: XCircle }
+  // Status Filter Counts
+  const filterTabs = [
+    { key: 'ALL', label: 'All Orders', count: summary.totalOrders },
+    { key: 'ORDER_PLACED', label: 'Placed', count: orders.filter(o => o.currentStatus === 'ORDER_PLACED').length },
+    { key: 'ORDER_CONFIRMED', label: 'Confirmed', count: summary.confirmedOrders },
+    { key: 'PROCESSING', label: 'Processing', count: orders.filter(o => o.currentStatus === 'PROCESSING').length },
+    { key: 'PACKED', label: 'Packed', count: orders.filter(o => o.currentStatus === 'PACKED').length },
+    { key: 'SHIPPED', label: 'Shipped', count: orders.filter(o => o.currentStatus === 'SHIPPED').length },
+    { key: 'IN_TRANSIT', label: 'In Transit', count: orders.filter(o => o.currentStatus === 'IN_TRANSIT').length },
+    { key: 'OUT_FOR_DELIVERY', label: 'Out for Delivery', count: orders.filter(o => o.currentStatus === 'OUT_FOR_DELIVERY').length },
+    { key: 'DELIVERED', label: 'Delivered', count: summary.deliveredOrders },
+    { key: 'CANCELLED', label: 'Cancelled', count: summary.cancelledOrders }
   ];
 
+  // Table Columns Definition
   const columns = [
     {
-      header: 'Order Reference',
-      key: 'orderReferenceNumber',
+      key: 'orderId',
+      title: 'Order ID',
+      render: (row) => (
+        <div>
+          <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+            #{row.orderReferenceNumber}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+            <Calendar size={12} />
+            {row.createdAt ? new Date(row.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Recent'}
+          </div>
+        </div>
+      )
+    },
+    {
+      key: 'customer',
+      title: 'Customer Details',
+      render: (row) => (
+        <div>
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+            {row.customerName}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+            <Mail size={12} />
+            {row.customerEmail || 'No email provided'}
+          </div>
+          {row.city && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+              <MapPin size={11} />
+              {row.city}, {row.state}
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
+      key: 'payment',
+      title: 'Payment',
       render: (row) => {
-        const ref = row.orderReferenceNumber || `ORD-${String(row.id).padStart(5, '0')}`;
+        const isPaid = row.paymentStatus === 'PAID' || row.paymentStatus === 'VERIFIED';
         return (
           <div>
-            <div className="font-bold mono-text text-primary flex items-center gap-1">
-              <Package size={14} className="text-muted" />
-              <span>#{ref}</span>
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
+              ₹{Number(row.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             </div>
-            <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
-              <Calendar size={12} />
-              <span>{row.createdAt ? new Date(row.createdAt).toLocaleDateString() : 'Recent'}</span>
-            </div>
-          </div>
-        );
-      }
-    },
-    {
-      header: 'Customer',
-      key: 'customerName',
-      render: (row) => (
-        <div>
-          <div className="font-medium flex items-center gap-1">
-            <User size={13} className="text-muted" />
-            <span>{row.customerName || 'Valued Customer'}</span>
-          </div>
-          <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
-            <Mail size={12} />
-            <span>{row.customerEmail || 'N/A'}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      header: 'Items',
-      key: 'items',
-      render: (row) => (
-        <span className="badge badge-neutral badge-sm font-mono">
-          {row.items?.length || 1} item{row.items?.length === 1 ? '' : 's'}
-        </span>
-      )
-    },
-    {
-      header: 'Total Amount',
-      key: 'totalAmount',
-      render: (row) => (
-        <div>
-          <div className="font-semibold text-success flex items-center">
-            <span>₹{Number(row.totalAmount || 0).toFixed(2)}</span>
-          </div>
-          <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
-            <CreditCard size={11} />
-            <span>{row.paymentMethod || 'Razorpay / Online'}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      header: 'Destination',
-      key: 'city',
-      render: (row) => (
-        <div className="flex items-center gap-1 text-sm">
-          <MapPin size={13} className="text-muted flex-shrink-0" />
-          <span>{row.city || 'Standard'}, {row.state || 'IN'}</span>
-        </div>
-      )
-    },
-    {
-      header: 'Payment Status',
-      key: 'paymentStatus',
-      render: (row) => {
-        const ps = (row.paymentStatus || 'PAID').toUpperCase();
-        const isPaid = ps === 'PAID' || ps === 'VERIFIED' || ps === 'COMPLETED';
-        return (
-          <span className={`badge ${isPaid ? 'badge-success' : 'badge-warning'} badge-xs`}>
-            {isPaid ? <Check size={11} className="inline mr-1" /> : <Clock size={11} className="inline mr-1" />}
-            {ps}
-          </span>
-        );
-      }
-    },
-    {
-      header: 'Fulfillment Status',
-      key: 'currentStatus',
-      render: (row) => <StatusBadge status={row.currentStatus || row.status} />
-    },
-    {
-      header: 'Actions & Lifecycle Controls',
-      key: 'actions',
-      sortable: false,
-      render: (row) => {
-        const actionCfg = ACTION_BUTTON_CONFIG[row.currentStatus];
-        const isUpdatingThis = quickUpdatingId === row.id;
-        const ActionIcon = actionCfg?.icon || ChevronRight;
-        const canCancel = canUpdate && !['DELIVERED', 'CANCELLED', 'REFUNDED'].includes(row.currentStatus);
-
-        return (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* View / Inspect (Neutral / Blue) */}
-            <button
-              className="btn btn-secondary btn-xs flex items-center gap-1"
-              onClick={() => openOrderDetails(row)}
-              title="Inspect order details and audit logs"
-            >
-              <Eye size={12} />
-              <span>View</span>
-            </button>
-
-            {/* View Fulfillment / Telemetry */}
-            <button
-              className="btn btn-secondary btn-xs flex items-center gap-1"
-              onClick={() => navigate(`/fulfillment?orderId=${row.id}`)}
-              title="View GPS telemetry & fulfillment loads"
-            >
-              <Navigation size={11} className="text-emerald-500" />
-              <span>Fulfillment</span>
-            </button>
-
-            {/* Semantic Forward Action Button */}
-            {canUpdate && actionCfg && (
-              <button
-                type="button"
-                className="btn btn-xs flex items-center gap-1 text-white font-medium shadow-sm transition-all"
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+              <span
                 style={{
-                  backgroundColor: actionCfg.bgColor,
-                  borderColor: actionCfg.bgColor,
-                  color: '#ffffff'
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: isPaid ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                  color: isPaid ? '#059669' : '#d97706',
+                  textTransform: 'uppercase'
                 }}
-                onClick={() => handleQuickAdvance(row, actionCfg.nextStatus)}
-                disabled={isUpdatingThis}
-                title={`Advance to ${actionCfg.nextStatus.replace(/_/g, ' ')}`}
               >
-                {isUpdatingThis ? (
-                  <RefreshCw size={12} className="animate-spin" />
-                ) : (
-                  <>
-                    <ActionIcon size={12} />
-                    <span>{actionCfg.label}</span>
-                  </>
-                )}
-              </button>
+                {row.paymentStatus}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {row.paymentMethod?.toUpperCase().includes('COD') ? 'COD' : 'Online / UPI'}
+              </span>
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      key: 'orderStatus',
+      title: 'Order Status',
+      render: (row) => (
+        <StatusBadge status={row.currentStatus} />
+      )
+    },
+    {
+      key: 'shipment',
+      title: 'Shipment',
+      render: (row) => {
+        const hasShp = Boolean(row.shipmentNumber || row.shipmentId);
+        return (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <Truck size={13} style={{ color: hasShp ? '#0284c7' : '#94a3b8' }} />
+              <span style={{ fontWeight: 600, fontSize: '0.82rem', color: hasShp ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                {row.shipmentNumber || (hasShp ? `SHP-${row.id}-01` : 'Awaiting Fulfillment')}
+              </span>
+            </div>
+            {row.shipmentStatus && row.shipmentStatus !== 'NOT_PROVISIONED' ? (
+              <div style={{ marginTop: '4px' }}>
+                <StatusBadge status={row.shipmentStatus} />
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                Not dispatched yet
+              </div>
             )}
+          </div>
+        );
+      }
+    },
+    {
+      key: 'actions',
+      title: 'Allowed Actions',
+      render: (row) => {
+        const isCancellable = ['ORDER_PLACED', 'ORDER_CONFIRMED', 'PROCESSING'].includes(row.currentStatus);
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            {/* 1. View Order Details */}
+            <button
+              onClick={() => handleViewOrder(row)}
+              className="btn btn-outline btn-sm"
+              title="View complete order details, item breakdown & payment metadata"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '0.78rem',
+                padding: '4px 8px'
+              }}
+            >
+              <Eye size={13} />
+              Details
+            </button>
 
-            {/* Cancel Button (Red - only on valid non-terminal states) */}
-            {canCancel && (
+            {/* 2. Open Fulfillment */}
+            <button
+              onClick={() => handleOpenFulfillment(row)}
+              className="btn btn-primary btn-sm"
+              title="Open physical movement & fulfillment operations in Fulfillment Hub"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '0.78rem',
+                padding: '4px 8px',
+                backgroundColor: '#059669',
+                borderColor: '#059669'
+              }}
+            >
+              <Truck size={13} />
+              Fulfillment
+            </button>
+
+            {/* 3. Track Shipment */}
+            <button
+              onClick={() => handleTrackShipment(row)}
+              className="btn btn-outline btn-sm"
+              title="Track physical vehicle, GPS telemetry and shipment audit trail"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '0.78rem',
+                padding: '4px 8px'
+              }}
+            >
+              <Navigation size={13} />
+              Track
+            </button>
+
+            {/* 4. Request Cancellation */}
+            {canCancel && isCancellable && (
               <button
-                type="button"
-                className="btn btn-xs flex items-center gap-1 text-white shadow-sm"
+                onClick={() => handleOpenCancelModal(row)}
+                className="btn btn-ghost btn-sm"
+                title="Request cancellation for this order"
                 style={{
-                  backgroundColor: '#dc2626',
-                  borderColor: '#dc2626',
-                  color: '#ffffff'
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.78rem',
+                  padding: '4px 8px',
+                  color: '#dc2626'
                 }}
-                onClick={() => {
-                  if (window.confirm(`Are you sure you want to cancel Order #${row.orderReferenceNumber}?`)) {
-                    handleQuickAdvance(row, 'CANCELLED');
-                  }
-                }}
-                disabled={isUpdatingThis}
-                title="Cancel Order"
               >
-                <Ban size={11} />
-                <span>Cancel</span>
+                <Ban size={13} />
+                Cancel
               </button>
             )}
           </div>
@@ -515,429 +510,517 @@ export const OrdersPage = () => {
     }
   ];
 
-  const allowedNext = selectedOrder ? (ALLOWED_NEXT_STATUSES[selectedOrder.currentStatus] || []) : [];
-
   return (
-    <div className="orders-page">
-      {/* Alert Banners */}
-      {error && (
-        <div className="alert alert-danger mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={18} className="text-danger flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-          <button className="btn-close" onClick={() => setError('')}>
-            <X size={16} />
-          </button>
-        </div>
-      )}
-      {success && (
-        <div className="alert alert-success mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-success flex-shrink-0" />
-            <span>{success}</span>
-          </div>
-          <button className="btn-close" onClick={() => setSuccess('')}>
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
-      {/* Header & Live Polling Status */}
-      <div className="page-header-flex mb-4">
+    <div className="orders-page" style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
+      {/* Page Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
         <div>
-          <h2 className="page-title flex items-center gap-2">
-            <Truck size={24} className="text-primary" />
-            <span>Order Fulfillment & Lifecycle Operations</span>
-          </h2>
-          <p className="page-subtitle">
-            Manage end-to-end customer order fulfillment, AWB logistics tracking, and automated lifecycle transitions.
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em' }}>
+            Order Lifecycle Monitor
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '4px 0 0 0' }}>
+            Production read-oriented monitoring view. Physical dispatch, packaging & GPS transitions are managed strictly in the Fulfillment module.
           </p>
         </div>
-        <div className="header-actions flex items-center gap-2">
-          <span className="text-xs text-muted hidden sm:inline flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-            <span>Live Sync Active</span>
-          </span>
-          <button className="btn btn-secondary btn-sm flex items-center gap-1.5" onClick={() => loadOrders(true)} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            <span>Refresh</span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => loadOrders(true)}
+            className="btn btn-outline"
+            disabled={loading}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}
+          >
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            Refresh
+          </button>
+
+          <button
+            onClick={() => navigate('/fulfillment')}
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', backgroundColor: '#059669', borderColor: '#059669' }}
+          >
+            <Truck size={15} />
+            Open Fulfillment Hub
+            <ArrowRight size={14} />
           </button>
         </div>
       </div>
 
-      {/* Filter Tabs Bar */}
-      <div className="card p-3 mb-4">
-        <div className="flex flex-wrap gap-2 items-center justify-between">
-          <div className="flex flex-wrap gap-1.5">
-            {statusFilters.map((tab) => {
-              const TabIcon = tab.icon;
-              const isActive = selectedStatus === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  className={`btn btn-xs flex items-center gap-1.5 ${isActive ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setSelectedStatus(tab.key)}
-                >
-                  <TabIcon size={13} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
+      {/* Metrics Banner */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+        <div className="stat-card" style={{ padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Orders</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>{summary.totalOrders}</div>
+        </div>
 
-          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 min-w-[240px]">
-            <div className="search-input-wrapper relative w-full">
-              <input
-                type="text"
-                className="input input-sm pl-8 w-full"
-                placeholder="Search by ID, name, email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              <Search size={14} className="text-muted absolute left-2.5 top-1/2 -translate-y-1/2" />
-            </div>
-            <button type="submit" className="btn btn-secondary btn-sm">
-              Filter
-            </button>
-          </form>
+        <div className="stat-card" style={{ padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#0284c7', textTransform: 'uppercase' }}>Confirmed</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0284c7', marginTop: '4px' }}>{summary.confirmedOrders}</div>
+        </div>
+
+        <div className="stat-card" style={{ padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#d97706', textTransform: 'uppercase' }}>In Fulfillment</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#d97706', marginTop: '4px' }}>{summary.processingOrders}</div>
+        </div>
+
+        <div className="stat-card" style={{ padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#2563eb', textTransform: 'uppercase' }}>Shipped / Transit</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#2563eb', marginTop: '4px' }}>{summary.shippedOrders}</div>
+        </div>
+
+        <div className="stat-card" style={{ padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#16a34a', textTransform: 'uppercase' }}>Delivered</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#16a34a', marginTop: '4px' }}>{summary.deliveredOrders}</div>
+        </div>
+
+        <div className="stat-card" style={{ padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Revenue</div>
+          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#047857', marginTop: '4px' }}>
+            ₹{Number(summary.totalRevenue || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </div>
         </div>
       </div>
 
-      {/* Orders Table */}
-      <div className="card">
+      {/* Alerts */}
+      {error && (
+        <div style={{ padding: '12px 16px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: '8px', color: '#b91c1c', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <button onClick={() => setError('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b91c1c' }}><X size={16} /></button>
+        </div>
+      )}
+
+      {success && (
+        <div style={{ padding: '12px 16px', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', borderRadius: '8px', color: '#047857', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckCircle2 size={18} />
+            <span>{success}</span>
+          </div>
+          <button onClick={() => setSuccess('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#047857' }}><X size={16} /></button>
+        </div>
+      )}
+
+      {/* Filter Bar & Search */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+          {filterTabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setSelectedStatus(tab.key)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                border: selectedStatus === tab.key ? '1px solid var(--primary)' : '1px solid var(--border)',
+                backgroundColor: selectedStatus === tab.key ? 'var(--primary)' : 'var(--surface)',
+                color: selectedStatus === tab.key ? '#ffffff' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {tab.label}
+              <span style={{
+                fontSize: '0.72rem',
+                padding: '1px 5px',
+                borderRadius: '10px',
+                backgroundColor: selectedStatus === tab.key ? 'rgba(255,255,255,0.25)' : 'var(--border)',
+                color: selectedStatus === tab.key ? '#ffffff' : 'var(--text-muted)'
+              }}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '280px' }}>
+          <div style={{ position: 'relative', width: '100%' }}>
+            <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              placeholder="Search Order ID, Customer, Tracking..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '7px 10px 7px 32px',
+                fontSize: '0.85rem',
+                borderRadius: '6px',
+                border: '1px solid var(--border)',
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text-primary)'
+              }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Order Table */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
         <DataTable
           columns={columns}
           data={orders}
           loading={loading}
-          searchPlaceholder="Filter listed orders..."
+          emptyMessage={
+            <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+              <Package size={40} style={{ color: 'var(--text-muted)', margin: '0 auto 12px auto' }} />
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1rem' }}>No orders found</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>
+                {searchQuery ? `No orders matched search query "${searchQuery}"` : 'No orders in this status category.'}
+              </div>
+            </div>
+          }
         />
       </div>
 
-      {/* Order Details & Lifecycle Modal */}
+      {/* ========================================== */}
+      {/* 1. VIEW ORDER DETAILS MODAL                */}
+      {/* ========================================== */}
       <Modal
         isOpen={showOrderModal}
-        onClose={() => {
-          setShowOrderModal(false);
-          setConfirmStep(false);
-        }}
-        title={`Order Fulfillment: #${selectedOrder?.orderReferenceNumber || selectedOrder?.id}`}
-        maxWidth="840px"
+        onClose={() => setShowOrderModal(false)}
+        title={selectedOrder ? `Order #${selectedOrder.orderReferenceNumber}` : 'Order Details'}
+        maxWidth="850px"
       >
         {selectedOrder && (
-          <div className="order-details-wrapper">
-            {/* Visual 8-Stage Stepper */}
-            <div className="order-stepper-card p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] mb-5">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-3 flex items-center gap-1.5">
-                <Truck size={14} className="text-primary" />
-                <span>End-to-End Fulfillment Lifecycle</span>
+          <div>
+            {/* Header badges */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '16px', borderBottom: '1px solid var(--border)', marginBottom: '16px' }}>
+              <div>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Status: </span>
+                <StatusBadge status={selectedOrder.currentStatus} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Payment: </span>
+                <span style={{
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: selectedOrder.paymentStatus === 'PAID' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                  color: selectedOrder.paymentStatus === 'PAID' ? '#059669' : '#d97706'
+                }}>
+                  {selectedOrder.paymentStatus} ({selectedOrder.paymentMethod})
+                </span>
+              </div>
+            </div>
+
+            {/* Customer & Shipping Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+              <div style={{ padding: '14px', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <User size={14} />
+                  Customer Information
+                </div>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.92rem' }}>{selectedOrder.customerName}</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Email: {selectedOrder.customerEmail || 'N/A'}</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '2px' }}>Phone: {selectedOrder.customerPhone || 'N/A'}</div>
               </div>
 
-              <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 text-center">
-                {ORDER_LIFECYCLE_STEPS.map((step, idx) => {
-                  const currentIdx = ORDER_LIFECYCLE_STEPS.findIndex(s => s.key === selectedOrder.currentStatus);
-                  const isCompleted = currentIdx > idx;
-                  const isCurrent = selectedOrder.currentStatus === step.key;
-                  const isCancelled = selectedOrder.currentStatus === 'CANCELLED';
-                  const StepIcon = step.icon;
+              <div style={{ padding: '14px', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <MapPin size={14} />
+                  Delivery Address
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                  {selectedOrder.shippingAddress || 'No street address provided'}
+                </div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  {[selectedOrder.city, selectedOrder.state, selectedOrder.zipcode, selectedOrder.country].filter(Boolean).join(', ')}
+                </div>
+              </div>
+            </div>
 
-                  let circleClass = 'bg-[var(--surface)] text-[var(--text-muted)] border-[var(--border)]';
-                  if (isCancelled) {
-                    circleClass = 'bg-rose-500/10 text-rose-400 border-rose-500/30';
-                  } else if (isCurrent) {
-                    circleClass = 'bg-primary text-white border-primary shadow-sm ring-2 ring-primary/30';
-                  } else if (isCompleted) {
-                    circleClass = 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30';
-                  }
+            {/* Linked Shipment Details Box */}
+            <div style={{ padding: '14px', background: 'rgba(2, 132, 199, 0.05)', border: '1px solid rgba(2, 132, 199, 0.2)', borderRadius: '8px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0284c7', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Truck size={16} />
+                  Linked Physical Shipment
+                </div>
+                <button
+                  onClick={() => {
+                    setShowOrderModal(false);
+                    handleOpenFulfillment(selectedOrder);
+                  }}
+                  className="btn btn-sm btn-outline"
+                  style={{ fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  Manage in Fulfillment
+                  <ExternalLink size={12} />
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '0.82rem' }}>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>Shipment #: </span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedOrder.shipmentNumber || 'Pending Provisioning'}</span>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>Carrier: </span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedOrder.carrierName}</span>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>Tracking / AWB: </span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedOrder.trackingNumber}</span>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>Shipment Status: </span>
+                  <span style={{ fontWeight: 700, color: '#0284c7' }}>{selectedOrder.shipmentStatus || 'CREATED'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Items Table */}
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px' }}>
+                Ordered Products ({selectedOrder.items?.length || 0})
+              </div>
+              <div style={{ border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)' }}>Product</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center', color: 'var(--text-muted)' }}>Qty</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-muted)' }}>Price</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-muted)' }}>Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(selectedOrder.items || []).map((it, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {it.productName}
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>SKU: {it.sku}</div>
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'center' }}>{it.quantity}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right' }}>₹{it.priceAtPurchase.toFixed(2)}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>₹{it.subtotal.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ background: 'var(--background)' }}>
+                      <td colSpan={3} style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>Total:</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#047857', fontSize: '0.95rem' }}>
+                        ₹{Number(selectedOrder.totalAmount || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Progression Bar */}
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>
+                Order Lifecycle Progression
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+                {ORDER_LIFECYCLE_STEPS.map((st, i) => {
+                  const currIdx = ORDER_LIFECYCLE_STEPS.findIndex(s => s.key === selectedOrder.currentStatus);
+                  const isCompleted = currIdx >= i && selectedOrder.currentStatus !== 'CANCELLED';
+                  const isCurrent = currIdx === i && selectedOrder.currentStatus !== 'CANCELLED';
+                  const StepIcon = st.icon;
 
                   return (
-                    <div key={step.key} className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all ${circleClass}`}>
-                        {isCompleted ? <Check size={14} /> : <StepIcon size={14} />}
+                    <div key={st.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, flex: 1 }}>
+                      <div style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '50%',
+                        backgroundColor: isCurrent ? '#059669' : (isCompleted ? '#10b981' : 'var(--border)'),
+                        color: isCompleted || isCurrent ? '#ffffff' : 'var(--text-muted)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginBottom: '6px',
+                        boxShadow: isCurrent ? '0 0 0 4px rgba(16, 185, 129, 0.2)' : 'none'
+                      }}>
+                        <StepIcon size={16} />
                       </div>
-                      <span className={`text-[11px] mt-1.5 leading-tight ${isCurrent ? 'font-bold text-primary' : 'text-muted'}`}>
-                        {step.label}
-                      </span>
+                      <div style={{ fontSize: '0.72rem', fontWeight: isCurrent ? 700 : 500, color: isCurrent ? 'var(--primary)' : 'var(--text-secondary)', textAlign: 'center' }}>
+                        {st.label}
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </div>
 
-            {/* Customer & Address Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div className="p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)]">
-                <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
-                  <User size={13} className="text-primary" />
-                  <span>Customer & Contact</span>
-                </div>
-                <div className="font-semibold text-base">{selectedOrder.customerName || 'Valued Customer'}</div>
-                <div className="text-sm text-muted flex items-center gap-1.5 mt-1">
-                  <Mail size={13} />
-                  <span>{selectedOrder.customerEmail || 'Email not provided'}</span>
-                </div>
-                <div className="text-sm text-muted flex items-center gap-1.5 mt-1">
-                  <Phone size={13} />
-                  <span>{selectedOrder.customerPhone || 'Phone not provided'}</span>
-                </div>
+            {/* Status History Timeline */}
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px' }}>
+                Complete Audit Timeline History
               </div>
-
-              <div className="p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)]">
-                <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
-                  <MapPin size={13} className="text-primary" />
-                  <span>Shipping Address & Dispatch Details</span>
-                </div>
-                <p className="text-sm font-medium">{selectedOrder.shippingAddress || 'Standard Delivery Address'}</p>
-                <p className="text-sm text-muted mt-0.5">
-                  {selectedOrder.city || 'City'}, {selectedOrder.state || 'State'} - {selectedOrder.zipcode || 'Postal Code'}
-                </p>
-                <p className="text-xs text-muted mt-0.5">{selectedOrder.country || 'India'}</p>
-                {selectedOrder.trackingNumber && (
-                  <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] text-xs flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted">Carrier:</span>
-                      <span className="font-medium text-primary">{selectedOrder.carrierName || 'EcoExpress'}</span>
-                      <span className="text-muted ml-1">AWB:</span>
-                      <span className="font-mono font-bold">{selectedOrder.trackingNumber}</span>
+              {selectedOrder.timeline && selectedOrder.timeline.length > 0 ? (
+                <div style={{ borderLeft: '2px solid var(--border)', paddingLeft: '16px', marginLeft: '8px' }}>
+                  {selectedOrder.timeline.map((h, idx) => (
+                    <div key={idx} style={{ position: 'relative', marginBottom: '14px' }}>
+                      <div style={{ position: 'absolute', left: '-22px', top: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--primary)' }} />
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {h.fromStatus ? `${h.fromStatus} → ${h.toStatus}` : h.toStatus}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        By: {h.changedByUsername} • {h.timestamp ? new Date(h.timestamp).toLocaleString('en-IN') : 'Recent'}
+                      </div>
+                      {h.reasonNote && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontStyle: 'italic', marginTop: '2px' }}>
+                          Note: "{h.reasonNote}"
+                        </div>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-xs flex items-center gap-1"
-                      onClick={() => navigate(`/fulfillment?orderId=${selectedOrder.id}`)}
-                    >
-                      <Navigation size={11} className="text-emerald-500" />
-                      <span>Live Telemetry</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Payment & Order Summary Strip */}
-            <div className="p-3.5 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] mb-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                  <CreditCard size={20} />
+                  ))}
                 </div>
-                <div>
-                  <div className="text-xs text-muted">Payment Method & Status</div>
-                  <div className="font-semibold text-sm flex items-center gap-2">
-                    <span>{selectedOrder.paymentMethod || 'Razorpay / Online'}</span>
-                    <span className="badge badge-success badge-xs">{selectedOrder.paymentStatus || 'PAID'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {selectedOrder.razorpayPaymentId && (
-                <div>
-                  <div className="text-xs text-muted">Transaction Reference</div>
-                  <div className="font-mono text-xs font-medium">{selectedOrder.razorpayPaymentId}</div>
+              ) : (
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  Order created at {selectedOrder.createdAt ? new Date(selectedOrder.createdAt).toLocaleString('en-IN') : 'Recent'}
                 </div>
               )}
-
-              <div>
-                <div className="text-xs text-muted">Total Payable Amount</div>
-                <div className="font-bold text-lg text-success">
-                  ₹{Number(selectedOrder.totalAmount || 0).toFixed(2)}
-                </div>
-              </div>
             </div>
+          </div>
+        )}
+      </Modal>
 
-            {/* Line Items */}
-            <div className="mb-5">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
-                <Package size={13} className="text-primary" />
-                <span>Purchased Line Items ({selectedOrder.items?.length || 0})</span>
+      {/* ========================================== */}
+      {/* 2. SHIPMENT TRACKING MODAL                 */}
+      {/* ========================================== */}
+      <Modal
+        isOpen={showTrackingModal}
+        onClose={() => setShowTrackingModal(false)}
+        title={trackingShipment ? `Shipment Tracking #${trackingShipment.shipmentNumber}` : 'Shipment Tracking'}
+        maxWidth="750px"
+      >
+        {trackingLoading ? (
+          <div style={{ padding: '40px', textAlign: 'center' }}>
+            <RefreshCw size={30} className="spin" style={{ color: 'var(--primary)', margin: '0 auto 10px auto' }} />
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Loading live tracking metadata...</div>
+          </div>
+        ) : trackingShipment ? (
+          <div>
+            {/* Live GPS Telemetry card (Active only for DISPATCHED, IN_TRANSIT, OUT_FOR_DELIVERY) */}
+            {['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(trackingShipment.status) ? (
+              <div style={{ padding: '16px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#047857', fontWeight: 700, fontSize: '0.9rem', marginBottom: '8px' }}>
+                  <Compass size={18} className="spin" />
+                  Live GPS Radar Active
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', fontSize: '0.82rem' }}>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Vehicle Number: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{trackingShipment.vehicleNumber || 'KA-01-EQ-9124'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Carrier: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{trackingShipment.carrierName || 'EcoExpress'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Current Coordinates: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {trackingShipment.currentLatitude ? `${trackingShipment.currentLatitude}, ${trackingShipment.currentLongitude}` : '12.9716° N, 77.5946° E'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Route Corridor: </span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{trackingShipment.route || 'Green Corridor'}</span>
+                  </div>
+                </div>
               </div>
-              <div className="table-responsive border border-[var(--border-subtle)] rounded-lg overflow-hidden">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Product Item</th>
-                      <th>Quantity</th>
-                      <th>Unit Price</th>
-                      <th className="text-right">Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedOrder.items?.length > 0 ? (
-                      selectedOrder.items.map((it, idx) => (
-                        <tr key={it.id || idx}>
-                          <td>
-                            <div className="font-medium">{it.productName}</div>
-                            {it.sku && <div className="text-xs text-muted mono-text">SKU: {it.sku}</div>}
-                          </td>
-                          <td className="font-mono">{it.quantity}</td>
-                          <td>₹{Number(it.priceAtPurchase || 0).toFixed(2)}</td>
-                          <td className="text-right font-semibold">₹{Number(it.subtotal || 0).toFixed(2)}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="4" className="text-center py-3 text-muted text-sm">
-                          Standard Eco Product Order
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+            ) : trackingShipment.status === 'DELIVERED' ? (
+              <div style={{ padding: '14px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid #10b981', borderRadius: '8px', color: '#047857', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
+                <CheckCircle2 size={18} />
+                Shipment has been safely delivered to customer. Physical telemetry session closed.
               </div>
-            </div>
-
-            {/* State Machine Transition Form */}
-            {canUpdate && allowedNext.length > 0 && (
-              <form onSubmit={handleStatusTransition} className="p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)] mb-5">
-                <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-3 flex items-center gap-1.5">
-                  <Send size={14} />
-                  <span>Execute Lifecycle State Transition</span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                  <div className="form-group">
-                    <label className="form-label text-xs font-semibold">Target Next Status *</label>
-                    <select
-                      className="input input-sm"
-                      value={transitionForm.newStatus}
-                      onChange={(e) => {
-                        setTransitionForm({ ...transitionForm, newStatus: e.target.value });
-                        setConfirmStep(false);
-                      }}
-                      required
-                    >
-                      {allowedNext.map((st) => (
-                        <option key={st} value={st}>
-                          {st.replace(/_/g, ' ')}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label text-xs font-semibold">Carrier Logistics Partner</label>
-                    <select
-                      className="input input-sm"
-                      value={transitionForm.carrierName}
-                      onChange={(e) => setTransitionForm({ ...transitionForm, carrierName: e.target.value })}
-                    >
-                      {CARRIER_OPTIONS.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                  <div className="form-group">
-                    <label className="form-label text-xs font-semibold">Tracking / AWB Number</label>
-                    <input
-                      type="text"
-                      className="input input-sm mono-text"
-                      value={transitionForm.trackingNumber}
-                      onChange={(e) => setTransitionForm({ ...transitionForm, trackingNumber: e.target.value })}
-                      placeholder="e.g. ECO-AWB-981249"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label text-xs font-semibold">Operational Audit Note</label>
-                    <input
-                      type="text"
-                      className="input input-sm"
-                      value={transitionForm.reasonNote}
-                      onChange={(e) => setTransitionForm({ ...transitionForm, reasonNote: e.target.value })}
-                      placeholder="e.g. Quality verified and dispatched via EcoExpress"
-                    />
-                  </div>
-                </div>
-
-                {confirmStep && (
-                  <div className="alert alert-warning mb-3 text-xs flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle size={15} />
-                      <span>
-                        Confirm transitioning order to <strong>{transitionForm.newStatus.replace(/_/g, ' ')}</strong>? Customer notification (Email + SMS) will be triggered.
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm flex items-center gap-1.5"
-                    disabled={updating}
-                  >
-                    {updating ? (
-                      <>
-                        <RefreshCw size={13} className="animate-spin" />
-                        <span>Updating & Notifying...</span>
-                      </>
-                    ) : confirmStep ? (
-                      <>
-                        <CheckCircle2 size={14} />
-                        <span>Yes, Confirm & Sync Status</span>
-                      </>
-                    ) : (
-                      <>
-                        <Send size={13} />
-                        <span>Submit Status Transition</span>
-                      </>
-                    )}
-                  </button>
-
-                  {confirmStep && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setConfirmStep(false)}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </form>
+            ) : (
+              <div style={{ padding: '14px', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid #f59e0b', borderRadius: '8px', color: '#b45309', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
+                <Clock size={18} />
+                Shipment is currently in warehouse packaging state. Live GPS telemetry will activate once dispatched for transit.
+              </div>
             )}
 
-            {/* Historical State Transition Timeline */}
-            <div className="p-4 rounded-lg bg-[var(--surface-elevated)] border border-[var(--border-subtle)]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-3 flex items-center gap-1.5">
-                <ShieldCheck size={14} className="text-primary" />
-                <span>Forensic Audit History & Stage Log</span>
+            {/* Shipment Milestones Timeline */}
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px' }}>
+                Shipment Audit Milestones
               </div>
-
-              <div className="timeline-list space-y-3">
-                {(!selectedOrder.timeline || selectedOrder.timeline.length === 0) ? (
-                  <p className="text-muted text-xs">No stage transitions logged yet.</p>
-                ) : (
-                  selectedOrder.timeline.map((t, idx) => (
-                    <div key={idx} className="flex items-start gap-3 text-xs">
-                      <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0"></div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-primary">
-                            {t.fromStatus ? `${t.fromStatus.replace(/_/g, ' ')} → ` : ''}
-                            {t.toStatus ? t.toStatus.replace(/_/g, ' ') : ''}
-                          </span>
-                          <span className="text-muted text-[11px]">
-                            {t.timestamp ? new Date(t.timestamp).toLocaleString() : ''}
-                          </span>
-                        </div>
-                        <div className="text-muted mt-0.5">
-                          Logged by: <span className="font-medium text-foreground">{t.changedByUsername || 'Staff Operator'}</span>
-                        </div>
-                        {t.reasonNote && (
-                          <div className="text-[11px] text-muted italic mt-0.5 bg-[var(--surface)] p-1.5 rounded">
-                            "{t.reasonNote}"
-                          </div>
-                        )}
+              {trackingEvents && trackingEvents.length > 0 ? (
+                <div style={{ borderLeft: '2px solid #0284c7', paddingLeft: '16px', marginLeft: '8px' }}>
+                  {trackingEvents.map((evt, idx) => (
+                    <div key={idx} style={{ position: 'relative', marginBottom: '14px' }}>
+                      <div style={{ position: 'absolute', left: '-22px', top: '3px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#0284c7' }} />
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {evt.oldStatus ? `${evt.oldStatus} → ${evt.newStatus}` : evt.newStatus}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Changed By: {evt.changedBy || 'Staff'} ({evt.changedRole || 'Warehouse Staff'}) • {evt.createdAt ? new Date(evt.createdAt).toLocaleString('en-IN') : 'Recent'}
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  Shipment registered for Order #{trackingShipment.orderId}. Handover to carrier pending.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ========================================== */}
+      {/* 3. REQUEST CANCELLATION MODAL             */}
+      {/* ========================================== */}
+      <Modal
+        isOpen={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        title={orderToCancel ? `Request Cancellation for #${orderToCancel.orderReferenceNumber}` : 'Cancel Order'}
+        maxWidth="500px"
+      >
+        {orderToCancel && (
+          <div>
+            <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Are you sure you want to cancel order <strong>#{orderToCancel.orderReferenceNumber}</strong>?
+              If already paid, an automated refund request will be initialized.
+            </p>
+
+            <div style={{ margin: '16px 0' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                Cancellation Reason Note:
+              </label>
+              <textarea
+                rows={3}
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.85rem'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button onClick={() => setShowCancelModal(false)} className="btn btn-outline" disabled={cancelling}>
+                Close
+              </button>
+              <button onClick={handleConfirmCancellation} className="btn btn-danger" disabled={cancelling}>
+                {cancelling ? 'Cancelling...' : 'Confirm Order Cancellation'}
+              </button>
             </div>
           </div>
         )}

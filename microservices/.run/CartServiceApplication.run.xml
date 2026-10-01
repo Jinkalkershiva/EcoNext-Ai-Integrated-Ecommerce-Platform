@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="CartServiceApplication (2)" type="Application" factoryName="Application" nameIsGenerated="true">
+  <configuration default="false" name="CartServiceApplication (2)" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="com.econext.cart.CartServiceApplication" />
     <module name="cart-service" />
     <extension name="coverage">

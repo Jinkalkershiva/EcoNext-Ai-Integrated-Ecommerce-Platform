@@ -6,7 +6,7 @@ from products.models import (
 )
 from accounts.models import UserProfile, ActivityLog
 from shop_cart.models import Cart, CartItem
-from order_service.models import Order, OrderItem, OrderStatusHistory, NotificationLog
+from order_service.models import Order, OrderItem, OrderStatusHistory, NotificationLog, Shipment, ShipmentItem, ShipmentEvent
 from ml_engine.models import PricePrediction
 
 
@@ -72,6 +72,10 @@ class ProductSerializer(serializers.ModelSerializer):
     imageUrl = serializers.CharField(source='image_url', read_only=True)
     additional_images = serializers.SerializerMethodField()
     additionalImages = serializers.SerializerMethodField()
+    is_whitelisted = serializers.BooleanField(read_only=True)
+    isWhitelisted = serializers.BooleanField(source='is_whitelisted', read_only=True)
+    is_archived = serializers.SerializerMethodField()
+    isArchived = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
 
     class Meta:
@@ -79,9 +83,10 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'description', 'category', 'subcategory', 'current_price',
             'price', 'stock', 'stockQuantity', 'sku', 'categoryId', 'categoryName',
-            'image_url', 'imageUrl', 'additional_images', 'additionalImages', 'tags', 'status', 'created_at', 'age_groups',
-            'gender_categories', 'eco_tags', 'skin_or_body_fit', 'season',
-            'occasion', 'popularity_score', 'sustainability_score', 'sustainabilityScore'
+            'image_url', 'imageUrl', 'additional_images', 'additionalImages', 'tags',
+            'is_whitelisted', 'isWhitelisted', 'is_archived', 'isArchived', 'status',
+            'created_at', 'age_groups', 'gender_categories', 'eco_tags', 'skin_or_body_fit',
+            'season', 'occasion', 'popularity_score', 'sustainability_score', 'sustainabilityScore'
         ]
 
     def get_additional_images(self, obj):
@@ -110,12 +115,21 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_categoryName(self, obj):
         return obj.category.name if obj.category else 'Uncategorized'
 
+    def get_is_archived(self, obj):
+        return (obj.status or '').upper() == 'ARCHIVED'
+
+    def get_isArchived(self, obj):
+        return self.get_is_archived(obj)
+
     def get_status(self, obj):
-        if obj.stock > 10:
-            return 'ACTIVE'
-        elif obj.stock > 0:
+        st = (obj.status or 'ACTIVE').upper()
+        if st == 'ARCHIVED':
+            return 'ARCHIVED'
+        if obj.stock <= 0:
+            return 'OUT_OF_STOCK'
+        elif obj.stock <= 10:
             return 'LOW_STOCK'
-        return 'OUT_OF_STOCK'
+        return st
 
 
 class PriceHistorySerializer(serializers.ModelSerializer):
@@ -159,13 +173,30 @@ class CartSerializer(serializers.ModelSerializer):
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    product = ProductSerializer(read_only=True)
+    product = serializers.SerializerMethodField()
+    product_name = serializers.SerializerMethodField()
     subtotal = serializers.SerializerMethodField()
     
     class Meta:
         model = OrderItem
-        fields = ['id', 'product', 'quantity', 'price_at_purchase', 'subtotal']
+        fields = ['id', 'product', 'product_name', 'quantity', 'price_at_purchase', 'subtotal']
     
+    def get_product(self, obj):
+        if obj.product:
+            return ProductSerializer(obj.product).data
+        return {
+            'id': None,
+            'name': obj.product_name or 'Purchased Item',
+            'image_url': None,
+            'imageUrl': None,
+            'price': str(obj.price_at_purchase),
+            'current_price': str(obj.price_at_purchase),
+            'status': 'ARCHIVED'
+        }
+
+    def get_product_name(self, obj):
+        return obj.product.name if obj.product else (obj.product_name or 'Purchased Item')
+
     def get_subtotal(self, obj):
         return str(obj.get_subtotal())
 
@@ -176,13 +207,36 @@ class OrderStatusHistorySerializer(serializers.ModelSerializer):
         fields = ['id', 'from_status', 'to_status', 'changed_by_name', 'note', 'carrier_name', 'tracking_number', 'timestamp']
 
 
+class ShipmentEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShipmentEvent
+        fields = ['id', 'shipment_id', 'old_status', 'new_status', 'changed_by', 'changed_role', 'latitude', 'longitude', 'created_at']
+
+
+class ShipmentSerializer(serializers.ModelSerializer):
+    events = ShipmentEventSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Shipment
+        fields = [
+            'id', 'shipment_number', 'order_id', 'status', 'carrier_name',
+            'tracking_number', 'vehicle_number', 'origin', 'destination', 'route',
+            'current_latitude', 'current_longitude', 'last_location_update',
+            'estimated_delivery', 'events', 'created_at', 'updated_at'
+        ]
+
+
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
+    shipments = ShipmentSerializer(many=True, read_only=True)
     order_reference_number = serializers.CharField(read_only=True)
     canonical_status = serializers.CharField(read_only=True)
     customer_name = serializers.SerializerMethodField()
     customer_email = serializers.SerializerMethodField()
+    shipment_id = serializers.SerializerMethodField()
+    shipment_number = serializers.SerializerMethodField()
+    shipment_status = serializers.SerializerMethodField()
     tracking_timeline = serializers.SerializerMethodField()
     
     class Meta:
@@ -193,7 +247,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'customer_email', 'shipping_address', 'city', 'state', 'zipcode',
             'country', 'payment_method', 'payment_status', 'razorpay_order_id',
             'razorpay_payment_id', 'carrier_name', 'tracking_number',
-            'estimated_delivery', 'items', 'status_history', 'tracking_timeline',
+            'estimated_delivery', 'shipment_id', 'shipment_number', 'shipment_status',
+            'shipments', 'items', 'status_history', 'tracking_timeline',
             'created_at', 'updated_at'
         ]
 
@@ -207,6 +262,18 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_customer_email(self, obj):
         return obj.email or (obj.user.email if obj.user else '')
+
+    def get_shipment_id(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return first_shp.id if first_shp else None
+
+    def get_shipment_number(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return first_shp.shipment_number if first_shp else None
+
+    def get_shipment_status(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return first_shp.status if first_shp else None
 
     def get_tracking_timeline(self, obj):
         """

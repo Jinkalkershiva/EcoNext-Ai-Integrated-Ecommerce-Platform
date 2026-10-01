@@ -28,11 +28,14 @@ export const ProductDetailPage = ({ productId: propProductId }) => {
   const [isCopied, setIsCopied] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
 
+  const [imageError, setImageError] = useState(false);
+
   useEffect(() => {
     const fetchProductData = async () => {
       if (!idToLoad) return;
       setLoading(true);
       setError(null);
+      setImageError(false);
       try {
         const data = await apiService.getProductDetail(idToLoad);
         if (data && data.status === 'success') {
@@ -102,7 +105,7 @@ export const ProductDetailPage = ({ productId: propProductId }) => {
   const ecoTags = Array.isArray(product.eco_tags) ? product.eco_tags : [];
   const inStock = product.stock === undefined || product.stock > 0;
 
-  const primaryImg = product.image_url || product.imageUrl || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80';
+  const primaryImg = product.image_url || product.imageUrl || '';
   const additionalImgs = Array.isArray(product.additional_images) ? product.additional_images : (Array.isArray(product.additionalImages) ? product.additionalImages : []);
   const allImages = [primaryImg, ...additionalImgs].filter(Boolean);
   const displayImage = selectedImage || primaryImg;
@@ -131,14 +134,32 @@ export const ProductDetailPage = ({ productId: propProductId }) => {
         {/* Gallery on Left */}
         <div className="product-gallery-side">
           <div className="product-main-image-frame">
-            <img
-              src={displayImage}
-              alt={product.name}
-              className="product-main-image"
-              onError={(e) => {
-                e.currentTarget.src = 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80';
-              }}
-            />
+            {displayImage && !imageError ? (
+              <img
+                src={displayImage}
+                alt={product.name}
+                className="product-main-image"
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  minHeight: '380px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: 'var(--bg-surface-sunken, #f8fafc)',
+                  color: 'var(--text-muted, #64748b)',
+                  fontSize: '1rem',
+                  fontWeight: 500,
+                  borderRadius: 'var(--radius-md, 8px)',
+                }}
+              >
+                Image unavailable
+              </div>
+            )}
           </div>
 
           {allImages.length > 1 && (

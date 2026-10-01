@@ -32,6 +32,7 @@ public class ShipmentResponse {
     private BigDecimal currentLongitude;
     private LocalDateTime lastLocationUpdate;
     private List<ShipmentItemResponse> items;
+    private List<ShipmentEventResponse> events;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -38,11 +38,19 @@ public class FulfillmentController {
 
     @GetMapping("/shipments")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
-    @Operation(summary = "Search and filter shipments")
+    @Operation(summary = "Search and filter shipments with enterprise location, hub, state, city, pincode, carrier and date filters")
     public ResponseEntity<ApiResponse<Page<ShipmentResponse>>> searchShipments(
             @RequestParam(required = false) Long orderId,
             @RequestParam(required = false) ShipmentStatus status,
             @RequestParam(required = false) Long containerId,
+            @RequestParam(required = false) String warehouse,
+            @RequestParam(required = false) String hub,
+            @RequestParam(required = false) String state,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) String pincode,
+            @RequestParam(required = false) String carrier,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime fromTime,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime toTime,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "15") int size,
@@ -51,7 +59,9 @@ public class FulfillmentController {
     ) {
         Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
-        Page<ShipmentResponse> shipments = shipmentService.searchShipments(orderId, status, containerId, search, pageable);
+        Page<ShipmentResponse> shipments = shipmentService.searchShipments(
+                orderId, status, containerId, warehouse, hub, state, city, pincode, carrier, fromTime, toTime, search, pageable
+        );
         return ResponseEntity.ok(ApiResponse.ok(shipments));
     }
 
@@ -69,6 +79,14 @@ public class FulfillmentController {
     public ResponseEntity<ApiResponse<ShipmentResponse>> getShipmentById(@PathVariable Long id) {
         ShipmentResponse shipment = shipmentService.getShipmentById(id);
         return ResponseEntity.ok(ApiResponse.ok(shipment));
+    }
+
+    @GetMapping("/shipments/{id}/events")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
+    @Operation(summary = "Get historical shipment status events audit trail")
+    public ResponseEntity<ApiResponse<List<ShipmentEventResponse>>> getShipmentEvents(@PathVariable Long id) {
+        List<ShipmentEventResponse> events = shipmentService.getShipmentEvents(id);
+        return ResponseEntity.ok(ApiResponse.ok(events));
     }
 
     // Called by API Gateway (/api/order-ops/shipments) when staff creates a shipment from packed order items.

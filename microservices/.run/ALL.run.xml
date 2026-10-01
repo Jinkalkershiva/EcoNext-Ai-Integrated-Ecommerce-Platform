@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="All_Services" type="CompoundRunConfigurationType">
+  <configuration default="false" name="ALL" type="CompoundRunConfigurationType">
     <toRun name="AdminStaffServiceApplication" type="Application" />
     <toRun name="ApiGatewayApplication" type="Application" />
     <toRun name="AuthServiceApplication" type="Application" />

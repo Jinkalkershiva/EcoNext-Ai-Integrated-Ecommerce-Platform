@@ -32,10 +32,14 @@ public class EmailNotificationService {
             return false;
         }
 
-        String subject = "🔐 Delivery Verification PIN for Order #" + orderReference + " - EcoNext";
+        String subject = "EcoNext Delivery Verification OTP";
+        String plainText = String.format(
+                "Your delivery verification code is:\n\n%s\n\nOrder:\n%s\n\nValid for %d minutes.\n\nEcoNext Sustainable Fulfillment",
+                otp, orderReference, validityMinutes
+        );
         String htmlContent = buildDeliveryOtpHtml(customerName, orderReference, shipmentNumber, otp, validityMinutes);
 
-        // Fallback or dev mode logging
+        // Fallback / dev mode console logging for testing
         log.info("[DELIVERY OTP DISPATCH] PIN generated for Order #{} (Shipment #{}): {} | Target Recipient: {}",
                 orderReference, shipmentNumber, otp, maskEmail(recipientEmail));
 
@@ -50,13 +54,13 @@ public class EmailNotificationService {
             helper.setFrom(mailUsername.contains("@") ? mailUsername : fromEmail);
             helper.setTo(recipientEmail);
             helper.setSubject(subject);
-            helper.setText(htmlContent, true);
+            helper.setText(plainText, htmlContent);
 
             mailSender.send(message);
             log.info("Successfully dispatched Delivery OTP email to {} for shipment #{}", maskEmail(recipientEmail), shipmentNumber);
             return true;
         } catch (Exception ex) {
-            log.warn("SMTP delivery failed for {}: {}. Continuing with order lifecycle without interruption.",
+            log.warn("SMTP delivery note for {}: {}. Continuing with order lifecycle without interruption.",
                     maskEmail(recipientEmail), ex.getMessage());
             return false;
         }
@@ -95,19 +99,22 @@ public class EmailNotificationService {
                 <div class="body">
                   <h2 style="font-size: 18px; margin-top: 0;">Hello {{name}},</h2>
                   <p style="font-size: 14px; line-height: 1.6; color: #475569;">
-                    Your eco-friendly order is <strong>Out for Delivery</strong> and will reach you shortly! Please provide the secure Delivery PIN below to your delivery executive upon receiving your package.
+                    Your eco-friendly order is <strong>Out for Delivery</strong> and will reach you shortly!
                   </p>
 
+                  <div style="font-size: 15px; margin: 16px 0 6px 0; font-weight: 600; color: #334155;">
+                    Your delivery verification code is:
+                  </div>
+
                   <div class="otp-box">
-                    <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #047857; margin-bottom: 6px;">Secure Delivery PIN</div>
                     <div class="otp-code">{{otp}}</div>
                     <div style="font-size: 12px; color: #64748b; margin-top: 6px;">Valid for {{minutes}} minutes</div>
                   </div>
 
                   <table class="meta-table">
                     <tr>
-                      <td class="label">Order Reference</td>
-                      <td class="val">#{{orderRef}}</td>
+                      <td class="label">Order</td>
+                      <td class="val">{{orderRef}}</td>
                     </tr>
                     <tr>
                       <td class="label">Shipment Number</td>
@@ -120,7 +127,7 @@ public class EmailNotificationService {
                   </table>
 
                   <div class="instructions">
-                    ⚠️ <strong>Security Advisory:</strong> Never share this PIN over phone or SMS before physical inspection and handover of your parcel.
+                    ⚠️ <strong>Security Advisory:</strong> Please share this verification code with your delivery executive only after physical inspection and handover of your parcel.
                   </div>
                 </div>
                 <div class="footer">

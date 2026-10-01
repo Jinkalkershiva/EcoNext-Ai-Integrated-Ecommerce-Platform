@@ -18,7 +18,9 @@ import {
   Sparkles,
   ExternalLink,
   Eye,
-  Check
+  Check,
+  Star,
+  Archive
 } from 'lucide-react';
 import { catalogOpsApi } from '../api/operationsApis';
 import { DataTable } from '../components/DataTable';
@@ -36,6 +38,7 @@ export const ProductsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [filterTab, setFilterTab] = useState('ALL');
 
   // Dropdown Menu State
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -237,6 +240,38 @@ export const ProductsPage = () => {
     }
   };
 
+  const handleToggleWhitelist = async (product) => {
+    const nextState = !(product.is_whitelisted || product.isWhitelisted);
+    // Optimistic update
+    setProducts(prev => prev.map(p => p.id === product.id ? { ...p, is_whitelisted: nextState, isWhitelisted: nextState } : p));
+    try {
+      await catalogOpsApi.toggleWhitelist(product.id, nextState);
+      setSuccess(`Product "${product.name}" ${nextState ? 'added to' : 'removed from'} whitelist.`);
+    } catch (err) {
+      setError(err.message || 'Failed to update whitelist status');
+      loadData();
+    }
+  };
+
+  const handleArchiveToggle = async (product) => {
+    const isArchived = (product.status === 'ARCHIVED');
+    const newStatus = isArchived ? 'ACTIVE' : 'ARCHIVED';
+    // Optimistic update
+    setProducts(prev => prev.map(p => p.id === product.id ? { ...p, status: newStatus } : p));
+    try {
+      if (isArchived) {
+        await catalogOpsApi.restoreProduct(product.id);
+        setSuccess(`Product "${product.name}" restored to catalog.`);
+      } else {
+        await catalogOpsApi.archiveProduct(product.id);
+        setSuccess(`Product "${product.name}" archived from active storefront.`);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to update archive status');
+      loadData();
+    }
+  };
+
   const columns = [
     {
       header: 'Product Details',
@@ -282,16 +317,17 @@ export const ProductsPage = () => {
     {
       header: 'Price',
       key: 'price',
-      render: (row) => <span className="font-semibold text-sm">₹{Number(row.price).toFixed(2)}</span>
+      render: (row) => <span className="font-semibold text-sm">₹{Number(row.price || row.current_price || 0).toFixed(2)}</span>
     },
     {
       header: 'Stock',
       key: 'stockQuantity',
       render: (row) => {
-        const isLow = row.stockQuantity <= (row.lowStockThreshold || 10);
+        const stock = row.stockQuantity !== undefined ? row.stockQuantity : (row.stock !== undefined ? row.stock : 0);
+        const isLow = stock <= (row.lowStockThreshold || 10);
         return (
           <div className={`font-semibold flex items-center gap-1 ${isLow ? 'text-danger' : 'text-success'}`}>
-            <span>{row.stockQuantity}</span>
+            <span>{stock}</span>
             {isLow && <AlertTriangle size={13} />}
           </div>
         );
@@ -304,13 +340,32 @@ export const ProductsPage = () => {
         <div className="flex items-center gap-1.5">
           <span className="badge badge-success badge-xs flex items-center gap-1">
             <Leaf size={11} />
-            <span>{row.sustainabilityScore || 0}/100</span>
+            <span>{row.sustainabilityScore || row.sustainability_score || 0}/100</span>
           </span>
           {row.carbonFootprintKg && (
             <span className="text-xs text-muted">({row.carbonFootprintKg}kg)</span>
           )}
         </div>
       )
+    },
+    {
+      header: 'Whitelist',
+      key: 'is_whitelisted',
+      render: (row) => {
+        const isWhitelisted = Boolean(row.is_whitelisted || row.isWhitelisted);
+        return (
+          <button
+            type="button"
+            className={`btn btn-xs ${isWhitelisted ? 'btn-warning' : 'btn-ghost'}`}
+            style={{ padding: '3px 7px', display: 'flex', alignItems: 'center', gap: '4px' }}
+            onClick={() => handleToggleWhitelist(row)}
+            title={isWhitelisted ? "Whitelisted (Click to remove)" : "Click to Whitelist"}
+          >
+            <Star size={13} fill={isWhitelisted ? "#f59e0b" : "none"} color={isWhitelisted ? "#d97706" : "#94a3b8"} />
+            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{isWhitelisted ? 'Whitelisted' : 'Standard'}</span>
+          </button>
+        );
+      }
     },
     {
       header: 'Status',
@@ -325,6 +380,23 @@ export const ProductsPage = () => {
         <div className="action-buttons-group flex items-center gap-1">
           {canManage && (
             <>
+              <button
+                className={`btn btn-xs flex items-center gap-1 ${row.status === 'ARCHIVED' ? 'btn-success' : 'btn-outline'}`}
+                onClick={() => handleArchiveToggle(row)}
+                title={row.status === 'ARCHIVED' ? "Restore product to active catalog" : "Archive product (hide from customer storefront)"}
+              >
+                {row.status === 'ARCHIVED' ? (
+                  <>
+                    <RefreshCw size={12} />
+                    <span>Restore</span>
+                  </>
+                ) : (
+                  <>
+                    <Archive size={12} />
+                    <span>Archive</span>
+                  </>
+                )}
+              </button>
               <button className="btn btn-secondary btn-xs flex items-center gap-1" onClick={() => openEditModal(row)}>
                 <Edit size={12} />
                 <span>Edit</span>
@@ -345,6 +417,13 @@ export const ProductsPage = () => {
       )
     }
   ];
+
+  const filteredProducts = products.filter(p => {
+    if (filterTab === 'ACTIVE') return (p.status || 'ACTIVE') !== 'ARCHIVED';
+    if (filterTab === 'ARCHIVED') return p.status === 'ARCHIVED';
+    if (filterTab === 'WHITELISTED') return Boolean(p.is_whitelisted || p.isWhitelisted);
+    return true;
+  });
 
   return (
     <div className="products-page">
@@ -379,15 +458,33 @@ export const ProductsPage = () => {
             <span>Eco Catalog Product Directory</span>
           </h2>
           <p className="page-subtitle">
-            Manage sustainable inventory items, pricing, carbon footprint metrics, images, and categories.
+            Manage sustainable inventory items, pricing, carbon footprint metrics, whitelist status, and categories.
           </p>
         </div>
       </div>
 
       <div className="card">
+        {/* Filter Tabs */}
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--border-color, #e2e8f0)', paddingBottom: '0.5rem' }}>
+          {['ALL', 'ACTIVE', 'WHITELISTED', 'ARCHIVED'].map(tab => (
+            <button
+              key={tab}
+              type="button"
+              className={`btn btn-sm ${filterTab === tab ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setFilterTab(tab)}
+              style={{ fontSize: '0.8rem', fontWeight: 600 }}
+            >
+              {tab === 'ALL' && `All (${products.length})`}
+              {tab === 'ACTIVE' && `Active (${products.filter(p => (p.status || 'ACTIVE') !== 'ARCHIVED').length})`}
+              {tab === 'WHITELISTED' && `⭐ Whitelisted (${products.filter(p => p.is_whitelisted || p.isWhitelisted).length})`}
+              {tab === 'ARCHIVED' && `📦 Archived (${products.filter(p => p.status === 'ARCHIVED').length})`}
+            </button>
+          ))}
+        </div>
+
         <DataTable
           columns={columns}
-          data={products}
+          data={filteredProducts}
           loading={loading}
           searchPlaceholder="Search by name, SKU, or tags..."
           actions={
@@ -788,7 +885,7 @@ export const ProductsPage = () => {
                     setFormData({ ...formData, imageUrl: e.target.value });
                     setImagePreviewError(false);
                   }}
-                  placeholder="https://images.unsplash.com/... or any HTTPS product image link"
+                  placeholder="https://... (Direct HTTPS product image URL)"
                   style={{ fontSize: '0.8rem' }}
                 />
                 <p className="text-muted text-xs mt-1" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>

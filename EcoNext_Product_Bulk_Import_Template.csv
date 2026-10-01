@@ -1,0 +1,3 @@
+sku,name,category,price,stock,description,image_url,sustainability_score,carbon_footprint,materials,is_whitelisted,status
+ECO-APP-001,Organic Bamboo Crewneck Tee,Apparel,1499.00,100,"Hypoallergenic, breathable bamboo fiber crewneck t-shirt with certified sustainable dye.",https://example.com/images/bamboo-tee.jpg,94.0,1.5,"95% Organic Bamboo, 5% Elastane",true,ACTIVE
+ECO-HOME-002,Recycled Glass Water Carafe,Home & Living,899.00,50,Handcrafted 1-liter carafe made from 100% recycled glass with natural cork stopper.,,88.5,0.8,100% Recycled Glass,false,ACTIVE

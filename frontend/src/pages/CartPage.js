@@ -73,12 +73,24 @@ export const CartPage = () => {
                 exit={{ opacity: 0, x: -30 }}
                 transition={{ duration: 0.2 }}
               >
-                <img
-                  src={item.image_url || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=200&q=80'}
-                  alt={item.name}
-                  className="cart-item-thumbnail"
-                  onClick={() => navigateTo(`product/${item.id}`)}
-                />
+                {item.image_url ? (
+                  <img
+                    src={item.image_url}
+                    alt={item.name}
+                    className="cart-item-thumbnail"
+                    onClick={() => navigateTo(`product/${item.id}`)}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <div
+                    className="cart-item-placeholder"
+                    onClick={() => navigateTo(`product/${item.id}`)}
+                  >
+                    Image unavailable
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                   <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)', textTransform: 'uppercase' }}>

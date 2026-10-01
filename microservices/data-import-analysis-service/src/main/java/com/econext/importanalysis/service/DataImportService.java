@@ -266,7 +266,7 @@ public class DataImportService {
             body.put("categoryId", 1); // Default to first category if unmapped
             body.put("currentPrice", mapped.get("currentPrice"));
             body.put("stock", mapped.getOrDefault("stock", 0));
-            body.put("imageUrl", mapped.getOrDefault("imageUrl", "https://images.unsplash.com/photo-1542291026-7eec264c27ff"));
+            body.put("imageUrl", mapped.getOrDefault("imageUrl", ""));
             if (mapped.containsKey("sku")) {
                 body.put("sku", mapped.get("sku"));
             }
