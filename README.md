@@ -27,6 +27,15 @@ The platform combines multi-modal artificial intelligence (computer vision simil
 * **Shiva Jinkalker** ([GitHub: @Jinkalkershiva](https://github.com/Jinkalkershiva))
 * **RajputAtul75** ([GitHub: @RajputAtul75](https://github.com/RajputAtul75))
 
+### 📚 Project Knowledge Base & Single Source of Truth
+Authoritative, production-grade technical documentation is maintained in the [`docs/`](docs/) directory:
+* 📄 **[Product Requirements Document (PRD)](docs/PRD.md)**: Product vision, user personas, functional specifications, and success KPIs.
+* 🏗️ **[System Architecture](docs/ARCHITECTURE.md)**: Polyglot microservices topology, Spring Cloud Gateway ingress, Kafka KRaft streaming, and database-per-service isolation.
+* 📏 **[Engineering Rules & Standards](docs/RULES.md)**: Domain invariants, zero ghost orders, JPA/Hibernate collection rules, and coding conventions.
+* 🎨 **[System Design & Workflows](docs/DESIGN.md)**: Level-0/1 DFDs, sequence diagrams for Razorpay & fulfillment, and state machine specifications.
+* 📋 **[Task Tracking & Roadmap](docs/TASK.md)**: Implementation milestones (Phases 1–4), 14/14 automated test matrix, and future engineering roadmap.
+* 🧠 **[Operational Memory & Gotchas](docs/MEMORY.md)**: Operational credentials, historical bug post-mortems, Hibernate orphan-removal patterns, and Redis fallback strategies.
+
 ---
 
 ## 📑 Table of Contents
