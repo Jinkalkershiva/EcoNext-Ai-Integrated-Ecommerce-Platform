@@ -11,15 +11,15 @@
 | Environment / Service | Host / Port | Credentials / Notes | Purpose |
 | :--- | :--- | :--- | :--- |
 | **API Gateway Ingress** | `http://127.0.0.1:8080` | Reverse proxy | Primary ingress for frontends and external callers |
-| **Django Core Backend** | `http://127.0.0.1:8000` | Superuser: `admin` | Catalog, ML engine, Gemini Copilot |
+| **Django Core Backend** | `http://127.0.0.1:8000` | Superuser: `ADMIN_USERNAME=<configured locally>` | Catalog, ML engine, Gemini Copilot |
 | **Order Operations Service** | `http://127.0.0.1:8084` | Bearer Token auth | Fulfillment, shipments, drivers, delivery OTP |
 | **Admin & Staff Service** | `http://127.0.0.1:8081` | Staff SSOT | Administrative authentication & RBAC/PBAC |
 | **Customer Storefront UI** | `http://localhost:5173` | React 19 / Vite | Customer e-commerce experience |
 | **Admin Operations Portal** | `http://localhost:5174` | React 19 / Vite | Logistics, fleet GPS, order management |
-| **MySQL 8.0 Server** | `localhost:3306` | User: `root` / `shivaJ@123` | Relational multi-schema database cluster |
-| **Redis 7 Cache** | `localhost:6379` | Default (no password) | Cache, rate limits, OTP ephemeral storage |
+| **MySQL 8.0 Server** | `localhost:3306` | User: `root` / `MYSQL_PASSWORD=<configured locally>` | Relational multi-schema database cluster |
+| **Redis 7 Cache** | `localhost:6379` | Default / `REDIS_PASSWORD=<configured locally>` | Cache, rate limits, OTP ephemeral storage |
 | **Kafka Broker (KRaft)** | `localhost:9092` | PLAINTEXT | Distributed event bus |
-| **Admin Staff Login** | `POST /api/admin/auth/login`| `admin` / `Admin@12345` | Returns JWT Bearer token with `ROLE_ADMIN` |
+| **Admin Staff Login** | `POST /api/admin/auth/login`| `ADMIN_USERNAME=<configured locally>` / `ADMIN_PASSWORD=<configured locally>` | Returns JWT Bearer token with `ROLE_ADMIN` |
 
 ---
 
