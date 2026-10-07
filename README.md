@@ -777,6 +777,18 @@ A 5-step guided batch catalog ingestion pipeline supporting `.csv` and `.xlsx` f
    - Emits asynchronous `inventory-events` Kafka notifications (with graceful local degradation).
    - Generates downloadable CSV error reports for skipped rows and logs `BULK_IMPORT_EXECUTED` in `ActivityLog`.
 
+#### Reference Ingestion Templates & Data Architecture Boundary
+The repository root provides two authoritative reference templates matching the schema expected by the wizard:
+* **`EcoNext_Product_Bulk_Import_Template.csv`**: Standard CSV reference template for bulk product uploads.
+* **`EcoNext_Product_Bulk_Import_Template.xlsx`**: Standard Excel spreadsheet reference template for bulk product uploads.
+
+> [!IMPORTANT]
+> **Data Architecture Boundary**:
+> * **Ingestion Only**: Both templates are strictly format/reference templates used by merchants and administrators for uploading data through the Bulk Import Wizard. They are **not** seed databases.
+> * **Not Runtime Data Sources**: These files do **not** serve as the application's runtime product data source.
+> * **Database Is Authoritative**: Upon import validation and execution, all product data is stored directly in the relational database (`products_product`).
+> * **Runtime Pipeline**: Storefront APIs (`/api/products/**`), visual search / CLIP embeddings, TF-IDF intent search, price prediction, and conversational assistants read current product data **exclusively from the database**, never from spreadsheet or CSV files.
+
 ### Controlled Database SQL Query Console (`/admin/database/query-console` & `/query-console`)
 A read-only SQL inspection console allowing authorized staff (`ROLE_ADMIN`, `DATA_ANALYST`) to inspect database state securely:
 * **Strict Read-Only Whitelist**: Permits only `SELECT`, `SHOW`, `DESCRIBE`, `DESC`, and `EXPLAIN` statements.
