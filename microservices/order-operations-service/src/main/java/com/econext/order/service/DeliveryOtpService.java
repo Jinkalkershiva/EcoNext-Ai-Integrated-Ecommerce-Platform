@@ -145,17 +145,29 @@ public class DeliveryOtpService {
      * Generates and dispatches a secure 6-digit Delivery PIN / OTP for a shipment or order.
      * Guaranteed idempotent: Checks delivery:otp:sent:{orderId} before dispatching email.
      */
-    @Transactional
     public DeliveryOtpResponse generateAndSendOtp(Long shipmentId, Long staffId, String staffUsername) {
+        return generateAndSendOtp(shipmentId, null, staffId, staffUsername);
+    }
+
+    @Transactional
+    public DeliveryOtpResponse generateAndSendOtp(Long shipmentId, Long targetOrderId, Long staffId, String staffUsername) {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
         OperationalOrder order = null;
-        if (shipment.getOrderId() != null) {
+        if (targetOrderId != null) {
+            order = orderRepository.findById(targetOrderId)
+                    .or(() -> orderRepository.findByDjangoOrderId(targetOrderId))
+                    .orElse(null);
+        }
+        if (order == null && shipment.getOrderId() != null) {
             order = orderRepository.findById(shipment.getOrderId()).orElse(null);
         }
         if (order == null && shipment.getAssignedOrders() != null && !shipment.getAssignedOrders().isEmpty()) {
-            order = shipment.getAssignedOrders().get(0);
+            order = shipment.getAssignedOrders().stream()
+                    .filter(o -> o.getCurrentStatus() != OrderStatus.DELIVERED)
+                    .findFirst()
+                    .orElse(shipment.getAssignedOrders().get(0));
         }
 
         if (order == null) {
@@ -186,6 +198,7 @@ public class DeliveryOtpService {
                         .status(order.getCurrentStatus().name())
                         .expiresInSeconds((int) existingEntry.getRemainingSeconds())
                         .message("Active Delivery PIN already sent. Please enter PIN or wait for code to expire.")
+                        .plainOtpForDev(existingEntry.getPlainOtpForDev())
                         .verified(false)
                         .generatedAt(existingEntry.getGeneratedAt())
                         .build();
@@ -237,6 +250,7 @@ public class DeliveryOtpService {
                 .status(order.getCurrentStatus().name())
                 .expiresInSeconds(OTP_TTL_SECONDS)
                 .message("Secure 6-digit Delivery PIN dispatched to customer email.")
+                .plainOtpForDev(otp)
                 .verified(false)
                 .generatedAt(LocalDateTime.now())
                 .build();
@@ -245,8 +259,12 @@ public class DeliveryOtpService {
     /**
      * Verifies the submitted Delivery PIN / OTP and transitions shipment and order to DELIVERED.
      */
-    @Transactional
     public DeliveryOtpResponse verifyDeliveryOtp(Long shipmentId, String rawOtp, Long staffId, String staffUsername) {
+        return verifyDeliveryOtp(shipmentId, null, rawOtp, staffId, staffUsername);
+    }
+
+    @Transactional
+    public DeliveryOtpResponse verifyDeliveryOtp(Long shipmentId, Long targetOrderId, String rawOtp, Long staffId, String staffUsername) {
         if (rawOtp == null || rawOtp.trim().isEmpty()) {
             throw new BadRequestException("Delivery OTP is required.");
         }
@@ -257,11 +275,19 @@ public class DeliveryOtpService {
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
         OperationalOrder order = null;
-        if (shipment.getOrderId() != null) {
+        if (targetOrderId != null) {
+            order = orderRepository.findById(targetOrderId)
+                    .or(() -> orderRepository.findByDjangoOrderId(targetOrderId))
+                    .orElse(null);
+        }
+        if (order == null && shipment.getOrderId() != null) {
             order = orderRepository.findById(shipment.getOrderId()).orElse(null);
         }
         if (order == null && shipment.getAssignedOrders() != null && !shipment.getAssignedOrders().isEmpty()) {
-            order = shipment.getAssignedOrders().get(0);
+            order = shipment.getAssignedOrders().stream()
+                    .filter(o -> o.getCurrentStatus() != OrderStatus.DELIVERED)
+                    .findFirst()
+                    .orElse(shipment.getAssignedOrders().get(0));
         }
 
         if (order == null) {
@@ -377,11 +403,26 @@ public class DeliveryOtpService {
         if (orderId != null) {
             entry = retrieveOtpEntryByOrderId(orderId);
         }
+        if (entry == null && shipment.getAssignedOrders() != null) {
+            for (OperationalOrder o : shipment.getAssignedOrders()) {
+                if (o.getCurrentStatus() != OrderStatus.DELIVERED) {
+                    entry = retrieveOtpEntryByOrderId(o.getId());
+                    if (entry != null) {
+                        orderId = o.getId();
+                        break;
+                    }
+                }
+            }
+        }
         if (entry == null) {
             entry = retrieveOtpEntryByShipmentId(shipmentId);
         }
 
         OperationalOrder order = orderId != null ? orderRepository.findById(orderId).orElse(null) : null;
+        if (order == null && entry != null && entry.getOrderId() != null) {
+            order = orderRepository.findById(entry.getOrderId()).orElse(null);
+            orderId = entry.getOrderId();
+        }
 
         if (entry == null || entry.isExpired()) {
             return DeliveryOtpResponse.builder()
@@ -410,6 +451,7 @@ public class DeliveryOtpService {
                 .status(shipment.getStatus().name())
                 .expiresInSeconds((int) entry.getRemainingSeconds())
                 .message("Active Delivery PIN pending verification. Remaining time: " + entry.getRemainingSeconds() + "s")
+                .plainOtpForDev(entry.getPlainOtpForDev())
                 .verified(false)
                 .generatedAt(entry.getGeneratedAt())
                 .build();

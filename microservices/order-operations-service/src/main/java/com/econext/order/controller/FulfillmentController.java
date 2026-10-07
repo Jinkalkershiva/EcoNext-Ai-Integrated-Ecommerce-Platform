@@ -262,7 +262,7 @@ public class FulfillmentController {
 
         Long staffId = principal != null ? principal.getId() : null;
         String staffUsername = principal != null ? principal.getUsername() : "SYSTEM";
-        DeliveryOtpResponse response = deliveryOtpService.generateAndSendOtp(target.getId(), staffId, staffUsername);
+        DeliveryOtpResponse response = deliveryOtpService.generateAndSendOtp(target.getId(), orderId, staffId, staffUsername);
         return ResponseEntity.ok(ApiResponse.ok("Delivery PIN generated and dispatched successfully", response));
     }
 
@@ -287,7 +287,7 @@ public class FulfillmentController {
         Long staffId = principal != null ? principal.getId() : (request != null ? request.getDeliveryStaffId() : null);
         String staffUsername = principal != null ? principal.getUsername() : (request != null && request.getDeliveryStaffUsername() != null ? request.getDeliveryStaffUsername() : "DELIVERY_AGENT");
 
-        DeliveryOtpResponse response = deliveryOtpService.verifyDeliveryOtp(target.getId(), rawOtp, staffId, staffUsername);
+        DeliveryOtpResponse response = deliveryOtpService.verifyDeliveryOtp(target.getId(), orderId, rawOtp, staffId, staffUsername);
         return ResponseEntity.ok(ApiResponse.ok(response.getMessage(), response));
     }
 

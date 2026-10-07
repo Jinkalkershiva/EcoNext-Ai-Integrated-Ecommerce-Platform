@@ -59,7 +59,9 @@ export async function apiRequest(endpoint, options = {}) {
   try {
     response = await fetch(fullUrl, config);
   } catch (err) {
-    throw new Error('Unable to connect to the authentication service. Please verify backend services are active.');
+    throw new Error(endpoint.includes('/auth')
+      ? 'Unable to connect to the authentication service. Please verify backend services are active.'
+      : 'Unable to connect to backend services. Please verify backend services are active.');
   }
 
   if (response.status === 401 && auth) {
@@ -87,12 +89,14 @@ export async function apiRequest(endpoint, options = {}) {
       }
     } else if (response.status === 403) {
       errorMsg = data?.message || 'Your account does not have authorization to access this portal.';
-    } else if (response.status >= 500) {
-      errorMsg = 'Authentication service is temporarily unavailable.';
     } else if (data?.message) {
       errorMsg = data.message;
     } else if (typeof data?.error === 'string') {
       errorMsg = data.error;
+    } else if (response.status >= 500) {
+      errorMsg = endpoint.includes('/auth')
+        ? 'Authentication service is temporarily unavailable.'
+        : 'Internal server error occurred. Please try again later.';
     } else {
       errorMsg = `Request failed with status ${response.status}`;
     }

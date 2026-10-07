@@ -330,7 +330,17 @@ public class ShipmentService {
 
         OperationalOrder order = orderRepository.findById(request.getOrderId())
                 .or(() -> orderRepository.findByDjangoOrderId(request.getOrderId()))
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + request.getOrderId()));
+                .orElseGet(() -> {
+                    OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(request.getOrderId());
+                    if (fetched != null) {
+                        return orderRepository.save(fetched);
+                    }
+                    return null;
+                });
+
+        if (order == null) {
+            throw new ResourceNotFoundException("Order not found with ID: " + request.getOrderId());
+        }
 
         if (order.getShipment() != null && order.getShipment().getId().equals(shipmentId)) {
             return mapToResponse(shipment);
@@ -349,6 +359,15 @@ public class ShipmentService {
         }
         if (shipment.getRemainingVolume().compareTo(orderVolume) < 0) {
             throw new BadRequestException("Capacity Exceeded: Order volume (" + orderVolume + " m3) exceeds remaining shipment capacity (" + shipment.getRemainingVolume() + " m3).");
+        }
+        if (shipment.getContainer() != null) {
+            Container c = shipment.getContainer();
+            if (c.getRemainingWeightKg().compareTo(orderWeight) < 0) {
+                throw new BadRequestException("Truck capacity exceeded: Order weight (" + orderWeight + " kg) exceeds truck remaining capacity (" + c.getRemainingWeightKg() + " kg).");
+            }
+            if (c.getRemainingVolumeM3().compareTo(orderVolume) < 0) {
+                throw new BadRequestException("Truck capacity exceeded: Order volume (" + orderVolume + " m3) exceeds truck remaining volume (" + c.getRemainingVolumeM3() + " m3).");
+            }
         }
 
         // 2. Route Compatibility Validation
@@ -401,6 +420,28 @@ public class ShipmentService {
         }
         if (!shipment.getAssignedOrders().contains(order)) {
             shipment.getAssignedOrders().add(order);
+        }
+
+        if (order.getItems() != null && !order.getItems().isEmpty()) {
+            if (shipment.getItems() == null) {
+                shipment.setItems(new ArrayList<>());
+            }
+            for (OperationalOrderItem it : order.getItems()) {
+                shipment.getItems().add(ShipmentItem.builder()
+                        .shipment(shipment)
+                        .orderItemId(it.getId())
+                        .productId(it.getProductId())
+                        .productName(it.getProductName())
+                        .quantity(it.getQuantity() != null ? it.getQuantity() : 1)
+                        .build());
+            }
+        }
+
+        if (shipment.getContainer() != null) {
+            Container c = shipment.getContainer();
+            c.setUsedWeightKg(c.getUsedWeightKg().add(orderWeight));
+            c.setUsedVolumeM3(c.getUsedVolumeM3().add(orderVolume));
+            containerRepository.save(c);
         }
 
         OrderStatus prevStatus = order.getCurrentStatus();
@@ -592,7 +633,13 @@ public class ShipmentService {
             for (Long oId : orderIds) {
                 OperationalOrder o = orderRepository.findById(oId)
                         .or(() -> orderRepository.findByDjangoOrderId(oId))
-                        .orElse(null);
+                        .orElseGet(() -> {
+                            OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(oId);
+                            if (fetched != null) {
+                                return orderRepository.save(fetched);
+                            }
+                            return null;
+                        });
                 if (o != null) {
                     orders.add(o);
                     totalOrderWeight = totalOrderWeight.add(o.resolveWeight());
@@ -685,6 +732,10 @@ public class ShipmentService {
         }
 
         if (driver != null) {
+            if (driver.getStatus() != DriverStatus.AVAILABLE && (driver.getAssignedShipmentId() == null || !driver.getAssignedShipmentId().equals(shipment.getId()))) {
+                throw new BadRequestException("Driver [" + driver.getName() + " (" + driver.getDriverCode() + ")] is currently " + driver.getStatus() + " and cannot be assigned to another active shipment.");
+            }
+
             // Enforce Warehouse Driver Isolation
             String shipmentWh = shipment.getWarehouse() != null && !shipment.getWarehouse().isBlank()
                     ? shipment.getWarehouse().trim().toLowerCase()
@@ -714,6 +765,10 @@ public class ShipmentService {
         }
 
         if (container != null) {
+            if (!container.canAcceptShipments()) {
+                throw new BadRequestException("Truck/Container [" + container.getContainerCode() + "] is in status " + container.getStatus() + " and cannot accept shipments.");
+            }
+
             // Enforce Warehouse Container Isolation
             String shipmentWh = shipment.getWarehouse() != null && !shipment.getWarehouse().isBlank()
                     ? shipment.getWarehouse().trim().toLowerCase()
