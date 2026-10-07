@@ -78,8 +78,9 @@ export const LoginPage = ({ onLoginSuccess, onSwitchPage }) => {
             </div>
           </div>
 
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            🌱 Over 50,000 conscious consumers shopping sustainably.
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <Leaf size={14} aria-hidden="true" style={{ color: 'var(--color-primary)' }} />
+            <span>Over 50,000 conscious consumers shopping sustainably.</span>
           </div>
         </div>
 

@@ -100,18 +100,33 @@ const safeStorage = {
 
 export const tokenStore = {
   getAccess() {
-    return safeStorage.get(ACCESS_TOKEN_KEY);
+    return (
+      safeStorage.get(ACCESS_TOKEN_KEY) ||
+      safeStorage.get('access') ||
+      safeStorage.get('accessToken') ||
+      safeStorage.get('token')
+    );
   },
 
   getRefresh() {
-    return safeStorage.get(REFRESH_TOKEN_KEY);
+    return (
+      safeStorage.get(REFRESH_TOKEN_KEY) ||
+      safeStorage.get('refresh') ||
+      safeStorage.get('refreshToken')
+    );
   },
 
-  /** Accepts the backend's `{ access, refresh }` token object. */
+  /** Accepts the backend's `{ access, refresh }` token object or string. */
   set(tokens) {
     if (!tokens) return;
-    if (tokens.access) safeStorage.set(ACCESS_TOKEN_KEY, tokens.access);
-    if (tokens.refresh) safeStorage.set(REFRESH_TOKEN_KEY, tokens.refresh);
+    if (typeof tokens === 'string') {
+      safeStorage.set(ACCESS_TOKEN_KEY, tokens);
+      return;
+    }
+    const access = tokens.access || tokens.accessToken || tokens.access_token || tokens.token;
+    const refresh = tokens.refresh || tokens.refreshToken || tokens.refresh_token;
+    if (access) safeStorage.set(ACCESS_TOKEN_KEY, access);
+    if (refresh) safeStorage.set(REFRESH_TOKEN_KEY, refresh);
   },
 
   getUser() {
@@ -135,6 +150,11 @@ export const tokenStore = {
     safeStorage.remove(ACCESS_TOKEN_KEY);
     safeStorage.remove(REFRESH_TOKEN_KEY);
     safeStorage.remove(USER_KEY);
+    safeStorage.remove('access');
+    safeStorage.remove('accessToken');
+    safeStorage.remove('token');
+    safeStorage.remove('refresh');
+    safeStorage.remove('refreshToken');
   },
 
   isAuthenticated() {
@@ -545,18 +565,19 @@ export const apiService = {
   },
 
   // ---------- Cart ----------
-  // The trailing authToken arguments are vestigial: the token now comes from
-  // tokenStore. They are kept so older call sites still compile.
-
   getCart() {
     return request('/cart/', { auth: true });
   },
 
-  addToCart(productId, quantity = 1) {
+  addToCart(productId, quantity = 1, variantId = null) {
     return request('/cart/add/', {
       method: 'POST',
       auth: true,
-      body: { product_id: productId, quantity },
+      body: {
+        product_id: productId,
+        quantity,
+        variant_id: variantId || undefined,
+      },
     });
   },
 
@@ -576,13 +597,132 @@ export const apiService = {
     return request('/cart/clear/', { method: 'DELETE', auth: true });
   },
 
+  // ---------- Saved Delivery Addresses ----------
+
+  getSavedAddresses() {
+    return request('/auth/addresses/', { auth: true });
+  },
+
+  getUserAddresses() {
+    return this.getSavedAddresses();
+  },
+
+  saveAddress(addressData) {
+    return request('/auth/addresses/', {
+      method: 'POST',
+      auth: true,
+      body: addressData,
+    });
+  },
+
+  createUserAddress(addressData) {
+    return this.saveAddress(addressData);
+  },
+
+  updateAddress(addressId, addressData) {
+    return request(`/auth/addresses/${addressId}/`, {
+      method: 'PATCH',
+      auth: true,
+      body: addressData,
+    });
+  },
+
+  updateUserAddress(addressId, addressData) {
+    return this.updateAddress(addressId, addressData);
+  },
+
+  deleteAddress(addressId) {
+    return request(`/auth/addresses/${addressId}/`, {
+      method: 'DELETE',
+      auth: true,
+    });
+  },
+
+  deleteUserAddress(addressId) {
+    return this.deleteAddress(addressId);
+  },
+
+  setDefaultAddress(addressId) {
+    return request(`/auth/addresses/${addressId}/set-default/`, {
+      method: 'POST',
+      auth: true,
+    });
+  },
+
+  // ---------- Product Reviews & Variants ----------
+
+  getProductReviews(productId, page = 1, pageSize = 2) {
+    return request(`/products/${productId}/reviews/?page=${page}&page_size=${pageSize}`);
+  },
+
+  submitProductReview(productId, reviewData, imageFiles = []) {
+    if (reviewData instanceof FormData) {
+      return request(`/products/${productId}/reviews/`, {
+        method: 'POST',
+        auth: true,
+        body: reviewData,
+      });
+    }
+
+    if (imageFiles && imageFiles.length > 0) {
+      const formData = new FormData();
+      formData.append('rating', reviewData.rating || 5);
+      if (reviewData.title) formData.append('title', reviewData.title);
+      formData.append('comment', reviewData.comment || reviewData.review_text || '');
+      imageFiles.forEach((file) => {
+        formData.append('images', file);
+      });
+      return request(`/products/${productId}/reviews/`, {
+        method: 'POST',
+        auth: true,
+        body: formData,
+      });
+    }
+
+    return request(`/products/${productId}/reviews/`, {
+      method: 'POST',
+      auth: true,
+      body: reviewData,
+    });
+  },
+
+  markReviewHelpful(reviewId) {
+    return request(`/products/reviews/${reviewId}/helpful/`, {
+      method: 'POST',
+    });
+  },
+
+  getProductVariants(productId) {
+    return request(`/products/${productId}/variants/`);
+  },
+
+  getProductInquiries(productId) {
+    return request(`/products/${productId}/inquiries/`, { auth: true });
+  },
+
+  sendProductInquiry(productId, message) {
+    return request(`/products/${productId}/inquiries/`, {
+      method: 'POST',
+      auth: true,
+      body: { message },
+    });
+  },
+
   // ---------- Orders ----------
 
-  createOrder(shippingData) {
+  createOrder(shippingData, cartItems = null) {
+    const payload = { shipping: shippingData };
+    if (cartItems && Array.isArray(cartItems)) {
+      payload.items = cartItems.map((item) => ({
+        product_id: item.id || item.productId,
+        variant_id: item.variant?.id || item.variant_id,
+        quantity: item.quantity,
+      }));
+    }
     return request('/orders/create/', {
       method: 'POST',
       auth: true,
-      body: { shipping: shippingData },
+      body: payload,
     });
   },
 
@@ -592,6 +732,34 @@ export const apiService = {
 
   getOrderDetail(orderId) {
     return request(`/orders/${orderId}/`, { auth: true });
+  },
+
+  getOrder(orderId) {
+    return this.getOrderDetail(orderId);
+  },
+
+  getOrderShipments(orderId) {
+    return request(`/order-ops/orders/${orderId}/shipments`, { auth: true }).catch(() => ({ data: [] }));
+  },
+
+  cancelOrder(orderId, reason = '') {
+    return request(`/orders/${orderId}/cancel/`, {
+      method: 'POST',
+      auth: true,
+      body: { reason },
+    });
+  },
+
+  requestOrderReturn(orderId, returnData) {
+    return request(`/orders/${orderId}/returns/`, {
+      method: 'POST',
+      auth: true,
+      body: { order_id: orderId, ...returnData },
+    });
+  },
+
+  getOrderReturns(orderId) {
+    return request(`/orders/${orderId}/returns/`, { auth: true });
   },
 
   // ---------- Delivery OTP & Live Logistics Tracking ----------
@@ -642,6 +810,10 @@ export const apiService = {
 
   sendChatMessage(message, history = []) {
     return request('/chat/', { method: 'POST', body: { message, history } });
+  },
+
+  aiChat(message, history = []) {
+    return request('/ai/chat/', { method: 'POST', body: { message, history } });
   },
 
   // ---------- Admin Panel (RBAC Protected) ----------
@@ -751,11 +923,18 @@ export const apiService = {
         body: paymentData,
       });
     } catch (err) {
-      return await request(`${PAYMENT_API_BASE}/create-order`, {
-        method: 'POST',
-        auth: true,
-        body: paymentData,
-      });
+      if (err.status === 0) {
+        try {
+          return await request(`${PAYMENT_API_BASE}/create-order`, {
+            method: 'POST',
+            auth: true,
+            body: paymentData,
+          });
+        } catch {
+          throw err;
+        }
+      }
+      throw err;
     }
   },
 
@@ -767,11 +946,18 @@ export const apiService = {
         body: verificationData,
       });
     } catch (err) {
-      return await request(`${PAYMENT_API_BASE}/verify`, {
-        method: 'POST',
-        auth: true,
-        body: verificationData,
-      });
+      if (err.status === 0) {
+        try {
+          return await request(`${PAYMENT_API_BASE}/verify`, {
+            method: 'POST',
+            auth: true,
+            body: verificationData,
+          });
+        } catch {
+          throw err;
+        }
+      }
+      throw err;
     }
   },
 

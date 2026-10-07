@@ -53,43 +53,68 @@ public class FulfillmentKafkaConsumer {
             }
 
             Long shipmentId = ((Number) shipmentIdObj).longValue();
-            Long orderId = ((Number) orderIdObj).longValue();
-            String shipmentNumber = (String) payload.getOrDefault("shipmentNumber", "SHP-" + orderId + "-" + shipmentId);
+            String shipmentNumber = (String) payload.getOrDefault("shipmentNumber", "SHP-" + shipmentId);
             String carrierName = (String) payload.getOrDefault("carrierName", "EcoExpress Carbon-Neutral");
             String trackingNumber = (String) payload.getOrDefault("trackingNumber", "");
 
-            // 1. Map Shipment status to Order status automatically:
-            // CREATED -> ORDER_CONFIRMED
-            // PACKED -> PACKED
-            // DISPATCHED -> SHIPPED
-            // IN_TRANSIT -> IN_TRANSIT
-            // ARRIVED_AT_HUB -> IN_TRANSIT
-            // OUT_FOR_DELIVERY -> OUT_FOR_DELIVERY
-            // DELIVERED -> DELIVERED
-            OrderStatus targetOrderStatus = mapShipmentStatusToOrderStatus(status);
-
-            if (targetOrderStatus != null) {
-                syncOrderStatusFromEvent(orderId, targetOrderStatus, status, carrierName, trackingNumber);
+            // Collect all order IDs for this shipment
+            java.util.Set<Long> allOrderIds = new java.util.LinkedHashSet<>();
+            if (orderIdObj != null) {
+                allOrderIds.add(((Number) orderIdObj).longValue());
+            }
+            if (payload.get("orderIds") instanceof java.util.Collection<?> col) {
+                for (Object item : col) {
+                    if (item instanceof Number num) {
+                        allOrderIds.add(num.longValue());
+                    }
+                }
+            }
+            if (allOrderIds.isEmpty()) {
+                // Look up in database
+                orderRepository.findByShipmentId(shipmentId).forEach(o -> {
+                    allOrderIds.add(o.getId());
+                    if (o.getDjangoOrderId() != null) allOrderIds.add(o.getDjangoOrderId());
+                });
             }
 
-            // 2. Broadcast real-time STOMP messages
-            ShipmentStatusWsMessage wsMessage = ShipmentStatusWsMessage.builder()
+            OrderStatus targetOrderStatus = mapShipmentStatusToOrderStatus(status);
+
+            for (Long oId : allOrderIds) {
+                if (targetOrderStatus != null) {
+                    syncOrderStatusFromEvent(oId, targetOrderStatus, status, carrierName, trackingNumber);
+                }
+
+                ShipmentStatusWsMessage wsMessage = ShipmentStatusWsMessage.builder()
+                        .eventType("SHIPMENT_STATUS_UPDATED")
+                        .shipmentId(shipmentId)
+                        .shipmentNumber(shipmentNumber)
+                        .orderId(oId)
+                        .status(status)
+                        .carrierName(carrierName)
+                        .trackingNumber(trackingNumber)
+                        .timestamp(LocalDateTime.now())
+                        .build();
+
+                messagingTemplate.convertAndSend("/topic/orders/" + oId, wsMessage);
+            }
+
+            // Broadcast real-time STOMP messages for shipment and fulfillment dashboards
+            ShipmentStatusWsMessage generalWsMessage = ShipmentStatusWsMessage.builder()
                     .eventType("SHIPMENT_STATUS_UPDATED")
                     .shipmentId(shipmentId)
                     .shipmentNumber(shipmentNumber)
-                    .orderId(orderId)
+                    .orderId(orderIdObj != null ? ((Number) orderIdObj).longValue() : null)
                     .status(status)
                     .carrierName(carrierName)
                     .trackingNumber(trackingNumber)
                     .timestamp(LocalDateTime.now())
                     .build();
 
-            messagingTemplate.convertAndSend("/topic/shipments/" + shipmentId, wsMessage);
-            messagingTemplate.convertAndSend("/topic/orders/" + orderId, wsMessage);
-            messagingTemplate.convertAndSend("/topic/fulfillment/activity", wsMessage);
-            messagingTemplate.convertAndSend("/topic/fulfillment/analytics", wsMessage);
+            messagingTemplate.convertAndSend("/topic/shipments/" + shipmentId, generalWsMessage);
+            messagingTemplate.convertAndSend("/topic/fulfillment/activity", generalWsMessage);
+            messagingTemplate.convertAndSend("/topic/fulfillment/analytics", generalWsMessage);
 
-            log.info("Broadcasted shipment status update via STOMP to /topic/shipments/{}, /topic/orders/{} and fulfillment analytics", shipmentId, orderId);
+            log.info("Broadcasted shipment status update via STOMP to /topic/shipments/{}, {} orders and fulfillment analytics", shipmentId, allOrderIds.size());
         } catch (Exception ex) {
             log.error("Failed to process and broadcast shipment status event from Kafka: {}", ex.getMessage(), ex);
         }
@@ -110,7 +135,8 @@ public class FulfillmentKafkaConsumer {
             case "OUT_FOR_DELIVERY":
                 return OrderStatus.OUT_FOR_DELIVERY;
             case "DELIVERED":
-                return OrderStatus.DELIVERED;
+                // Individual order delivery is strictly gated by DeliveryOtpService verification with audit record
+                return null;
             case "CANCELLED":
                 return OrderStatus.CANCELLED;
             default:
@@ -179,7 +205,6 @@ public class FulfillmentKafkaConsumer {
             }
 
             Long shipmentId = ((Number) shipmentIdObj).longValue();
-            Long orderId = orderIdObj != null ? ((Number) orderIdObj).longValue() : null;
             BigDecimal latitude = new BigDecimal(String.valueOf(latObj));
             BigDecimal longitude = new BigDecimal(String.valueOf(lonObj));
             String shipmentNumber = (String) payload.getOrDefault("shipmentNumber", "SHP-" + shipmentId);
@@ -189,11 +214,47 @@ public class FulfillmentKafkaConsumer {
             String vehicleNumber = (String) payload.getOrDefault("vehicleNumber", "");
             String note = (String) payload.getOrDefault("note", "");
 
+            java.util.Set<Long> allOrderIds = new java.util.LinkedHashSet<>();
+            if (orderIdObj != null) {
+                allOrderIds.add(((Number) orderIdObj).longValue());
+            }
+            if (payload.get("orderIds") instanceof java.util.Collection<?> col) {
+                for (Object item : col) {
+                    if (item instanceof Number num) {
+                        allOrderIds.add(num.longValue());
+                    }
+                }
+            }
+            if (allOrderIds.isEmpty()) {
+                orderRepository.findByShipmentId(shipmentId).forEach(o -> {
+                    allOrderIds.add(o.getId());
+                    if (o.getDjangoOrderId() != null) allOrderIds.add(o.getDjangoOrderId());
+                });
+            }
+
+            for (Long oId : allOrderIds) {
+                ShipmentLocationWsMessage orderWsMessage = ShipmentLocationWsMessage.builder()
+                        .eventType("SHIPMENT_LOCATION_UPDATED")
+                        .shipmentId(shipmentId)
+                        .shipmentNumber(shipmentNumber)
+                        .orderId(oId)
+                        .latitude(latitude)
+                        .longitude(longitude)
+                        .locationName(locationName)
+                        .status(status)
+                        .trackingNumber(trackingNumber)
+                        .vehicleNumber(vehicleNumber)
+                        .note(note)
+                        .timestamp(LocalDateTime.now())
+                        .build();
+                messagingTemplate.convertAndSend("/topic/orders/" + oId, orderWsMessage);
+            }
+
             ShipmentLocationWsMessage wsMessage = ShipmentLocationWsMessage.builder()
                     .eventType("SHIPMENT_LOCATION_UPDATED")
                     .shipmentId(shipmentId)
                     .shipmentNumber(shipmentNumber)
-                    .orderId(orderId)
+                    .orderId(orderIdObj != null ? ((Number) orderIdObj).longValue() : null)
                     .latitude(latitude)
                     .longitude(longitude)
                     .locationName(locationName)
@@ -205,13 +266,10 @@ public class FulfillmentKafkaConsumer {
                     .build();
 
             messagingTemplate.convertAndSend("/topic/shipments/" + shipmentId, wsMessage);
-            if (orderId != null) {
-                messagingTemplate.convertAndSend("/topic/orders/" + orderId, wsMessage);
-            }
             messagingTemplate.convertAndSend("/topic/fulfillment/activity", wsMessage);
             messagingTemplate.convertAndSend("/topic/fulfillment/analytics", wsMessage);
 
-            log.info("Broadcasted shipment GPS location via STOMP: shipmentId={}, lat={}, lon={}", shipmentId, latitude, longitude);
+            log.info("Broadcasted shipment GPS location via STOMP: shipmentId={}, lat={}, lon={}, ordersCount={}", shipmentId, latitude, longitude, allOrderIds.size());
         } catch (Exception ex) {
             log.error("Failed to process and broadcast shipment location event from Kafka: {}", ex.getMessage(), ex);
         }
@@ -251,6 +309,121 @@ public class FulfillmentKafkaConsumer {
             log.info("Broadcasted container status update via STOMP: containerId={}, code={}, status={}", containerId, containerCode, status);
         } catch (Exception ex) {
             log.error("Failed to process container status event from Kafka: {}", ex.getMessage(), ex);
+        }
+    }
+
+    @Transactional
+    @KafkaListener(topics = FulfillmentEventProducer.TOPIC_ORDER_EVENTS, groupId = "${spring.kafka.consumer.group-id:order-ops-tracking-group}")
+    public void handleOrderEvent(Map<String, Object> payload) {
+        try {
+            log.info("Received order event from Kafka: {}", payload);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = payload;
+            if (payload.containsKey("data") && payload.get("data") instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> innerData = (Map<String, Object>) payload.get("data");
+                data = innerData;
+            }
+
+            Object orderIdObj = data.get("orderId") != null ? data.get("orderId") : (data.get("order_id") != null ? data.get("order_id") : data.get("id"));
+            if (orderIdObj == null) {
+                log.warn("Malformed order event payload (missing order ID): {}", payload);
+                return;
+            }
+
+            Long orderId = ((Number) orderIdObj).longValue();
+            String statusStr = (String) (data.get("status") != null ? data.get("status") : data.get("canonical_status"));
+            OrderStatus targetStatus = OrderStatus.ORDER_CONFIRMED;
+            if (statusStr != null) {
+                try {
+                    String norm = statusStr.toUpperCase().replace(" ", "_");
+                    if (norm.equals("PENDING") || norm.equals("ORDER_PLACED")) {
+                        targetStatus = OrderStatus.ORDER_PLACED;
+                    } else if (norm.equals("PAYMENT_CONFIRMED") || norm.equals("CONFIRMED") || norm.equals("ORDER_ACCEPTED")) {
+                        targetStatus = OrderStatus.ORDER_CONFIRMED;
+                    } else {
+                        targetStatus = OrderStatus.valueOf(norm);
+                    }
+                } catch (Exception e) {
+                    targetStatus = OrderStatus.ORDER_CONFIRMED;
+                }
+            }
+
+            // Check if OperationalOrder exists (idempotency check by djangoOrderId or id)
+            Optional<OperationalOrder> orderOpt = orderRepository.findByDjangoOrderId(orderId)
+                    .or(() -> orderRepository.findById(orderId));
+
+            OperationalOrder order;
+            if (orderOpt.isEmpty()) {
+                // Fetch full order entity with items and addresses from Django
+                OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(orderId);
+                if (fetched != null) {
+                    fetched.setCurrentStatus(targetStatus);
+                    order = orderRepository.save(fetched);
+                    log.info("Ingested and created OperationalOrder #{} (Django Order #{}) from Kafka order event with status {}",
+                            order.getId(), orderId, targetStatus);
+                } else {
+                    // Create minimal placeholder OperationalOrder if Django unreachable
+                    Object totalAmtObj = data.get("totalAmount") != null ? data.get("totalAmount") : data.get("total_amount");
+                    BigDecimal totalAmount = totalAmtObj != null ? new BigDecimal(String.valueOf(totalAmtObj)) : BigDecimal.ZERO;
+                    String userIdStr = String.valueOf(data.getOrDefault("userId", "1"));
+                    Long userId = 1L;
+                    try { userId = Long.parseLong(userIdStr); } catch (Exception ignored) {}
+
+                    order = OperationalOrder.builder()
+                            .customerId(userId)
+                            .customerUsername("CUSTOMER_" + userId)
+                            .customerEmail("customer" + userId + "@econext.org")
+                            .customerName("Valued Customer")
+                            .totalAmount(totalAmount)
+                            .currentStatus(targetStatus)
+                            .djangoOrderId(orderId)
+                            .build();
+                    order = orderRepository.save(order);
+                    log.info("Created placeholder OperationalOrder #{} from Kafka order event", order.getId());
+                }
+
+                // Record initial transition
+                OrderStatusTransition transition = OrderStatusTransition.builder()
+                        .orderId(order.getId())
+                        .fromStatus(OrderStatus.ORDER_PLACED)
+                        .toStatus(targetStatus)
+                        .reasonNote("Order received via Kafka order-events topic")
+                        .staffUsername("EVENT_BUS")
+                        .build();
+                transitionRepository.save(transition);
+            } else {
+                order = orderOpt.get();
+                OrderStatus prev = order.getCurrentStatus();
+                if (prev != targetStatus && prev != OrderStatus.DELIVERED && prev != OrderStatus.CANCELLED) {
+                    order.setCurrentStatus(targetStatus);
+                    order = orderRepository.save(order);
+
+                    OrderStatusTransition transition = OrderStatusTransition.builder()
+                            .orderId(order.getId())
+                            .fromStatus(prev)
+                            .toStatus(targetStatus)
+                            .reasonNote("Status updated via Kafka order-events topic")
+                            .staffUsername("EVENT_BUS")
+                            .build();
+                    transitionRepository.save(transition);
+                    log.info("Updated OperationalOrder #{} status from {} to {} via Kafka", order.getId(), prev, targetStatus);
+                }
+            }
+
+            // Broadcast live update to STOMP WebSocket
+            Map<String, Object> wsMsg = Map.of(
+                    "eventType", "ORDER_STATUS_UPDATED",
+                    "orderId", orderId,
+                    "operationalOrderId", order.getId(),
+                    "status", targetStatus.name(),
+                    "timestamp", LocalDateTime.now().toString()
+            );
+            messagingTemplate.convertAndSend("/topic/orders/" + orderId, wsMsg);
+            messagingTemplate.convertAndSend("/topic/fulfillment/activity", wsMsg);
+        } catch (Exception ex) {
+            log.error("Failed to process order event from Kafka: {}", ex.getMessage(), ex);
         }
     }
 }

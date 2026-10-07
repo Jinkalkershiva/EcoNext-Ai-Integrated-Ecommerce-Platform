@@ -2,12 +2,17 @@ package com.econext.order.service;
 
 import com.econext.order.dto.DeliveryOtpResponse;
 import com.econext.order.dto.ShipmentResponse;
+import com.econext.order.entity.DeliveryVerificationAudit;
 import com.econext.order.entity.OperationalOrder;
+import com.econext.order.entity.OrderStatus;
+import com.econext.order.entity.OrderStatusTransition;
 import com.econext.order.entity.Shipment;
 import com.econext.order.entity.ShipmentStatus;
 import com.econext.order.exception.GlobalExceptionHandler.BadRequestException;
 import com.econext.order.exception.GlobalExceptionHandler.ResourceNotFoundException;
+import com.econext.order.repository.DeliveryVerificationAuditRepository;
 import com.econext.order.repository.OperationalOrderRepository;
+import com.econext.order.repository.OrderStatusTransitionRepository;
 import com.econext.order.repository.ShipmentRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
@@ -48,6 +53,9 @@ public class DeliveryOtpService {
     private final OperationalOrderRepository orderRepository;
     private final EmailNotificationService emailNotificationService;
     private final ShipmentService shipmentService;
+    private final DeliveryVerificationAuditRepository deliveryVerificationAuditRepository;
+    private final OrderStatusTransitionRepository transitionRepository;
+    private final DjangoOrderSyncService djangoOrderSyncService;
 
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
@@ -61,12 +69,18 @@ public class DeliveryOtpService {
             ShipmentRepository shipmentRepository,
             OperationalOrderRepository orderRepository,
             EmailNotificationService emailNotificationService,
-            @Lazy ShipmentService shipmentService
+            @Lazy ShipmentService shipmentService,
+            DeliveryVerificationAuditRepository deliveryVerificationAuditRepository,
+            OrderStatusTransitionRepository transitionRepository,
+            DjangoOrderSyncService djangoOrderSyncService
     ) {
         this.shipmentRepository = shipmentRepository;
         this.orderRepository = orderRepository;
         this.emailNotificationService = emailNotificationService;
         this.shipmentService = shipmentService;
+        this.deliveryVerificationAuditRepository = deliveryVerificationAuditRepository;
+        this.transitionRepository = transitionRepository;
+        this.djangoOrderSyncService = djangoOrderSyncService;
     }
 
     @Data
@@ -128,7 +142,7 @@ public class DeliveryOtpService {
     }
 
     /**
-     * Generates and dispatches a secure 6-digit Delivery PIN / OTP for a shipment.
+     * Generates and dispatches a secure 6-digit Delivery PIN / OTP for a shipment or order.
      * Guaranteed idempotent: Checks delivery:otp:sent:{orderId} before dispatching email.
      */
     @Transactional
@@ -136,11 +150,20 @@ public class DeliveryOtpService {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
-        OperationalOrder order = orderRepository.findById(shipment.getOrderId())
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + shipment.getOrderId()));
+        OperationalOrder order = null;
+        if (shipment.getOrderId() != null) {
+            order = orderRepository.findById(shipment.getOrderId()).orElse(null);
+        }
+        if (order == null && shipment.getAssignedOrders() != null && !shipment.getAssignedOrders().isEmpty()) {
+            order = shipment.getAssignedOrders().get(0);
+        }
 
-        if (shipment.getStatus() == ShipmentStatus.DELIVERED) {
-            throw new BadRequestException("Shipment #" + shipment.getShipmentNumber() + " is already DELIVERED.");
+        if (order == null) {
+            throw new ResourceNotFoundException("No order associated with shipment #" + shipmentId);
+        }
+
+        if (order.getCurrentStatus() == OrderStatus.DELIVERED) {
+            throw new BadRequestException("Order #" + order.getId() + " is already DELIVERED.");
         }
 
         Long orderId = order.getId();
@@ -151,7 +174,7 @@ public class DeliveryOtpService {
         if (existingEntry != null && !existingEntry.isExpired()) {
             boolean alreadySent = checkSentFlag(orderId);
             if (alreadySent) {
-                log.info("Active Delivery OTP already dispatched for Order #{} (Shipment #{}). Skipping duplicate email notification.", orderRef, shipment.getShipmentNumber());
+                log.info("Active Delivery OTP already dispatched for Order #{} (Shipment #{}). Skipping duplicate notification.", orderRef, shipment.getShipmentNumber());
                 return DeliveryOtpResponse.builder()
                         .shipmentId(shipment.getId())
                         .orderId(order.getId())
@@ -160,9 +183,9 @@ public class DeliveryOtpService {
                         .customerPhone(order.getCustomerPhone())
                         .maskedEmail(EmailNotificationService.maskEmail(order.getCustomerEmail()))
                         .maskedPhone(EmailNotificationService.maskPhone(order.getCustomerPhone()))
-                        .status(shipment.getStatus().name())
+                        .status(order.getCurrentStatus().name())
                         .expiresInSeconds((int) existingEntry.getRemainingSeconds())
-                        .message("Existing Delivery OTP is active. Please enter OTP or wait before requesting a new code.")
+                        .message("Active Delivery PIN already sent. Please enter PIN or wait for code to expire.")
                         .verified(false)
                         .generatedAt(existingEntry.getGeneratedAt())
                         .build();
@@ -211,7 +234,7 @@ public class DeliveryOtpService {
                 .customerPhone(order.getCustomerPhone())
                 .maskedEmail(EmailNotificationService.maskEmail(order.getCustomerEmail()))
                 .maskedPhone(EmailNotificationService.maskPhone(order.getCustomerPhone()))
-                .status(shipment.getStatus().name())
+                .status(order.getCurrentStatus().name())
                 .expiresInSeconds(OTP_TTL_SECONDS)
                 .message("Secure 6-digit Delivery PIN dispatched to customer email.")
                 .verified(false)
@@ -233,7 +256,19 @@ public class DeliveryOtpService {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
-        Long orderId = shipment.getOrderId();
+        OperationalOrder order = null;
+        if (shipment.getOrderId() != null) {
+            order = orderRepository.findById(shipment.getOrderId()).orElse(null);
+        }
+        if (order == null && shipment.getAssignedOrders() != null && !shipment.getAssignedOrders().isEmpty()) {
+            order = shipment.getAssignedOrders().get(0);
+        }
+
+        if (order == null) {
+            throw new ResourceNotFoundException("No order found associated with shipment #" + shipmentId);
+        }
+
+        Long orderId = order.getId();
         OtpEntry entry = retrieveOtpEntryByOrderId(orderId);
         if (entry == null) {
             entry = retrieveOtpEntryByShipmentId(shipmentId);
@@ -267,28 +302,64 @@ public class DeliveryOtpService {
         // OTP is valid! Invalidate the OTP token immediately (prevent replay)
         clearOtpEntry(orderId, shipmentId);
 
-        // Transition Shipment status to DELIVERED
-        ShipmentResponse updatedShipment = shipmentService.updateShipmentStatus(
-                shipmentId,
-                ShipmentStatus.DELIVERED,
-                staffId,
-                staffUsername != null ? staffUsername : "DELIVERY_AGENT"
-        );
+        // Record Delivery Verification Audit
+        OrderStatus prevStatus = order.getCurrentStatus();
+        DeliveryVerificationAudit audit = DeliveryVerificationAudit.builder()
+                .orderId(order.getId())
+                .shipmentId(shipment.getId())
+                .customerId(order.getCustomerId())
+                .verifiedBy(staffUsername != null ? staffUsername : "DELIVERY_AGENT")
+                .verificationMethod("CUSTOMER_OTP_EMAIL")
+                .verificationTimestamp(LocalDateTime.now())
+                .previousOrderStatus(prevStatus != null ? prevStatus.name() : "OUT_FOR_DELIVERY")
+                .newOrderStatus(OrderStatus.DELIVERED.name())
+                .deliveryAttemptInfo("Verified via 6-digit cryptographic OTP by staff: " + (staffUsername != null ? staffUsername : "DELIVERY_AGENT"))
+                .build();
+        deliveryVerificationAuditRepository.save(audit);
 
-        log.info("Delivery OTP verified successfully for Shipment #{} (Order #{}). Status transitioned to DELIVERED.",
-                updatedShipment.getShipmentNumber(), updatedShipment.getOrderId());
+        // Transition Order to DELIVERED
+        order.setCurrentStatus(OrderStatus.DELIVERED);
+        order.setDeliveredAt(LocalDateTime.now());
+        orderRepository.save(order);
+
+        OrderStatusTransition transition = OrderStatusTransition.builder()
+                .orderId(order.getId())
+                .fromStatus(prevStatus)
+                .toStatus(OrderStatus.DELIVERED)
+                .reasonNote("Customer Delivery PIN verified successfully.")
+                .staffId(staffId)
+                .staffUsername(staffUsername != null ? staffUsername : "DELIVERY_AGENT")
+                .build();
+        transitionRepository.save(transition);
+
+        djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.DELIVERED);
+
+        // Check if all assigned orders in shipment are now delivered
+        boolean allDelivered = shipment.getAssignedOrders() == null || shipment.getAssignedOrders().isEmpty()
+                || shipment.getAssignedOrders().stream().allMatch(o -> o.getCurrentStatus() == OrderStatus.DELIVERED || o.getId().equals(orderId));
+
+        if (allDelivered) {
+            shipmentService.updateShipmentStatus(
+                    shipmentId,
+                    ShipmentStatus.DELIVERED,
+                    staffId,
+                    staffUsername != null ? staffUsername : "DELIVERY_AGENT"
+            );
+        }
+
+        log.info("Delivery OTP verified successfully for Order #{} on Shipment #{}.", order.getId(), shipment.getShipmentNumber());
 
         return DeliveryOtpResponse.builder()
-                .shipmentId(updatedShipment.getId())
-                .orderId(updatedShipment.getOrderId())
-                .shipmentNumber(updatedShipment.getShipmentNumber())
+                .shipmentId(shipment.getId())
+                .orderId(order.getId())
+                .shipmentNumber(shipment.getShipmentNumber())
                 .customerEmail(entry.getCustomerEmail())
                 .customerPhone(entry.getCustomerPhone())
                 .maskedEmail(EmailNotificationService.maskEmail(entry.getCustomerEmail()))
                 .maskedPhone(EmailNotificationService.maskPhone(entry.getCustomerPhone()))
-                .status(ShipmentStatus.DELIVERED.name())
+                .status(OrderStatus.DELIVERED.name())
                 .expiresInSeconds(0)
-                .message("Delivery verification successful! Shipment #" + updatedShipment.getShipmentNumber() + " marked DELIVERED.")
+                .message("Delivery verification successful! Order #" + order.getId() + " marked DELIVERED.")
                 .verified(true)
                 .generatedAt(LocalDateTime.now())
                 .build();
@@ -302,12 +373,15 @@ public class DeliveryOtpService {
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
         Long orderId = shipment.getOrderId();
-        OtpEntry entry = retrieveOtpEntryByOrderId(orderId);
+        OtpEntry entry = null;
+        if (orderId != null) {
+            entry = retrieveOtpEntryByOrderId(orderId);
+        }
         if (entry == null) {
             entry = retrieveOtpEntryByShipmentId(shipmentId);
         }
 
-        OperationalOrder order = orderRepository.findById(orderId).orElse(null);
+        OperationalOrder order = orderId != null ? orderRepository.findById(orderId).orElse(null) : null;
 
         if (entry == null || entry.isExpired()) {
             return DeliveryOtpResponse.builder()

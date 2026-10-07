@@ -1,13 +1,10 @@
 package com.econext.order.service;
 
 import com.econext.order.dto.*;
-import com.econext.order.entity.OperationalOrder;
-import com.econext.order.entity.OrderStatus;
-import com.econext.order.entity.OrderStatusTransition;
+import com.econext.order.entity.*;
 import com.econext.order.exception.GlobalExceptionHandler.BadRequestException;
 import com.econext.order.exception.GlobalExceptionHandler.ResourceNotFoundException;
-import com.econext.order.repository.OperationalOrderRepository;
-import com.econext.order.repository.OrderStatusTransitionRepository;
+import com.econext.order.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -27,20 +24,36 @@ public class OperationalOrderService {
 
     private final OperationalOrderRepository orderRepository;
     private final OrderStatusTransitionRepository transitionRepository;
+    private final OrderReturnRequestRepository returnRequestRepository;
+    private final DeliveryVerificationAuditRepository deliveryVerificationAuditRepository;
     private final DjangoOrderSyncService djangoOrderSyncService;
 
-    // Valid state transitions graph
+    // Comprehensive canonical lifecycle transitions graph
     private static final Map<OrderStatus, Set<OrderStatus>> VALID_TRANSITIONS = Map.ofEntries(
-            Map.entry(OrderStatus.ORDER_PLACED, Set.of(OrderStatus.ORDER_CONFIRMED, OrderStatus.CANCELLED)),
-            Map.entry(OrderStatus.ORDER_CONFIRMED, Set.of(OrderStatus.PROCESSING, OrderStatus.CANCELLED)),
-            Map.entry(OrderStatus.PROCESSING, Set.of(OrderStatus.PACKED, OrderStatus.CANCELLED)),
-            Map.entry(OrderStatus.PACKED, Set.of(OrderStatus.SHIPPED, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.ORDER_PLACED, Set.of(OrderStatus.ORDER_CONFIRMED, OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.ORDER_CONFIRMED, Set.of(OrderStatus.PROCESSING, OrderStatus.PACKED, OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.PROCESSING, Set.of(OrderStatus.PACKED, OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.PACKED, Set.of(OrderStatus.READY_FOR_SHIPMENT, OrderStatus.ASSIGNED_TO_SHIPMENT, OrderStatus.SHIPPED, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.READY_FOR_SHIPMENT, Set.of(OrderStatus.ASSIGNED_TO_SHIPMENT, OrderStatus.IN_TRANSIT, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.ASSIGNED_TO_SHIPMENT, Set.of(OrderStatus.IN_TRANSIT, OrderStatus.READY_FOR_SHIPMENT, OrderStatus.CANCELLED)),
             Map.entry(OrderStatus.SHIPPED, Set.of(OrderStatus.IN_TRANSIT, OrderStatus.CANCELLED)),
             Map.entry(OrderStatus.IN_TRANSIT, Set.of(OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED)),
-            Map.entry(OrderStatus.OUT_FOR_DELIVERY, Set.of(OrderStatus.DELIVERED, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.OUT_FOR_DELIVERY, Set.of(OrderStatus.DELIVERY_VERIFICATION_STARTED, OrderStatus.DELIVERY_VERIFIED, OrderStatus.DELIVERED, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.DELIVERY_VERIFICATION_STARTED, Set.of(OrderStatus.DELIVERY_VERIFIED, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED)),
+            Map.entry(OrderStatus.DELIVERY_VERIFIED, Set.of(OrderStatus.DELIVERED)),
             Map.entry(OrderStatus.DELIVERED, Set.of(OrderStatus.RETURN_REQUESTED)),
-            Map.entry(OrderStatus.RETURN_REQUESTED, Set.of(OrderStatus.RETURNED)),
+            Map.entry(OrderStatus.CANCEL_REQUESTED, Set.of(OrderStatus.CANCELLED, OrderStatus.ORDER_CONFIRMED)),
+            Map.entry(OrderStatus.RETURN_REQUESTED, Set.of(OrderStatus.INSPECTION_REQUIRED, OrderStatus.RETURN_APPROVED, OrderStatus.RETURN_REJECTED)),
+            Map.entry(OrderStatus.INSPECTION_REQUIRED, Set.of(OrderStatus.RETURN_APPROVED, OrderStatus.RETURN_REJECTED)),
+            Map.entry(OrderStatus.RETURN_APPROVED, Set.of(OrderStatus.RETURN_IN_TRANSIT, OrderStatus.RETURN_RECEIVED)),
+            Map.entry(OrderStatus.RETURN_IN_TRANSIT, Set.of(OrderStatus.RETURN_RECEIVED)),
+            Map.entry(OrderStatus.RETURN_RECEIVED, Set.of(OrderStatus.INSPECTION_PASSED, OrderStatus.RETURN_REJECTED, OrderStatus.REFUND_PENDING, OrderStatus.RETURNED)),
+            Map.entry(OrderStatus.INSPECTION_PASSED, Set.of(OrderStatus.REFUND_PENDING, OrderStatus.REFUND_PROCESSING, OrderStatus.REFUNDED, OrderStatus.RETURNED)),
+            Map.entry(OrderStatus.REFUND_PENDING, Set.of(OrderStatus.REFUND_PROCESSING, OrderStatus.REFUNDED, OrderStatus.RETURNED)),
+            Map.entry(OrderStatus.REFUND_PROCESSING, Set.of(OrderStatus.REFUNDED, OrderStatus.RETURNED)),
+            Map.entry(OrderStatus.REFUNDED, Set.of(OrderStatus.RETURNED)),
             Map.entry(OrderStatus.CANCELLED, Set.of()),
+            Map.entry(OrderStatus.RETURN_REJECTED, Set.of()),
             Map.entry(OrderStatus.RETURNED, Set.of())
     );
 
@@ -82,6 +95,11 @@ public class OperationalOrderService {
                     "'. Allowed target states: " + allowed);
         }
 
+        // Security check: cannot manually mark OUT_FOR_DELIVERY -> DELIVERED without OTP
+        if (currentStatus == OrderStatus.OUT_FOR_DELIVERY && targetStatus == OrderStatus.DELIVERED) {
+            throw new BadRequestException("Direct transition to DELIVERED is forbidden. Secure Customer Delivery OTP verification is required.");
+        }
+
         order.setCurrentStatus(targetStatus);
         if (request.getCarrierName() != null && !request.getCarrierName().isBlank()) {
             order.setCarrierName(request.getCarrierName());
@@ -106,6 +124,238 @@ public class OperationalOrderService {
         djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), targetStatus);
 
         return mapOrderToResponse(updated);
+    }
+
+    @Transactional
+    public OrderResponse cancelOrder(Long orderId, String cancellationReason, Long customerId, String customerUsername) {
+        OperationalOrder order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + orderId));
+
+        OrderStatus current = order.getCurrentStatus();
+        if (current == OrderStatus.DELIVERED || current == OrderStatus.OUT_FOR_DELIVERY || current == OrderStatus.CANCELLED || current == OrderStatus.RETURNED) {
+            throw new BadRequestException("Order cannot be cancelled in status " + current);
+        }
+
+        order.setCurrentStatus(OrderStatus.CANCELLED);
+        order.setCancellationReason(cancellationReason != null ? cancellationReason : "Customer requested cancellation before dispatch");
+        order.setRefundStatus("REFUND_PENDING");
+        OperationalOrder saved = orderRepository.save(order);
+
+        OrderStatusTransition transition = OrderStatusTransition.builder()
+                .orderId(saved.getId())
+                .fromStatus(current)
+                .toStatus(OrderStatus.CANCELLED)
+                .reasonNote("Order cancelled by " + (customerUsername != null ? customerUsername : "User") + ". Reason: " + order.getCancellationReason())
+                .staffId(customerId)
+                .staffUsername(customerUsername != null ? customerUsername : "CUSTOMER")
+                .build();
+        transitionRepository.save(transition);
+
+        djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.CANCELLED);
+
+        return mapOrderToResponse(saved);
+    }
+
+    // ==========================================
+    // Return & Inspection Operations
+    // ==========================================
+
+    @Transactional
+    public OrderReturnResponse createReturnRequest(CreateOrderReturnRequest request, Long customerId, String customerUsername) {
+        OperationalOrder order = orderRepository.findById(request.getOrderId())
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + request.getOrderId()));
+
+        if (order.getCurrentStatus() != OrderStatus.DELIVERED) {
+            throw new BadRequestException("Return can only be requested for DELIVERED orders. Current status: " + order.getCurrentStatus());
+        }
+
+        // Return policy validation: Check snapshotted items return eligibility and window
+        boolean anyEligible = false;
+        if (order.getItems() != null && !order.getItems().isEmpty()) {
+            for (OperationalOrderItem item : order.getItems()) {
+                if (Boolean.TRUE.equals(item.getReturnEligible())) {
+                    anyEligible = true;
+                    int window = item.getReturnWindowDays() != null ? item.getReturnWindowDays() : 7;
+                    if (order.getDeliveredAt() != null && order.getDeliveredAt().plusDays(window).isBefore(LocalDateTime.now())) {
+                        throw new BadRequestException("Return window of " + window + " days has expired for item " + item.getProductName());
+                    }
+                }
+            }
+        } else {
+            anyEligible = true;
+        }
+
+        if (!anyEligible) {
+            throw new BadRequestException("This product is marked as non-returnable as per purchase policy.");
+        }
+
+        boolean activeExists = returnRequestRepository.existsByOrderIdAndStatusIn(order.getId(),
+                List.of(OrderStatus.RETURN_REQUESTED, OrderStatus.RETURN_APPROVED, OrderStatus.RETURN_IN_TRANSIT, OrderStatus.RETURN_RECEIVED));
+        if (activeExists) {
+            throw new BadRequestException("An active return request is already pending for this order.");
+        }
+
+        OrderReturnRequest returnReq = OrderReturnRequest.builder()
+                .orderId(order.getId())
+                .orderItemId(request.getOrderItemId())
+                .customerId(customerId != null ? customerId : order.getCustomerId())
+                .customerUsername(customerUsername != null ? customerUsername : order.getCustomerUsername())
+                .customerEmail(order.getCustomerEmail())
+                .reason(request.getReason())
+                .conditionNote(request.getConditionNote() != null ? request.getConditionNote() : "Product in original packaging with tags intact.")
+                .status(OrderStatus.RETURN_REQUESTED)
+                .refundAmount(order.getTotalAmount())
+                .requestedAt(LocalDateTime.now())
+                .build();
+
+        OrderReturnRequest saved = returnRequestRepository.save(returnReq);
+
+        OrderStatus prev = order.getCurrentStatus();
+        order.setCurrentStatus(OrderStatus.RETURN_REQUESTED);
+        orderRepository.save(order);
+
+        OrderStatusTransition t = OrderStatusTransition.builder()
+                .orderId(order.getId())
+                .fromStatus(prev)
+                .toStatus(OrderStatus.RETURN_REQUESTED)
+                .reasonNote("Customer initiated return: " + request.getReason())
+                .staffId(customerId)
+                .staffUsername(customerUsername != null ? customerUsername : "CUSTOMER")
+                .build();
+        transitionRepository.save(t);
+
+        djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.RETURN_REQUESTED);
+
+        return mapReturnToResponse(saved);
+    }
+
+    @Transactional
+    public OrderReturnResponse approveReturn(Long returnId, ReturnActionRequest request, Long staffId, String staffUsername) {
+        OrderReturnRequest ret = returnRequestRepository.findById(returnId)
+                .orElseThrow(() -> new ResourceNotFoundException("Return request not found with ID: " + returnId));
+
+        ret.setStatus(OrderStatus.RETURN_APPROVED);
+        ret.setInspectedBy(staffUsername != null ? staffUsername : "OPERATIONS_STAFF");
+        ret.setInspectedAt(LocalDateTime.now());
+        OrderReturnRequest saved = returnRequestRepository.save(ret);
+
+        OperationalOrder order = orderRepository.findById(ret.getOrderId()).orElse(null);
+        if (order != null) {
+            OrderStatus prev = order.getCurrentStatus();
+            order.setCurrentStatus(OrderStatus.RETURN_APPROVED);
+            orderRepository.save(order);
+
+            OrderStatusTransition t = OrderStatusTransition.builder()
+                    .orderId(order.getId())
+                    .fromStatus(prev)
+                    .toStatus(OrderStatus.RETURN_APPROVED)
+                    .reasonNote("Return request approved by " + staffUsername + ". " + (request != null && request.getNote() != null ? request.getNote() : ""))
+                    .staffId(staffId)
+                    .staffUsername(staffUsername != null ? staffUsername : "STAFF")
+                    .build();
+            transitionRepository.save(t);
+            djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.RETURN_APPROVED);
+        }
+
+        return mapReturnToResponse(saved);
+    }
+
+    @Transactional
+    public OrderReturnResponse rejectReturn(Long returnId, ReturnActionRequest request, Long staffId, String staffUsername) {
+        OrderReturnRequest ret = returnRequestRepository.findById(returnId)
+                .orElseThrow(() -> new ResourceNotFoundException("Return request not found with ID: " + returnId));
+
+        ret.setStatus(OrderStatus.RETURN_REJECTED);
+        ret.setRejectionReason(request != null && request.getRejectionReason() != null ? request.getRejectionReason() : "Failed return criteria inspection");
+        ret.setInspectedBy(staffUsername != null ? staffUsername : "OPERATIONS_STAFF");
+        ret.setInspectedAt(LocalDateTime.now());
+        OrderReturnRequest saved = returnRequestRepository.save(ret);
+
+        OperationalOrder order = orderRepository.findById(ret.getOrderId()).orElse(null);
+        if (order != null) {
+            OrderStatus prev = order.getCurrentStatus();
+            order.setCurrentStatus(OrderStatus.RETURN_REJECTED);
+            orderRepository.save(order);
+
+            OrderStatusTransition t = OrderStatusTransition.builder()
+                    .orderId(order.getId())
+                    .fromStatus(prev)
+                    .toStatus(OrderStatus.RETURN_REJECTED)
+                    .reasonNote("Return rejected by " + staffUsername + ": " + ret.getRejectionReason())
+                    .staffId(staffId)
+                    .staffUsername(staffUsername != null ? staffUsername : "STAFF")
+                    .build();
+            transitionRepository.save(t);
+            djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.RETURN_REJECTED);
+        }
+
+        return mapReturnToResponse(saved);
+    }
+
+    @Transactional
+    public OrderReturnResponse receiveReturn(Long returnId, ReturnActionRequest request, Long staffId, String staffUsername) {
+        OrderReturnRequest ret = returnRequestRepository.findById(returnId)
+                .orElseThrow(() -> new ResourceNotFoundException("Return request not found with ID: " + returnId));
+
+        ret.setStatus(OrderStatus.RETURNED);
+        ret.setReceivedAt(LocalDateTime.now());
+        ret.setInspectedBy(staffUsername != null ? staffUsername : "WAREHOUSE_STAFF");
+        ret.setInspectedAt(LocalDateTime.now());
+        OrderReturnRequest saved = returnRequestRepository.save(ret);
+
+        OperationalOrder order = orderRepository.findById(ret.getOrderId()).orElse(null);
+        if (order != null) {
+            OrderStatus prev = order.getCurrentStatus();
+            order.setCurrentStatus(OrderStatus.RETURNED);
+            order.setRefundStatus("REFUND_COMPLETED");
+            orderRepository.save(order);
+
+            OrderStatusTransition t = OrderStatusTransition.builder()
+                    .orderId(order.getId())
+                    .fromStatus(prev)
+                    .toStatus(OrderStatus.RETURNED)
+                    .reasonNote("Return item received at warehouse hub and passed physical inspection by " + staffUsername)
+                    .staffId(staffId)
+                    .staffUsername(staffUsername != null ? staffUsername : "STAFF")
+                    .build();
+            transitionRepository.save(t);
+            djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.RETURNED);
+        }
+
+        return mapReturnToResponse(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderReturnResponse> getAllReturns() {
+        return returnRequestRepository.findAllByOrderByRequestedAtDesc().stream()
+                .map(this::mapReturnToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderReturnResponse> getReturnsByOrderId(Long orderId) {
+        return returnRequestRepository.findByOrderId(orderId).stream()
+                .map(this::mapReturnToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<DeliveryVerificationAuditResponse> getDeliveryAudits(Long orderId) {
+        return deliveryVerificationAuditRepository.findByOrderId(orderId).stream()
+                .map(a -> DeliveryVerificationAuditResponse.builder()
+                        .id(a.getId())
+                        .orderId(a.getOrderId())
+                        .shipmentId(a.getShipmentId())
+                        .verifiedBy(a.getVerifiedBy())
+                        .customerId(a.getCustomerId())
+                        .verificationMethod(a.getVerificationMethod())
+                        .verificationTimestamp(a.getVerificationTimestamp())
+                        .previousOrderStatus(a.getPreviousOrderStatus())
+                        .newOrderStatus(a.getNewOrderStatus())
+                        .deliveryAttemptInfo(a.getDeliveryAttemptInfo())
+                        .createdAt(a.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -152,6 +402,12 @@ public class OperationalOrderService {
                         .quantity(item.getQuantity())
                         .priceAtPurchase(item.getPriceAtPurchase())
                         .subtotal(item.getSubtotal())
+                        .returnEligible(item.getReturnEligible())
+                        .returnWindowDays(item.getReturnWindowDays())
+                        .returnPolicy(item.getReturnPolicy())
+                        .conditionRequired(item.getConditionRequired())
+                        .weightKg(item.getWeightKg())
+                        .volumeM3(item.getVolumeM3())
                         .build())
                 .collect(Collectors.toList()) : new ArrayList<>();
 
@@ -175,10 +431,37 @@ public class OperationalOrderService {
                 .carrierName(order.getCarrierName())
                 .trackingNumber(order.getTrackingNumber())
                 .djangoOrderId(order.getDjangoOrderId())
+                .totalWeightKg(order.resolveWeight())
+                .totalVolumeM3(order.resolveVolume())
+                .deliveredAt(order.getDeliveredAt())
+                .cancellationReason(order.getCancellationReason())
+                .refundStatus(order.getRefundStatus())
                 .items(itemResponses)
                 .timeline(timeline)
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
+                .build();
+    }
+
+    private OrderReturnResponse mapReturnToResponse(OrderReturnRequest r) {
+        return OrderReturnResponse.builder()
+                .id(r.getId())
+                .orderId(r.getOrderId())
+                .orderItemId(r.getOrderItemId())
+                .customerId(r.getCustomerId())
+                .customerUsername(r.getCustomerUsername())
+                .customerEmail(r.getCustomerEmail())
+                .reason(r.getReason())
+                .conditionNote(r.getConditionNote())
+                .status(r.getStatus())
+                .rejectionReason(r.getRejectionReason())
+                .refundId(r.getRefundId())
+                .refundAmount(r.getRefundAmount())
+                .requestedAt(r.getRequestedAt())
+                .inspectedAt(r.getInspectedAt())
+                .inspectedBy(r.getInspectedBy())
+                .receivedAt(r.getReceivedAt())
+                .createdAt(r.getCreatedAt())
                 .build();
     }
 

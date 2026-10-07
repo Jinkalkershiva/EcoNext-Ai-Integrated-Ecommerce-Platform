@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { TrendingDown, TrendingUp, AlertCircle, Activity } from 'lucide-react';
+import { TrendingDown, TrendingUp, AlertCircle, Activity, Minus, Info, Sparkles, Clock } from 'lucide-react';
 import '../styles/price-predictor.css';
 
 export const PricePredictorCard = ({ prediction, currentPrice }) => {
@@ -48,11 +48,11 @@ export const PricePredictorCard = ({ prediction, currentPrice }) => {
   const getRecommendationText = () => {
     switch (displayData.recommendation) {
       case 'best_price':
-        return 'Best Price Now! 🟢';
+        return 'Best Price Now';
       case 'wait':
-        return 'Wait for Better Offer 🟡';
+        return 'Wait for Better Offer';
       default:
-        return 'Neutral Price 🔵';
+        return 'Neutral Price';
     }
   };
 
@@ -80,9 +80,9 @@ export const PricePredictorCard = ({ prediction, currentPrice }) => {
 
   const getTrendIcon = () => {
     const trend = displayData.trend || 'stable';
-    if (trend === 'up') return '📈';
-    if (trend === 'down') return '📉';
-    return '➡️';
+    if (trend === 'up') return <TrendingUp size={14} aria-hidden="true" style={{ verticalAlign: 'middle' }} />;
+    if (trend === 'down') return <TrendingDown size={14} aria-hidden="true" style={{ verticalAlign: 'middle' }} />;
+    return <Minus size={14} aria-hidden="true" style={{ verticalAlign: 'middle' }} />;
   };
 
   const getTrendLabel = () => {
@@ -106,7 +106,10 @@ export const PricePredictorCard = ({ prediction, currentPrice }) => {
       {/* Header */}
       <div className="predictor-header">
         <div className="header-content">
-          <span className="predictor-title">📊 7-Day Price Prediction</span>
+          <span className="predictor-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Activity size={16} aria-hidden="true" />
+            <span>7-Day Price Prediction</span>
+          </span>
           <motion.div
             className="recommendation-badge"
             initial={{ scale: 0 }}
@@ -214,10 +217,25 @@ export const PricePredictorCard = ({ prediction, currentPrice }) => {
       >
         {displayData.message ? (
           <>
-            <h4>
-              {displayData.recommendation === 'best_price' && '🎯 Great Deal!'}
-              {displayData.recommendation === 'wait' && '💰 Hold On!'}
-              {displayData.recommendation === 'neutral' && '⏸️ Stable Price'}
+            <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              {displayData.recommendation === 'best_price' && (
+                <>
+                  <Sparkles size={16} aria-hidden="true" />
+                  <span>Great Deal!</span>
+                </>
+              )}
+              {displayData.recommendation === 'wait' && (
+                <>
+                  <Clock size={16} aria-hidden="true" />
+                  <span>Hold On!</span>
+                </>
+              )}
+              {displayData.recommendation === 'neutral' && (
+                <>
+                  <Activity size={16} aria-hidden="true" />
+                  <span>Stable Price</span>
+                </>
+              )}
             </h4>
             <p>{displayData.message}</p>
           </>
@@ -225,19 +243,28 @@ export const PricePredictorCard = ({ prediction, currentPrice }) => {
           <>
             {displayData.recommendation === 'best_price' && (
               <>
-                <h4>🎯 Great Deal!</h4>
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Sparkles size={16} aria-hidden="true" />
+                  <span>Great Deal!</span>
+                </h4>
                 <p>This is currently the best price. Historical data suggests the price will increase or stay stable in the next 7 days. Consider buying now!</p>
               </>
             )}
             {displayData.recommendation === 'wait' && (
               <>
-                <h4>💰 Hold On!</h4>
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Clock size={16} aria-hidden="true" />
+                  <span>Hold On!</span>
+                </h4>
                 <p>Our model predicts a price drop in the coming days. You might get a better deal if you wait. Average predicted price drop: {Math.abs(getPriceChange()).toFixed(1)}%</p>
               </>
             )}
             {displayData.recommendation === 'neutral' && (
               <>
-                <h4>⏸️ Stable Price</h4>
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Activity size={16} aria-hidden="true" />
+                  <span>Stable Price</span>
+                </h4>
                 <p>The price is expected to remain stable over the next 7 days. Feel free to buy whenever it's convenient for you.</p>
               </>
             )}
@@ -246,8 +273,9 @@ export const PricePredictorCard = ({ prediction, currentPrice }) => {
       </motion.div>
 
       {/* Disclaimer */}
-      <p className="disclaimer">
-        💡 Predictions are based on historical pricing data using Linear Regression ML model. Actual prices may vary.
+      <p className="disclaimer" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
+        <Info size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '2px' }} />
+        <span>Predictions are based on historical pricing data using Linear Regression ML model. Actual prices may vary.</span>
       </p>
     </motion.div>
   );

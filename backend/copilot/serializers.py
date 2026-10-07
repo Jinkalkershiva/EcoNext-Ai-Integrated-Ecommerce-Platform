@@ -13,7 +13,8 @@ class CopilotResponseSerializer(serializers.Serializer):
 
 
 class ChatRequestSerializer(serializers.Serializer):
-    message = serializers.CharField(max_length=1000)
+    message = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    query = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
     history = serializers.ListField(
         child=serializers.DictField(),
         required=False,

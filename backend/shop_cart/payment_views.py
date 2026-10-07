@@ -17,7 +17,8 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from django.conf import settings
-from shop_cart.models import Cart
+from shop_cart.models import Cart, CartItem
+from products.models import Product, ProductVariant
 from order_service.models import Order, NotificationLog
 from site_analytics.kafka_producer import publish_order_event
 
@@ -93,7 +94,22 @@ def create_razorpay_order_view(request):
     """
     try:
         cart, _ = Cart.objects.get_or_create(user=request.user)
-        items = list(cart.items.select_related('product').all())
+        items = list(cart.items.select_related('product', 'variant').all())
+
+        # If cart in DB was empty, check if items were provided in checkout payload
+        if not items:
+            raw_items = request.data.get('items') or request.data.get('cart_items')
+            if raw_items and isinstance(raw_items, list):
+                for raw_it in raw_items:
+                    pid = raw_it.get('product_id') or raw_it.get('productId') or raw_it.get('id')
+                    vid = raw_it.get('variant_id') or raw_it.get('variantId')
+                    qty = int(raw_it.get('quantity') or raw_it.get('qty') or 1)
+                    if pid:
+                        prod = Product.objects.filter(id=pid).first()
+                        if prod:
+                            var = ProductVariant.objects.filter(id=vid, product=prod).first() if vid else None
+                            CartItem.objects.create(cart=cart, product=prod, variant=var, quantity=qty)
+                items = list(cart.items.select_related('product', 'variant').all())
 
         if not items:
             return Response({
@@ -241,7 +257,30 @@ def razorpay_webhook_view(request):
                 order = Order.objects.filter(razorpay_order_id=rzp_order_id).first()
             if order and order.payment_status != 'PAID':
                 order.payment_status = 'PAID'
-                order.save(update_fields=['payment_status', 'updated_at'])
-                logger.info("Reconciled order #%s payment status to PAID via webhook", order.id)
+                if order.canonical_status == 'ORDER_PLACED':
+                    order.status = 'ORDER_CONFIRMED'
+                order.save(update_fields=['payment_status', 'status', 'updated_at'])
+                
+                from order_service.models import OrderStatusHistory
+                OrderStatusHistory.objects.create(
+                    order=order,
+                    from_status='ORDER_PLACED',
+                    to_status='ORDER_CONFIRMED',
+                    changed_by_name='Razorpay Webhook',
+                    note='Payment captured and verified asynchronously via Razorpay webhook'
+                )
+
+                try:
+                    publish_order_event(
+                        order_id=order.id,
+                        user_id=order.user_id,
+                        total_amount=order.total_price,
+                        status=order.canonical_status,
+                        items_count=order.items.count()
+                    )
+                except Exception:
+                    pass
+
+                logger.info("Reconciled order #%s payment status to PAID and status to %s via webhook", order.id, order.status)
 
     return Response({'status': 'success', 'message': 'Webhook processed'}, status=status.HTTP_200_OK)

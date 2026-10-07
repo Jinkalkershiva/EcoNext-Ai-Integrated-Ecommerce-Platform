@@ -88,8 +88,13 @@ const normalizeOrder = (o) => {
   // Linked shipment detection
   const firstShp = (o.shipments && o.shipments.length > 0) ? o.shipments[0] : null;
   const shipmentId = o.shipment_id || o.shipmentId || (firstShp ? firstShp.id : null);
-  const shipmentNumber = o.shipment_number || o.shipmentNumber || (firstShp ? (firstShp.shipmentNumber || firstShp.shipment_number) : null);
-  const shipmentStatus = o.shipment_status || o.shipmentStatus || (firstShp ? (firstShp.status || 'CREATED') : (o.shipments?.length ? 'PROVISIONED' : null));
+  let shipmentNumber = o.shipment_number || o.shipmentNumber || (firstShp ? (firstShp.shipmentNumber || firstShp.shipment_number) : null);
+  let shipmentStatus = o.shipment_status || o.shipmentStatus || (firstShp ? (firstShp.status || 'CREATED') : (o.shipments?.length ? 'PROVISIONED' : null));
+
+  if (currentStatus === 'DELIVERED') {
+    if (!shipmentStatus || shipmentStatus === 'NOT_PROVISIONED') shipmentStatus = 'DELIVERED';
+    if (!shipmentNumber) shipmentNumber = `SHP-${String(o.id).padStart(5, '0')}`;
+  }
 
   return {
     ...o,

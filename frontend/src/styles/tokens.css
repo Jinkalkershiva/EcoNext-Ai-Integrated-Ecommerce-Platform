@@ -298,6 +298,10 @@
    Global Universal Scale Tokens (Inherited by all themes)
    -------------------------------------------------------------------------- */
 :root {
+  /* UI Scaling & Root Font */
+  --ui-scale: 1;
+  --base-font-size: 16px;
+
   /* Standardized Spacing Scale */
   --space-1: 4px;
   --space-2: 8px;
@@ -324,12 +328,25 @@
   --border-width-lg: 3px;
 
   /* Navigation & Header Heights */
-  --header-height: 72px;
-  --banner-height: 38px;
+  --header-height: 76px;
+  --header-subnav-height: 46px;
+  --banner-height: 36px;
 
   /* Layout Max Widths */
-  --container-max-width: 1280px;
-  --container-padding: 1.5rem;
+  --container-max-width: 1520px;
+  --container-padding: 1.25rem;
+
+  /* Campaign Accent Palettes */
+  --campaign-coral: #F43F5E;
+  --campaign-coral-bg: #FFF1F2;
+  --campaign-amber: #D97706;
+  --campaign-amber-bg: #FEF3C7;
+  --campaign-indigo: #4F46E5;
+  --campaign-indigo-bg: #EEF2FF;
+  --campaign-emerald: #059669;
+  --campaign-emerald-bg: #ECFDF5;
+  --campaign-teal: #0D9488;
+  --campaign-teal-bg: #F0FDFA;
 
   /* Typography Families */
   --font-display: 'Archivo', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;

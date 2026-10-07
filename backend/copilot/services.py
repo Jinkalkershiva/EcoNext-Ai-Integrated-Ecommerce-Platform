@@ -28,11 +28,29 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _get_api_config() -> Dict[str, str]:
-    """Read Gemini connection settings from environment."""
+    """Read Gemini connection settings from environment (with Windows User registry fallback)."""
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    placeholder_values = {
+        "", "your-gemini-api-key-here", "your_api_key_here", "placeholder", "your_gemini_api_key"
+    }
+    if (api_key in placeholder_values or api_key.startswith("your-")) and os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as regkey:
+                val, _ = winreg.QueryValueEx(regkey, "GEMINI_API_KEY")
+                if val:
+                    api_key = str(val).strip()
+        except Exception:
+            pass
+
+    model = os.getenv("GEMINI_MODEL", "").strip()
+    if not model or model in ("gemini-1.5-flash", "gemini-3.6-flash", "your-gemini-model"):
+        model = "gemini-3.8-flash"
+
     return {
-        "api_key": os.getenv("GEMINI_API_KEY", ""),
+        "api_key": api_key,
         "api_url": os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),
-        "model": os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
+        "model": model,
     }
 
 
@@ -41,7 +59,10 @@ def _call_gemini(user_message: str, temperature: float = 0) -> str:
     config = _get_api_config()
 
     if not config["api_key"]:
+        logger.warning("GEMINI_API_KEY configured: false")
         raise ValueError("GEMINI_API_KEY environment variable is not set")
+
+    logger.info("GEMINI_API_KEY configured: true (model: %s)", config["model"])
 
     payload = {
         "model": config["model"],
@@ -57,11 +78,33 @@ def _call_gemini(user_message: str, temperature: float = 0) -> str:
         "Content-Type": "application/json",
     }
 
-    response = requests.post(
-        config["api_url"], headers=headers, json=payload, timeout=30
-    )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"].strip()
+    try:
+        response = requests.post(
+            config["api_url"], headers=headers, json=payload, timeout=30
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        # Fallback to native Google Generative Language endpoint
+        logger.info("OpenAI endpoint attempt failed; falling back to Google native generateContent endpoint")
+        native_url = f"https://generativelanguage.googleapis.com/v1beta/models/{config['model']}:generateContent"
+        native_payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"{ECOAI_SYSTEM_PROMPT}\n\nUser request: {user_message}"}]
+                }
+            ],
+            "generationConfig": {"temperature": temperature}
+        }
+        native_headers = {
+            "x-goog-api-key": config["api_key"],
+            "Content-Type": "application/json",
+        }
+        native_resp = requests.post(native_url, headers=native_headers, json=native_payload, timeout=30)
+        native_resp.raise_for_status()
+        data = native_resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
 def _extract_json(text: str) -> Dict[str, Any]:
@@ -198,7 +241,11 @@ def extract_intent(query: str) -> Dict[str, Any]:
         response_text = _call_gemini(user_message, temperature=0)
         return _extract_json(response_text)
     except Exception as exc:
-        logger.info('EcoAi intent extraction via Gemini failed (%s); using regex fallback', exc)
+        err_msg = str(exc)
+        api_key = _get_api_config().get("api_key", "")
+        if api_key and api_key in err_msg:
+            err_msg = err_msg.replace(api_key, "[REDACTED]")
+        logger.info('EcoAi intent extraction via Gemini failed (%s); using regex fallback', err_msg)
         return _fallback_parse_query(query)
 
 

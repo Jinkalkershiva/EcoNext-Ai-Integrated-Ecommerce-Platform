@@ -63,7 +63,7 @@ spring:
         - id: ai-copilot-route
           uri: ${AI_SERVICE_URL:http://localhost:8000}
           predicates:
-            - Path=/api/copilot/**, /api/chat/**
+            - Path=/api/copilot/**, /api/chat/**, /api/ai/**
           order: 8
 
         # 9. Admin & Staff Operational Management Service (Order: 9)
@@ -113,6 +113,11 @@ spring:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5073,http://localhost:5074,http://localhost:5173,http://localhost:5174,http://127.0.0.1:3000,http://127.0.0.1:5073,http://127.0.0.1:5074,http://127.0.0.1:5173,http://127.0.0.1:5174}
+
+gemini:
+  api:
+    key: ${GEMINI_API_KEY:}
+  model: ${GEMINI_MODEL:gemini-3.8-flash}
 
 management:
   endpoints:

@@ -336,6 +336,21 @@ export const orderOpsApi = {
     }
   },
 
+  cancelOrder: async (id, reason = '') => {
+    try {
+      const res = await apiRequest(`/admin/orders/${id}/cancel/`, {
+        method: 'POST',
+        body: { reason }
+      });
+      return res.order || res.data || res;
+    } catch {
+      const res = await apiRequest(`/order-ops/orders/${id}/cancel?reason=${encodeURIComponent(reason)}`, {
+        method: 'POST'
+      });
+      return res.data || res;
+    }
+  },
+
   getOrderTimeline: async (id) => {
     try {
       const res = await apiRequest(`/admin/orders/${id}/`);
@@ -344,6 +359,15 @@ export const orderOpsApi = {
     } catch {
       const res = await apiRequest(`/order-ops/orders/${id}/timeline`);
       return res.data || res || [];
+    }
+  },
+
+  getOrderDeliveryAudits: async (id) => {
+    try {
+      const res = await apiRequest(`/order-ops/orders/${id}/delivery-audits`);
+      return res.data || res || [];
+    } catch {
+      return [];
     }
   },
 
@@ -359,6 +383,75 @@ export const orderOpsApi = {
 };
 
 export const orderApi = orderOpsApi;
+
+export const returnsApi = {
+  getAllReturns: async () => {
+    try {
+      const res = await apiRequest('/admin/returns/');
+      return res.returns || res.data || [];
+    } catch {
+      const res = await apiRequest('/order-ops/returns');
+      return res.data || res || [];
+    }
+  },
+
+  getReturnsByOrderId: async (orderId) => {
+    try {
+      const res = await apiRequest(`/order-ops/orders/${orderId}/returns`);
+      return res.data || res || [];
+    } catch {
+      return [];
+    }
+  },
+
+  approveReturn: async (id, note = '') => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/approve/`, {
+        method: 'POST',
+        body: { note }
+      });
+      return res.return || res.data || res;
+    } catch {
+      const res = await apiRequest(`/order-ops/returns/${id}/approve`, {
+        method: 'POST',
+        body: { note }
+      });
+      return res.data || res;
+    }
+  },
+
+  rejectReturn: async (id, rejectionReason) => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/reject/`, {
+        method: 'POST',
+        body: { rejection_reason: rejectionReason, rejectionReason }
+      });
+      return res.return || res.data || res;
+    } catch {
+      const res = await apiRequest(`/order-ops/returns/${id}/reject`, {
+        method: 'POST',
+        body: { rejectionReason }
+      });
+      return res.data || res;
+    }
+  },
+
+  receiveReturn: async (id, note = '') => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/receive/`, {
+        method: 'POST',
+        body: { note }
+      });
+      return res.return || res.data || res;
+    } catch {
+      const res = await apiRequest(`/order-ops/returns/${id}/receive`, {
+        method: 'POST',
+        body: { note }
+      });
+      return res.data || res;
+    }
+  }
+};
 
 export const customerOpsApi = {
   getCustomers: async (params = {}) => {
@@ -395,6 +488,28 @@ export const paymentOpsApi = {
     const query = searchParams.toString();
     const res = await apiRequest(`/admin/payments/${query ? '?' + query : ''}`);
     return res.payments || res.data || res;
+  },
+
+  getRefunds: async (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.orderId) searchParams.append('orderId', params.orderId);
+    if (params.page !== undefined) searchParams.append('page', params.page);
+    if (params.size !== undefined) searchParams.append('size', params.size);
+
+    const query = searchParams.toString();
+    try {
+      const res = await apiRequest(`/payments/refunds${query ? '?' + query : ''}`);
+      return res.data?.content || res.data || res || [];
+    } catch {
+      return [];
+    }
+  },
+
+  retryRefund: async (refundId) => {
+    const res = await apiRequest(`/payments/refunds/${refundId}/retry`, {
+      method: 'POST'
+    });
+    return res.data || res;
   }
 };
 
@@ -540,6 +655,40 @@ export const fulfillmentApi = {
     return res.data || res;
   },
 
+  assignOrderToShipment: async (shipmentId, orderId, routeException = false, exceptionReason = '') => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/orders`, {
+      method: 'POST',
+      body: { orderId, routeException, exceptionReason }
+    });
+    return res.data || res;
+  },
+
+  removeOrderFromShipment: async (shipmentId, orderId) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/orders/${orderId}`, {
+      method: 'DELETE'
+    });
+    return res.data || res;
+  },
+
+  markShipmentFull: async (shipmentId) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/mark-full`, {
+      method: 'POST'
+    });
+    return res.data || res;
+  },
+
+  dispatchShipment: async (shipmentId) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/dispatch`, {
+      method: 'POST'
+    });
+    return res.data || res;
+  },
+
+  getRouteExceptions: async (shipmentId) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/route-exceptions`);
+    return res.data || res || [];
+  },
+
   updateShipmentStatus: async (id, status) => {
     const res = await apiRequest(`/order-ops/shipments/${id}/status?status=${status}`, {
       method: 'PATCH'
@@ -637,6 +786,72 @@ export const fulfillmentApi = {
   getContainerTracking: async (id) => {
     const res = await apiRequest(`/order-ops/containers/${id}/tracking`);
     return res.data || res || [];
+  },
+
+  getCompatibleShipments: async (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.orderId) searchParams.append('orderId', params.orderId);
+    if (params.orderIds && Array.isArray(params.orderIds)) {
+      params.orderIds.forEach(id => searchParams.append('orderIds', id));
+    } else if (params.orderIds) {
+      searchParams.append('orderIds', params.orderIds);
+    }
+    if (params.warehouse) searchParams.append('warehouse', params.warehouse);
+    if (params.destination) searchParams.append('destination', params.destination);
+
+    const query = searchParams.toString();
+    const res = await apiRequest(`/order-ops/shipments/compatible${query ? '?' + query : ''}`);
+    return res.data || res || [];
+  },
+
+  batchAssignOrdersToShipment: async (shipmentId, payload = {}) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/batch-assign`, {
+      method: 'POST',
+      body: payload
+    });
+    return res.data || res;
+  },
+
+  assignDriverAndTruck: async (shipmentId, payload = {}) => {
+    const res = await apiRequest(`/order-ops/shipments/${shipmentId}/assign-driver-truck`, {
+      method: 'POST',
+      body: payload
+    });
+    return res.data || res;
+  },
+
+  getDrivers: async (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.warehouse && params.warehouse !== 'All Warehouses') searchParams.append('warehouse', params.warehouse);
+    if (params.status && params.status !== 'ALL') searchParams.append('status', params.status);
+    if (params.search) searchParams.append('search', params.search);
+
+    const query = searchParams.toString();
+    const res = await apiRequest(`/order-ops/drivers${query ? '?' + query : ''}`);
+    return res.data || res || [];
+  },
+
+  getAvailableDrivers: async (warehouse = '') => {
+    const searchParams = new URLSearchParams();
+    if (warehouse && warehouse !== 'All Warehouses') searchParams.append('warehouse', warehouse);
+    const query = searchParams.toString();
+    const res = await apiRequest(`/order-ops/drivers/available${query ? '?' + query : ''}`);
+    return res.data || res || [];
+  },
+
+  createDriver: async (driverData) => {
+    const res = await apiRequest('/order-ops/drivers', {
+      method: 'POST',
+      body: driverData
+    });
+    return res.data || res;
+  },
+
+  updateDriverStatus: async (driverId, status) => {
+    const res = await apiRequest(`/order-ops/drivers/${driverId}/status?status=${status}`, {
+      method: 'PATCH'
+    });
+    return res.data || res;
   },
 
   getFulfillmentSummary: async (params = {}) => {

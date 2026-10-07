@@ -20,6 +20,13 @@ class DualJWTAuthentication(authentication.BaseAuthentication):
         super().__init__(*args, **kwargs)
         self.simple_jwt_auth = JWTAuthentication()
 
+    def authenticate_header(self, request):
+        """
+        Required by DRF so that unauthenticated requests to protected endpoints
+        return HTTP 401 Unauthorized with a WWW-Authenticate header instead of HTTP 403 Forbidden.
+        """
+        return 'Bearer realm="api"'
+
     def authenticate(self, request):
         header = self.simple_jwt_auth.get_header(request)
         if header is None:
@@ -40,18 +47,26 @@ class DualJWTAuthentication(authentication.BaseAuthentication):
 
         # 2. Try Spring Boot microservice JWT token
         token_str = raw_token.decode('utf-8') if isinstance(raw_token, bytes) else str(raw_token)
-        spring_secret = os.getenv('JWT_SECRET_KEY', '404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970')
+        spring_secret = os.getenv('JWT_SECRET') or os.getenv('JWT_SECRET_KEY') or getattr(settings, 'JWT_SECRET', '404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970')
 
         keys_to_try = []
+        if len(spring_secret.encode('utf-8')) >= 32:
+            keys_to_try.append(spring_secret.encode('utf-8'))
         try:
-            keys_to_try.append(base64.b64decode(spring_secret))
+            b64_decoded = base64.b64decode(spring_secret)
+            if len(b64_decoded) >= 32:
+                keys_to_try.append(b64_decoded)
         except Exception:
             pass
-        keys_to_try.append(spring_secret.encode('utf-8'))
 
         for key in keys_to_try:
             try:
-                payload = jwt.decode(token_str, key, algorithms=['HS256', 'HS384', 'HS512'])
+                payload = jwt.decode(
+                    token_str,
+                    key,
+                    algorithms=['HS256', 'HS384', 'HS512'],
+                    options={'verify_aud': False}
+                )
                 username = payload.get('username') or payload.get('sub')
                 if not username:
                     continue

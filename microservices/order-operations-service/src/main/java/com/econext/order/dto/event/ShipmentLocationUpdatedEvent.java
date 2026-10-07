@@ -24,6 +24,7 @@ public class ShipmentLocationUpdatedEvent implements Serializable {
     private Long shipmentId;
     private String shipmentNumber;
     private Long orderId;
+    private java.util.List<Long> orderIds;
     private BigDecimal latitude;
     private BigDecimal longitude;
     private String locationName;

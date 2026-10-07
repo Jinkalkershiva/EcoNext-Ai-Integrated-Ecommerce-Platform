@@ -53,8 +53,8 @@ app:
 # Razorpay Test Configuration
 # ============================================================
 razorpay:
-  key-id: ${RAZORPAY_KEY_ID}
-  key-secret: ${RAZORPAY_KEY_SECRET}
+  key-id: ${RAZORPAY_KEY_ID:rzp_test_ThVMo8TNJCEXHK}
+  key-secret: ${RAZORPAY_KEY_SECRET:v6y75CsdLQQsiT7JoEuximmz}
   currency: ${RAZORPAY_CURRENCY:INR}
 
 

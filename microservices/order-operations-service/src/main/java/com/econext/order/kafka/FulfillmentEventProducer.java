@@ -17,6 +17,7 @@ public class FulfillmentEventProducer {
     public static final String TOPIC_SHIPMENT_STATUS = "shipment.status.updated";
     public static final String TOPIC_SHIPMENT_LOCATION = "shipment.location.updated";
     public static final String TOPIC_CONTAINER_STATUS = "container.status.updated";
+    public static final String TOPIC_ORDER_EVENTS = "order-events";
 
     @Autowired(required = false)
     private KafkaTemplate<String, Object> kafkaTemplate;

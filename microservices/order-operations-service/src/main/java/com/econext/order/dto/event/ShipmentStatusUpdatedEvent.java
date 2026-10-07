@@ -25,6 +25,7 @@ public class ShipmentStatusUpdatedEvent implements Serializable {
     private Long shipmentId;
     private String shipmentNumber;
     private Long orderId;
+    private java.util.List<Long> orderIds;
 
     private String oldStatus;
     private String newStatus;

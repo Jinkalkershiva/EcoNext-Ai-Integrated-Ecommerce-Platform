@@ -22,6 +22,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -54,12 +55,23 @@ public class ContainerService {
             throw new BadRequestException("Container with code '" + request.getContainerCode() + "' already exists.");
         }
 
+        BigDecimal maxW = request.getMaxWeightKg() != null ? request.getMaxWeightKg() : new BigDecimal("25000.00");
+        BigDecimal maxV = request.getMaxVolumeM3() != null ? request.getMaxVolumeM3() : new BigDecimal("80.00");
+        String vehicleNumber = request.getVehicleNumber() != null && !request.getVehicleNumber().isBlank()
+                ? request.getVehicleNumber()
+                : "KA-01-TRUCK-" + (1000 + (System.currentTimeMillis() % 9000));
+
         Container container = Container.builder()
                 .containerCode(request.getContainerCode())
                 .status(ContainerStatus.CREATED)
                 .origin(request.getOrigin())
                 .destination(request.getDestination())
                 .route(request.getRoute())
+                .vehicleNumber(vehicleNumber)
+                .maxWeightKg(maxW)
+                .maxVolumeM3(maxV)
+                .usedWeightKg(BigDecimal.ZERO)
+                .usedVolumeM3(BigDecimal.ZERO)
                 .currentLatitude(request.getCurrentLatitude())
                 .currentLongitude(request.getCurrentLongitude())
                 .lastLocationUpdate(request.getCurrentLatitude() != null ? LocalDateTime.now() : null)
@@ -153,8 +165,41 @@ public class ContainerService {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
+        if (!container.canAcceptShipments()) {
+            throw new BadRequestException("Container [" + container.getContainerCode() + "] is in status " + container.getStatus() + " and cannot accept shipments.");
+        }
+
+        BigDecimal shpWeight = shipment.getUsedWeight() != null ? shipment.getUsedWeight() : BigDecimal.ZERO;
+        BigDecimal shpVolume = shipment.getUsedVolume() != null ? shipment.getUsedVolume() : BigDecimal.ZERO;
+
+        if (container.getRemainingWeightKg().compareTo(shpWeight) < 0) {
+            throw new BadRequestException("Container Capacity Exceeded: Shipment weight (" + shpWeight + " kg) exceeds container remaining capacity (" + container.getRemainingWeightKg() + " kg).");
+        }
+        if (container.getRemainingVolumeM3().compareTo(shpVolume) < 0) {
+            throw new BadRequestException("Container Capacity Exceeded: Shipment volume (" + shpVolume + " m3) exceeds container remaining capacity (" + container.getRemainingVolumeM3() + " m3).");
+        }
+
+        // Update container load
+        container.setUsedWeightKg(container.getUsedWeightKg().add(shpWeight));
+        container.setUsedVolumeM3(container.getUsedVolumeM3().add(shpVolume));
+        containerRepository.save(container);
+
         shipment.setContainer(container);
-        return shipmentRepository.save(shipment);
+        if (container.getVehicleNumber() != null && !container.getVehicleNumber().isBlank()) {
+            shipment.setVehicleNumber(container.getVehicleNumber());
+        }
+        Shipment savedShipment = shipmentRepository.save(shipment);
+
+        LogisticsTrackingEvent tracking = LogisticsTrackingEvent.builder()
+                .shipmentId(savedShipment.getId())
+                .containerId(container.getId())
+                .status(savedShipment.getStatus().name())
+                .locationName(container.getOrigin())
+                .description("Shipment #" + savedShipment.getShipmentNumber() + " loaded onto Truck/Container [" + container.getContainerCode() + "] (Vehicle: " + container.getVehicleNumber() + ")")
+                .build();
+        trackingEventRepository.save(tracking);
+
+        return savedShipment;
     }
 
     @Transactional(readOnly = true)
@@ -181,13 +226,37 @@ public class ContainerService {
     }
 
     private ContainerResponse mapToResponse(Container c) {
+        BigDecimal maxW = c.getMaxWeightKg() != null ? c.getMaxWeightKg() : new BigDecimal("25000.00");
+        BigDecimal maxV = c.getMaxVolumeM3() != null ? c.getMaxVolumeM3() : new BigDecimal("80.00");
+        BigDecimal usedW = c.getUsedWeightKg() != null ? c.getUsedWeightKg() : BigDecimal.ZERO;
+        BigDecimal usedV = c.getUsedVolumeM3() != null ? c.getUsedVolumeM3() : BigDecimal.ZERO;
+        BigDecimal remW = maxW.subtract(usedW).max(BigDecimal.ZERO);
+        BigDecimal remV = maxV.subtract(usedV).max(BigDecimal.ZERO);
+
+        double weightPct = maxW.compareTo(BigDecimal.ZERO) > 0 ? (usedW.doubleValue() / maxW.doubleValue()) * 100.0 : 0.0;
+        double volPct = maxV.compareTo(BigDecimal.ZERO) > 0 ? (usedV.doubleValue() / maxV.doubleValue()) * 100.0 : 0.0;
+
         return ContainerResponse.builder()
                 .id(c.getId())
                 .containerCode(c.getContainerCode())
                 .status(c.getStatus())
+                .warehouse(c.getWarehouse() != null ? c.getWarehouse() : c.getOrigin())
+                .driverId(c.getDriverId())
+                .driverCode(c.getDriverCode())
+                .driverName(c.getDriverName())
                 .origin(c.getOrigin())
                 .destination(c.getDestination())
                 .route(c.getRoute())
+                .vehicleNumber(c.getVehicleNumber())
+                .maxWeightKg(maxW)
+                .maxVolumeM3(maxV)
+                .usedWeightKg(usedW)
+                .usedVolumeM3(usedV)
+                .remainingWeightKg(remW)
+                .remainingVolumeM3(remV)
+                .weightUtilizationPercent(Math.round(weightPct * 10.0) / 10.0)
+                .volumeUtilizationPercent(Math.round(volPct * 10.0) / 10.0)
+                .canAcceptShipments(c.canAcceptShipments())
                 .currentLatitude(c.getCurrentLatitude())
                 .currentLongitude(c.getCurrentLongitude())
                 .lastLocationUpdate(c.getLastLocationUpdate())

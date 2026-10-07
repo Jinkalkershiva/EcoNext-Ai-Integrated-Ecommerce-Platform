@@ -14,6 +14,14 @@ urlpatterns = [
     path('auth/otp/verify/', auth_views.verify_otp_view, name='verify-otp'),
     path('auth/otp/reset-password/', auth_views.reset_password_with_otp_view, name='reset-password-otp'),
 
+    # Customer Saved Delivery Addresses
+    path('auth/addresses/', auth_views.user_addresses_list_create, name='user-addresses'),
+    path('auth/addresses', auth_views.user_addresses_list_create, name='user-addresses-noslash'),
+    path('auth/addresses/<int:pk>/', auth_views.user_address_detail, name='user-address-detail'),
+    path('auth/addresses/<int:pk>', auth_views.user_address_detail, name='user-address-detail-noslash'),
+    path('auth/addresses/<int:pk>/set-default/', auth_views.user_address_set_default, name='user-address-set-default'),
+    path('auth/addresses/<int:pk>/set-default', auth_views.user_address_set_default, name='user-address-set-default-noslash'),
+
     # Access tokens live 24h and refresh tokens 7 days, but there was no way to
     # exchange one for the other — every session silently died after a day.
     path('auth/refresh/', TokenRefreshView.as_view(), name='token-refresh'),

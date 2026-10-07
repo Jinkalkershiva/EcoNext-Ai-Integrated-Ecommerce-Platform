@@ -38,6 +38,9 @@ urlpatterns = [
     path('api/products/', include('products.urls')),
     path('api/copilot/', include('copilot.urls')),
     path('api/chat/', ChatAPIView.as_view(), name='chat-endpoint'),
+    path('api/chat', ChatAPIView.as_view()),
+    path('api/ai/chat/', ChatAPIView.as_view(), name='ai-chat-endpoint'),
+    path('api/ai/chat', ChatAPIView.as_view()),
     path(
         'api/personalization/preferences/',
         UserPreferenceViewSet.as_view({'get': 'list', 'post': 'create'}),
@@ -66,11 +69,42 @@ urlpatterns = [
     path('api/cart/item/<int:item_id>/delete/', cart_views.remove_from_cart, name='remove_from_cart'),
     path('api/cart/clear/', cart_views.clear_cart, name='clear_cart'),
     
-    # Order endpoints
+    # Order endpoints (supporting dual trailing/non-trailing slashes and /api/orders/ & /api/shop/orders/)
     path('api/orders/create/', cart_views.create_order, name='create_order'),
+    path('api/orders/create', cart_views.create_order, name='create_order_noslash'),
+    path('api/shop/orders/create/', cart_views.create_order, name='shop_create_order'),
+    path('api/shop/orders/create', cart_views.create_order, name='shop_create_order_noslash'),
+
     path('api/orders/', cart_views.order_list, name='order_list'),
+    path('api/orders', cart_views.order_list, name='order_list_noslash'),
+    path('api/shop/orders/', cart_views.order_list, name='shop_order_list'),
+    path('api/shop/orders', cart_views.order_list, name='shop_order_list_noslash'),
+
     path('api/orders/<int:order_id>/', cart_views.order_detail, name='order_detail'),
+    path('api/orders/<int:order_id>', cart_views.order_detail, name='order_detail_noslash'),
+    path('api/orders/<str:order_id>/', cart_views.order_detail, name='order_detail_str'),
+    path('api/orders/<str:order_id>', cart_views.order_detail, name='order_detail_str_noslash'),
+    path('api/shop/orders/<int:order_id>/', cart_views.order_detail, name='shop_order_detail'),
+    path('api/shop/orders/<int:order_id>', cart_views.order_detail, name='shop_order_detail_noslash'),
+    path('api/shop/orders/<str:order_id>/', cart_views.order_detail, name='shop_order_detail_str'),
+    path('api/shop/orders/<str:order_id>', cart_views.order_detail, name='shop_order_detail_str_noslash'),
+
     path('api/orders/<int:order_id>/status/', cart_views.update_order_status, name='update_order_status'),
+    path('api/orders/<int:order_id>/status', cart_views.update_order_status, name='update_order_status_noslash'),
+    path('api/orders/<int:order_id>/cancel/', cart_views.cancel_order, name='cancel_order'),
+    path('api/orders/<int:order_id>/cancel', cart_views.cancel_order, name='cancel_order_noslash'),
+    path('api/orders/<int:order_id>/returns/', cart_views.request_order_return, name='request_order_return'),
+    path('api/orders/<int:order_id>/returns', cart_views.request_order_return, name='request_order_return_noslash'),
+    path('api/orders/<int:order_id>/returns-list/', cart_views.get_order_returns, name='get_order_returns'),
+    path('api/orders/<int:order_id>/returns-list', cart_views.get_order_returns, name='get_order_returns_noslash'),
+    path('api/orders/returns/<int:return_id>/approve/', cart_views.approve_order_return, name='approve_order_return'),
+    path('api/orders/returns/<int:return_id>/approve', cart_views.approve_order_return, name='approve_order_return_noslash'),
+    path('api/orders/returns/<int:return_id>/reject/', cart_views.reject_order_return, name='reject_order_return'),
+    path('api/orders/returns/<int:return_id>/reject', cart_views.reject_order_return, name='reject_order_return_noslash'),
+    path('api/orders/returns/<int:return_id>/receive/', cart_views.receive_order_return, name='receive_order_return'),
+    path('api/orders/returns/<int:return_id>/receive', cart_views.receive_order_return, name='receive_order_return_noslash'),
+    path('api/admin/returns/', cart_views.list_admin_returns, name='list_admin_returns'),
+    path('api/admin/returns', cart_views.list_admin_returns, name='list_admin_returns_noslash'),
     # Payment & Razorpay endpoints
     path('api/payments/create-order/', payment_views.create_razorpay_order_view, name='create_razorpay_order'),
     path('api/payments/create-order', payment_views.create_razorpay_order_view, name='create_razorpay_order_noslash'),

@@ -1,0 +1,172 @@
+/* ==========================================================================
+   EcoNext Marketplace ProductsPage (PLP) Styles
+   ========================================================================== */
+
+.products-page-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Header Section */
+.plp-header-bar {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.plp-header-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.plp-main-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.plp-result-count {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.plp-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.plp-sort-select {
+  padding: 0.5rem 0.85rem;
+  font-size: 0.84375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background-color: var(--bg-surface-sunken);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.plp-sort-select:focus {
+  border-color: var(--color-primary);
+}
+
+.plp-mobile-filter-btn {
+  display: none;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.84375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+/* Active Filter Chips */
+.plp-active-filters-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0;
+}
+
+.plp-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(5, 150, 105, 0.2);
+}
+
+.plp-filter-chip-remove {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: opacity var(--transition-fast);
+}
+
+.plp-filter-chip-remove:hover {
+  opacity: 0.7;
+}
+
+.plp-clear-all-btn {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  font-size: 0.78125rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0.2rem 0.4rem;
+}
+
+/* Main Two-Column Layout */
+.plp-body-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.plp-sidebar-column {
+  position: sticky;
+  top: 80px;
+}
+
+.plp-grid-column {
+  min-width: 0; /* Prevents overflow in grid */
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .plp-body-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .plp-sidebar-column {
+    display: none;
+  }
+
+  .plp-sidebar-column.mobile-open {
+    display: block;
+    position: static;
+  }
+
+  .plp-mobile-filter-btn {
+    display: inline-flex;
+  }
+}

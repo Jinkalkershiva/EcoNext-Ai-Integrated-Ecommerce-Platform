@@ -1,0 +1,29 @@
+package com.econext.order.dto;
+
+import com.econext.order.entity.DriverStatus;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class DriverResponse {
+    private Long id;
+    private String driverCode;
+    private String name;
+    private String phone;
+    private String email;
+    private String licenseNumber;
+    private String warehouse;
+    private DriverStatus status;
+    private String currentVehicleNumber;
+    private Long assignedShipmentId;
+    private Long assignedContainerId;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+}

@@ -64,7 +64,7 @@ class CopilotAPIView(APIView):
 class ChatAPIView(APIView):
     """
     Handles conversation-based interactions for the EcoNext AI shopping assistant.
-    Expects {"message": str, "history": list}.
+    Expects {"message": str, "history": list} or {"query": str}.
     """
     permission_classes = [AllowAny]
 
@@ -72,12 +72,21 @@ class ChatAPIView(APIView):
         serializer = ChatRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        message = serializer.validated_data["message"].strip()
+        message = (
+            serializer.validated_data.get("message")
+            or serializer.validated_data.get("query")
+            or ""
+        ).strip()
         history = serializer.validated_data.get("history", [])
         
         if not message:
             return Response(
-                {"success": False, "reply": "Please say something!", "products": []},
+                {
+                    "success": False,
+                    "response": "Please enter a message.",
+                    "reply": "Please enter a message.",
+                    "products": []
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
             

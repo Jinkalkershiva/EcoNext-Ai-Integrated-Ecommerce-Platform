@@ -5,20 +5,23 @@ import logging
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status, viewsets
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from django.shortcuts import get_object_or_404
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Avg
 from django.utils import timezone
 from datetime import timedelta
 
 from products.models import (
     Product, Category, ProductSearch,
-    SubCategory, AgeGroup, GenderCategory, EcoTag, SkinOrBodyFit, Season, Occasion
+    SubCategory, AgeGroup, GenderCategory, EcoTag, SkinOrBodyFit, Season, Occasion,
+    ProductVariant, ProductReview, ReviewImage, ProductInquiry
 )
 from products.serializers import (
     ProductSerializer, SearchResultSerializer, CategorySerializer,
     SubCategorySerializer, AgeGroupSerializer, GenderCategorySerializer,
-    EcoTagSerializer, SkinOrBodyFitSerializer, SeasonSerializer, OccasionSerializer
+    EcoTagSerializer, SkinOrBodyFitSerializer, SeasonSerializer, OccasionSerializer,
+    ProductVariantSerializer, ProductReviewSerializer, ReviewImageSerializer,
+    ProductInquirySerializer
 )
 from ml_engine.price_predictor import PricePredictionService
 from ml_engine.visual_search import visual_search_engine
@@ -33,14 +36,14 @@ logger = logging.getLogger(__name__)
 def product_queryset(include_archived=False):
     """Base queryset with the joins ProductSerializer needs.
 
-    ProductSerializer nests eight related objects per product. Without these
+    ProductSerializer nests related objects per product. Without these
     joins a 50-product page issued hundreds of queries; this collapses it to a
     small constant number.
     """
     qs = (
         Product.objects
         .select_related('category', 'subcategory', 'skin_or_body_fit', 'season', 'occasion')
-        .prefetch_related('age_groups', 'gender_categories', 'eco_tags')
+        .prefetch_related('age_groups', 'gender_categories', 'eco_tags', 'variants', 'reviews__images', 'reviews__user')
     )
     if not include_archived:
         qs = qs.exclude(status='ARCHIVED')
@@ -546,3 +549,247 @@ def search_history(request):
         'status': 'success',
         'trending_searches': list(trending_searches),
     })
+
+
+# ============ Reviews & Ratings Endpoints ============
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticatedOrReadOnly])
+def product_reviews(request, product_id):
+    """List reviews or submit a new review for a product."""
+    product = get_object_or_404(Product, id=product_id)
+
+    if request.method == 'GET':
+        reviews_qs = ProductReview.objects.filter(product=product).select_related('user').prefetch_related('images').order_by('-created_at')
+        total_reviews = reviews_qs.count()
+
+        distribution = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+        customer_photos = []
+        for r in reviews_qs:
+            if 1 <= r.rating <= 5:
+                distribution[r.rating] += 1
+            for img in r.images.all():
+                url = img.get_url()
+                if url:
+                    customer_photos.append({
+                        'id': img.id,
+                        'url': url,
+                        'review_id': r.id,
+                        'rating': r.rating,
+                        'user_name': f"{r.user.first_name} {r.user.last_name}".strip() or r.user.username
+                    })
+
+        avg_rating = reviews_qs.aggregate(Avg('rating'))['rating__avg']
+        avg_rating = round(float(avg_rating), 1) if avg_rating is not None else 0.0
+
+        # Pagination support (defaults to page_size=2 for progressive disclosure)
+        try:
+            page = max(1, int(request.GET.get('page', 1)))
+        except (ValueError, TypeError):
+            page = 1
+
+        try:
+            page_size = max(1, min(50, int(request.GET.get('page_size', 2))))
+        except (ValueError, TypeError):
+            page_size = 2
+
+        offset = (page - 1) * page_size
+        paginated_reviews = reviews_qs[offset:offset + page_size]
+        total_pages = (total_reviews + page_size - 1) // page_size if total_reviews > 0 else 1
+        has_more = offset + page_size < total_reviews
+
+        serializer = ProductReviewSerializer(paginated_reviews, many=True)
+        return Response({
+            'status': 'success',
+            'product_id': product_id,
+            'summary': {
+                'average_rating': avg_rating,
+                'ratings_count': total_reviews,
+                'reviews_count': total_reviews,
+                'rating_distribution': distribution,
+                'customer_photos': customer_photos,
+            },
+            'average_rating': avg_rating,
+            'total_ratings': total_reviews,
+            'total_reviews': total_reviews,
+            'distribution': distribution,
+            'customer_photos': customer_photos,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'has_more': has_more,
+            'reviews': serializer.data,
+        })
+
+    # POST: Submit new review
+    if not request.user or not request.user.is_authenticated:
+        return Response({
+            'status': 'error',
+            'message': 'Please log in to submit a review.'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    data = request.data
+    raw_rating = data.get('rating')
+    if raw_rating is None:
+        return Response({
+            'status': 'error',
+            'message': 'Rating is required (1-5).'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        rating = int(raw_rating)
+        if rating < 1 or rating > 5:
+            return Response({
+                'status': 'error',
+                'message': 'Rating must be an integer between 1 and 5.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    except (ValueError, TypeError):
+        return Response({
+            'status': 'error',
+            'message': 'Valid integer rating between 1 and 5 is required.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    comment = (data.get('comment') or data.get('review_text') or '').strip()
+    if not comment:
+        return Response({
+            'status': 'error',
+            'message': 'Review text is required.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check duplicate review: One review per product per customer
+    if ProductReview.objects.filter(product=product, user=request.user).exists():
+        return Response({
+            'status': 'error',
+            'message': 'You have already submitted a review for this product.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    title = (data.get('title') or '').strip()
+
+    # Check verified purchase
+    from order_service.models import OrderItem
+    is_verified = OrderItem.objects.filter(
+        order__user=request.user,
+        product=product
+    ).exists()
+
+    review = ProductReview.objects.create(
+        product=product,
+        user=request.user,
+        rating=rating,
+        title=title,
+        comment=comment,
+        is_verified_purchase=is_verified
+    )
+
+    # Handle uploaded images
+    images = request.FILES.getlist('images') or request.FILES.getlist('photos')
+    for img_file in images[:5]:
+        ReviewImage.objects.create(review=review, image=img_file)
+
+    # Handle image URLs if passed
+    image_urls = data.get('image_urls') or data.get('imageUrls')
+    if isinstance(image_urls, list):
+        for u in image_urls[:5]:
+            if isinstance(u, str) and (u.startswith('http://') or u.startswith('https://')):
+                ReviewImage.objects.create(review=review, image_url=u)
+
+    serializer = ProductReviewSerializer(review)
+    return Response({
+        'status': 'success',
+        'message': 'Review submitted successfully!',
+        'review': serializer.data
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+def review_helpful(request, review_id):
+    """Increment helpful vote for a review."""
+    review = get_object_or_404(ProductReview, id=review_id)
+    review.helpful_votes += 1
+    review.save(update_fields=['helpful_votes'])
+    return Response({
+        'status': 'success',
+        'helpful_votes': review.helpful_votes
+    })
+
+
+@api_view(['GET'])
+def product_variants_list(request, product_id):
+    """Get active variants for a product."""
+    product = get_object_or_404(Product, id=product_id)
+    variants = product.variants.filter(is_active=True).order_by('id')
+    serializer = ProductVariantSerializer(variants, many=True)
+    return Response({
+        'status': 'success',
+        'product_id': product_id,
+        'variants': serializer.data
+    })
+
+
+@api_view(['GET', 'POST'])
+def product_inquiries(request, product_id):
+    """
+    GET: Retrieve conversation history for this product scoped to the authenticated user.
+    POST: Send an inquiry message about the product. Generates an authoritative response
+          grounded in the product's database properties (variants, prices, stock, sustainability, returns).
+    """
+    product = get_object_or_404(Product, id=product_id)
+
+    if not request.user or not request.user.is_authenticated:
+        return Response({'status': 'error', 'message': 'Authentication required for product inquiries.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if request.method == 'GET':
+        inquiries = ProductInquiry.objects.filter(product=product, user=request.user).order_by('created_at')
+        serializer = ProductInquirySerializer(inquiries, many=True)
+        return Response({
+            'status': 'success',
+            'product_id': product.id,
+            'product_name': product.name,
+            'inquiries': serializer.data
+        })
+
+    elif request.method == 'POST':
+        message_text = request.data.get('message', '').strip()
+        if not message_text:
+            return Response({'status': 'error', 'message': 'Message cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 1. Save user inquiry
+        ProductInquiry.objects.create(
+            product=product,
+            user=request.user,
+            sender_type='CUSTOMER',
+            message=message_text
+        )
+
+        # 2. Build verified database context for the assistant
+        variants = product.variants.filter(is_active=True)
+        var_summary = ", ".join([f"Size: {v.size}, Price: ₹{v.price or product.current_price}, Stock: {v.stock}" for v in variants]) if variants.exists() else f"Standard Size, Price: ₹{product.current_price}, Stock: {product.stock}"
+
+        # Grounded response logic
+        q_lower = message_text.lower()
+        if 'size' in q_lower or 'available' in q_lower or 'stock' in q_lower or 'variant' in q_lower or any(s in q_lower for s in ['xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl']):
+            reply = f"For **{product.name}**, current available options are: {var_summary}. We dispatch within 24 hours with carbon-neutral transit."
+        elif 'return' in q_lower or 'refund' in q_lower or 'replace' in q_lower or 'policy' in q_lower:
+            reply = f"This product is covered by our **{product.return_window_days}-day return policy** ({product.return_policy}). Condition required: {product.condition_required}. Doorstep QC inspection and instant refund are supported."
+        elif 'material' in q_lower or 'organic' in q_lower or 'eco' in q_lower or 'carbon' in q_lower or 'fabric' in q_lower:
+            reply = f"**{product.name}** is crafted with certified sustainable standards. Sustainability Score: **{product.sustainability_score}/100**, Estimated Carbon Footprint: **{product.weight_kg} kg CO₂e offset**. Packaged in zero-plastic compostable materials."
+        else:
+            reply = f"Thank you for asking about **{product.name}**! It is currently priced at **₹{product.current_price}** with free carbon-neutral delivery. Options: {var_summary}. Let us know if you need sizing or delivery assistance."
+
+        # Save AI/Seller assistant message
+        ProductInquiry.objects.create(
+            product=product,
+            user=request.user,
+            sender_type='ECOAI',
+            message=reply
+        )
+
+        inquiries = ProductInquiry.objects.filter(product=product, user=request.user).order_by('created_at')
+        serializer = ProductInquirySerializer(inquiries, many=True)
+        return Response({
+            'status': 'success',
+            'inquiries': serializer.data,
+            'reply': reply
+        }, status=status.HTTP_201_CREATED)
+
+

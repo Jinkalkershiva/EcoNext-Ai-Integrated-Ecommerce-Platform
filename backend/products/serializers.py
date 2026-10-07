@@ -2,9 +2,10 @@ from rest_framework import serializers
 
 from products.models import (
     Product, Category, PriceHistory, ProductSearch,
-    SubCategory, AgeGroup, GenderCategory, EcoTag, SkinOrBodyFit, Season, Occasion
+    SubCategory, AgeGroup, GenderCategory, EcoTag, SkinOrBodyFit, Season, Occasion,
+    ProductVariant, ProductReview, ReviewImage, ProductInquiry
 )
-from accounts.models import UserProfile, ActivityLog
+from accounts.models import UserProfile, ActivityLog, UserAddress
 from shop_cart.models import Cart, CartItem
 from order_service.models import Order, OrderItem, OrderStatusHistory, NotificationLog, Shipment, ShipmentItem, ShipmentEvent
 from ml_engine.models import PricePrediction
@@ -52,6 +53,18 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'description']
 
 
+class ProductVariantSerializer(serializers.ModelSerializer):
+    price = serializers.SerializerMethodField()
+    original_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = ProductVariant
+        fields = ['id', 'size', 'color', 'sku', 'price', 'original_price', 'stock', 'is_active']
+
+    def get_price(self, obj):
+        return str(obj.get_price())
+
+
 class ProductSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     subcategory = SubCategorySerializer(read_only=True)
@@ -61,6 +74,7 @@ class ProductSerializer(serializers.ModelSerializer):
     skin_or_body_fit = SkinOrBodyFitSerializer(read_only=True)
     season = SeasonSerializer(read_only=True)
     occasion = OccasionSerializer(read_only=True)
+    variants = ProductVariantSerializer(many=True, read_only=True)
 
     # Aliases for Admin Panel & Microservice DTO compatibility
     price = serializers.DecimalField(source='current_price', max_digits=10, decimal_places=2, read_only=True)
@@ -77,6 +91,9 @@ class ProductSerializer(serializers.ModelSerializer):
     is_archived = serializers.SerializerMethodField()
     isArchived = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
+    rating = serializers.SerializerMethodField()
+    ratings_count = serializers.SerializerMethodField()
+    reviews_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -86,8 +103,23 @@ class ProductSerializer(serializers.ModelSerializer):
             'image_url', 'imageUrl', 'additional_images', 'additionalImages', 'tags',
             'is_whitelisted', 'isWhitelisted', 'is_archived', 'isArchived', 'status',
             'created_at', 'age_groups', 'gender_categories', 'eco_tags', 'skin_or_body_fit',
-            'season', 'occasion', 'popularity_score', 'sustainability_score', 'sustainabilityScore'
+            'season', 'occasion', 'popularity_score', 'sustainability_score', 'sustainabilityScore',
+            'variants', 'rating', 'ratings_count', 'reviews_count'
         ]
+
+    def get_rating(self, obj):
+        reviews = obj.reviews.all()
+        if reviews.exists():
+            from django.db.models import Avg
+            avg = reviews.aggregate(Avg('rating'))['rating__avg']
+            return round(float(avg), 1) if avg is not None else 0.0
+        return 0.0
+
+    def get_reviews_count(self, obj):
+        return obj.reviews.count()
+
+    def get_ratings_count(self, obj):
+        return obj.reviews.count()
 
     def get_additional_images(self, obj):
         if isinstance(obj.image_features, dict):
@@ -150,12 +182,18 @@ class PricePredictionSerializer(serializers.ModelSerializer):
 
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
+    variant = ProductVariantSerializer(read_only=True)
+    variant_id = serializers.IntegerField(read_only=True)
     subtotal = serializers.SerializerMethodField()
+    price = serializers.SerializerMethodField()
     
     class Meta:
         model = CartItem
-        fields = ['id', 'product', 'quantity', 'subtotal', 'added_at']
+        fields = ['id', 'product', 'variant', 'variant_id', 'price', 'quantity', 'subtotal', 'added_at']
     
+    def get_price(self, obj):
+        return str(obj.get_price())
+
     def get_subtotal(self, obj):
         return str(obj.get_subtotal())
 
@@ -175,11 +213,17 @@ class CartSerializer(serializers.ModelSerializer):
 class OrderItemSerializer(serializers.ModelSerializer):
     product = serializers.SerializerMethodField()
     product_name = serializers.SerializerMethodField()
+    variant = ProductVariantSerializer(read_only=True)
+    variant_name = serializers.CharField(read_only=True)
     subtotal = serializers.SerializerMethodField()
     
     class Meta:
         model = OrderItem
-        fields = ['id', 'product', 'product_name', 'quantity', 'price_at_purchase', 'subtotal']
+        fields = [
+            'id', 'product', 'product_name', 'variant', 'variant_name', 'quantity', 'price_at_purchase',
+            'subtotal', 'return_eligible', 'return_window_days', 'return_policy',
+            'condition_required', 'weight_kg', 'volume_m3'
+        ]
     
     def get_product(self, obj):
         if obj.product:
@@ -199,6 +243,68 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     def get_subtotal(self, obj):
         return str(obj.get_subtotal())
+
+
+class ReviewImageSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReviewImage
+        fields = ['id', 'url', 'created_at']
+
+    def get_url(self, obj):
+        return obj.get_url()
+
+
+class ProductReviewSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    user_initial = serializers.SerializerMethodField()
+    images = ReviewImageSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProductReview
+        fields = [
+            'id', 'product', 'user', 'user_name', 'user_initial',
+            'rating', 'title', 'comment', 'is_verified_purchase',
+            'helpful_votes', 'images', 'created_at'
+        ]
+        read_only_fields = ['user', 'is_verified_purchase', 'helpful_votes', 'created_at']
+
+    def get_user_name(self, obj):
+        if not obj.user:
+            return 'Verified Customer'
+        full_name = f"{obj.user.first_name} {obj.user.last_name}".strip()
+        if full_name:
+            return full_name
+        return obj.user.username
+
+    def get_user_initial(self, obj):
+        name = self.get_user_name(obj)
+        return name[0].upper() if name else 'U'
+
+
+class UserAddressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserAddress
+        fields = [
+            'id', 'address_type', 'full_name', 'phone', 'address_line',
+            'landmark', 'city', 'state', 'zipcode', 'country', 'is_default',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+
+class OrderReturnSerializer(serializers.ModelSerializer):
+    class Meta:
+        from order_service.models import OrderReturn
+        model = OrderReturn
+        fields = [
+            'id', 'order', 'order_item', 'user', 'reason', 'condition_note',
+            'status', 'rejection_reason', 'refund_id', 'refund_amount',
+            'requested_at', 'inspected_at', 'inspected_by', 'received_at',
+            'created_at', 'updated_at'
+        ]
 
 
 class OrderStatusHistorySerializer(serializers.ModelSerializer):
@@ -221,8 +327,9 @@ class ShipmentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'shipment_number', 'order_id', 'status', 'carrier_name',
             'tracking_number', 'vehicle_number', 'origin', 'destination', 'route',
+            'max_weight_kg', 'max_volume_m3', 'used_weight_kg', 'used_volume_m3',
             'current_latitude', 'current_longitude', 'last_location_update',
-            'estimated_delivery', 'events', 'created_at', 'updated_at'
+            'estimated_delivery', 'dispatched_at', 'delivered_at', 'events', 'created_at', 'updated_at'
         ]
 
 
@@ -230,6 +337,7 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
     shipments = ShipmentSerializer(many=True, read_only=True)
+    returns = OrderReturnSerializer(many=True, read_only=True)
     order_reference_number = serializers.CharField(read_only=True)
     canonical_status = serializers.CharField(read_only=True)
     customer_name = serializers.SerializerMethodField()
@@ -237,7 +345,14 @@ class OrderSerializer(serializers.ModelSerializer):
     shipment_id = serializers.SerializerMethodField()
     shipment_number = serializers.SerializerMethodField()
     shipment_status = serializers.SerializerMethodField()
+    current_latitude = serializers.SerializerMethodField()
+    current_longitude = serializers.SerializerMethodField()
+    vehicle_number = serializers.SerializerMethodField()
+    origin = serializers.SerializerMethodField()
+    destination = serializers.SerializerMethodField()
+    route = serializers.SerializerMethodField()
     tracking_timeline = serializers.SerializerMethodField()
+    return_eligibility = serializers.SerializerMethodField()
     
     class Meta:
         model = Order
@@ -247,8 +362,12 @@ class OrderSerializer(serializers.ModelSerializer):
             'customer_email', 'shipping_address', 'city', 'state', 'zipcode',
             'country', 'payment_method', 'payment_status', 'razorpay_order_id',
             'razorpay_payment_id', 'carrier_name', 'tracking_number',
-            'estimated_delivery', 'shipment_id', 'shipment_number', 'shipment_status',
-            'shipments', 'items', 'status_history', 'tracking_timeline',
+            'estimated_delivery', 'delivered_at', 'total_weight_kg', 'total_volume_m3',
+            'refund_status', 'cancellation_reason', 'return_eligibility',
+            'shipment_id', 'shipment_number', 'shipment_status',
+            'current_latitude', 'current_longitude', 'vehicle_number',
+            'origin', 'destination', 'route',
+            'shipments', 'items', 'status_history', 'returns', 'tracking_timeline',
             'created_at', 'updated_at'
         ]
 
@@ -269,11 +388,78 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_shipment_number(self, obj):
         first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
-        return first_shp.shipment_number if first_shp else None
+        if first_shp:
+            return first_shp.shipment_number
+        if obj.tracking_number and obj.canonical_status in ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED']:
+            return f"SHP-{obj.id:05d}"
+        return None
 
     def get_shipment_status(self, obj):
         first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
-        return first_shp.status if first_shp else None
+        if first_shp:
+            return first_shp.status
+        canonical = obj.canonical_status
+        if canonical == 'DELIVERED':
+            return 'DELIVERED'
+        elif canonical in ['OUT_FOR_DELIVERY', 'DELIVERY_VERIFICATION_STARTED', 'DELIVERY_VERIFIED']:
+            return 'OUT_FOR_DELIVERY'
+        elif canonical in ['SHIPPED', 'IN_TRANSIT']:
+            return 'IN_TRANSIT'
+        elif canonical in ['PACKED', 'READY_FOR_SHIPMENT', 'ASSIGNED_TO_SHIPMENT']:
+            return 'READY_FOR_DISPATCH'
+        return None
+
+    def get_current_latitude(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return float(first_shp.current_latitude) if (first_shp and first_shp.current_latitude is not None) else None
+
+    def get_current_longitude(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return float(first_shp.current_longitude) if (first_shp and first_shp.current_longitude is not None) else None
+
+    def get_vehicle_number(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return first_shp.vehicle_number if (first_shp and first_shp.vehicle_number) else ''
+
+    def get_origin(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return first_shp.origin if (first_shp and first_shp.origin) else ''
+
+    def get_destination(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        if first_shp and first_shp.destination:
+            return first_shp.destination
+        return f"{obj.city}, {obj.state}".strip(', ')
+
+    def get_route(self, obj):
+        first_shp = obj.shipments.first() if hasattr(obj, 'shipments') else None
+        return first_shp.route if (first_shp and first_shp.route) else ''
+
+    def get_return_eligibility(self, obj):
+        eligible, reason = obj.is_return_eligible()
+        # Calculate expiry date if applicable
+        expiry_iso = None
+        if obj.status in ['DELIVERED', 'delivered'] or obj.delivered_at:
+            deliv = obj.delivered_at or obj.updated_at
+            min_days = 7
+            for item in obj.items.all():
+                if item.return_eligible:
+                    min_days = item.return_window_days
+                    break
+            if deliv:
+                try:
+                    from django.utils import timezone
+                    expiry_dt = deliv + timezone.timedelta(days=min_days)
+                    expiry_iso = expiry_dt.isoformat()
+                except Exception:
+                    pass
+
+        return {
+            'eligible': eligible,
+            'reason': reason,
+            'returnWindowExpiry': expiry_iso,
+            'hasActiveReturn': obj.returns.filter(status__in=['RETURN_REQUESTED', 'INSPECTION_REQUIRED', 'RETURN_APPROVED', 'RETURN_IN_TRANSIT', 'RETURN_RECEIVED', 'REFUND_PENDING', 'REFUNDED']).exists() if hasattr(obj, 'returns') else False
+        }
 
     def get_tracking_timeline(self, obj):
         """
@@ -370,3 +556,19 @@ class SearchResultSerializer(serializers.Serializer):
     product = ProductSerializer()
     similarity_score = serializers.FloatField()
     intent_match = serializers.CharField()
+
+
+class ProductInquirySerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductInquiry
+        fields = ['id', 'product', 'user', 'user_name', 'sender_type', 'message', 'is_read', 'created_at']
+        read_only_fields = ['user', 'created_at']
+
+    def get_user_name(self, obj):
+        if not obj.user:
+            return 'Guest'
+        name = f"{obj.user.first_name} {obj.user.last_name}".strip()
+        return name or obj.user.username
+

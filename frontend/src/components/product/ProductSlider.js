@@ -1,10 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, PackageOpen } from 'lucide-react';
 import ProductCard from './ProductCard';
 import './ProductSlider.css';
 
 export const ProductSlider = ({
   products = [],
+  loading = false,
+  emptyMessage = 'No products available in this collection.',
   onViewDetails,
   onAddToCart,
   className = '',
@@ -19,33 +21,56 @@ export const ProductSlider = ({
   const checkScroll = () => {
     if (!trackRef.current) return;
     const { scrollLeft, scrollWidth, clientWidth } = trackRef.current;
-    setCanScrollLeft(scrollLeft > 5);
-    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 5);
+    setCanScrollLeft(scrollLeft > 8);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 8);
   };
 
   useEffect(() => {
     checkScroll();
     const el = trackRef.current;
-    if (el) {
-      el.addEventListener('scroll', checkScroll, { passive: true });
-      window.addEventListener('resize', checkScroll);
-    }
-    return () => {
-      if (el) el.removeEventListener('scroll', checkScroll);
-      window.removeEventListener('resize', checkScroll);
+    if (!el) return;
+
+    let timeoutId = null;
+    const handleScrollEvent = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(checkScroll, 40);
     };
-  }, [products]);
+
+    el.addEventListener('scroll', handleScrollEvent, { passive: true });
+    window.addEventListener('resize', handleScrollEvent);
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      el.removeEventListener('scroll', handleScrollEvent);
+      window.removeEventListener('resize', handleScrollEvent);
+    };
+  }, [products, loading]);
 
   const handleScroll = (direction) => {
     if (!trackRef.current) return;
-    const scrollAmount = 320;
+    const containerWidth = trackRef.current.clientWidth;
+    const scrollAmount = Math.max(260, Math.floor(containerWidth * 0.75));
     trackRef.current.scrollBy({
       left: direction === 'left' ? -scrollAmount : scrollAmount,
       behavior: 'smooth',
     });
   };
 
-  if (!products || products.length === 0) return null;
+  if (!loading && (!products || products.length === 0)) {
+    if (!title && !subtitle) return null;
+    return (
+      <div className={`product-slider-container ${className}`}>
+        <div style={{ marginBottom: 'var(--space-3)' }}>
+          {title && <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>{title}</h2>}
+          {subtitle && <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', margin: '4px 0 0 0' }}>{subtitle}</p>}
+        </div>
+        <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', backgroundColor: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+          <PackageOpen size={24} style={{ margin: '0 auto 0.5rem', opacity: 0.6 }} />
+          <div>{emptyMessage}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`product-slider-container ${className}`}>
@@ -61,7 +86,7 @@ export const ProductSlider = ({
         >
           <div>
             {title && (
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0 }}>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>
                 {title}
               </h2>
             )}
@@ -105,15 +130,42 @@ export const ProductSlider = ({
       )}
 
       <div className="product-slider-track" ref={trackRef}>
-        {products.map((product) => (
-          <div key={product.id} className="product-slider-item">
-            <ProductCard
-              product={product}
-              onViewDetails={onViewDetails}
-              onAddToCart={onAddToCart}
-            />
-          </div>
-        ))}
+        {loading
+          ? [...Array(6)].map((_, i) => (
+              <div key={i} className="product-slider-item" style={{ minWidth: '220px' }}>
+                <div
+                  className="card-base"
+                  style={{
+                    height: '340px',
+                    padding: '0.75rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.6rem',
+                    borderRadius: 'var(--radius-md)',
+                  }}
+                >
+                  <div
+                    className="skeleton-box"
+                    style={{ aspectRatio: '1 / 1', width: '100%', borderRadius: 'var(--radius-sm)' }}
+                  />
+                  <div className="skeleton-box" style={{ height: '12px', width: '35%' }} />
+                  <div className="skeleton-box" style={{ height: '16px', width: '85%' }} />
+                  <div className="skeleton-box" style={{ height: '14px', width: '50%' }} />
+                </div>
+              </div>
+            ))
+          : products.map((item, idx) => {
+              const prod = item?.product || item;
+              return (
+                <div key={prod?.id || idx} className="product-slider-item">
+                  <ProductCard
+                    product={prod}
+                    onViewDetails={onViewDetails}
+                    onAddToCart={onAddToCart}
+                  />
+                </div>
+              );
+            })}
       </div>
     </div>
   );

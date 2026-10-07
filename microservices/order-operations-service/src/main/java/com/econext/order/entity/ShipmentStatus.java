@@ -1,7 +1,11 @@
 package com.econext.order.entity;
 
 public enum ShipmentStatus {
+    OPEN,
     CREATED,
+    ASSIGNED,
+    FULL,
+    READY_FOR_DISPATCH,
     PACKED,
     DISPATCHED,
     IN_TRANSIT,

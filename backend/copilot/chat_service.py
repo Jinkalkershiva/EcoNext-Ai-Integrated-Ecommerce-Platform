@@ -72,8 +72,11 @@ def run_chat_pipeline(message: str, history: List[Dict[str, str]]) -> Dict[str, 
         # Step 4: Call Gemini
         config = _get_api_config()
         if not config["api_key"]:
+            logger.warning("GEMINI_API_KEY configured: false")
             raise ValueError("GEMINI_API_KEY environment variable is not set")
             
+        logger.info("GEMINI_API_KEY configured: true (model: %s)", config["model"])
+
         payload = {
             "model": config["model"],
             "messages": messages,
@@ -84,20 +87,53 @@ def run_chat_pipeline(message: str, history: List[Dict[str, str]]) -> Dict[str, 
             "Content-Type": "application/json",
         }
         
-        response = requests.post(config["api_url"], headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        reply_text = response.json()["choices"][0]["message"]["content"].strip()
-        
+        reply_text = None
+        try:
+            response = requests.post(config["api_url"], headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            if "choices" in data and len(data["choices"]) > 0:
+                reply_text = data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            logger.info("Chat pipeline OpenAI endpoint attempt failed; trying Google native endpoint")
+            native_url = f"https://generativelanguage.googleapis.com/v1beta/models/{config['model']}:generateContent"
+            native_contents = []
+            for m in messages:
+                role = "user" if m.get("role") in ["user", "system"] else "model"
+                native_contents.append({"role": role, "parts": [{"text": m.get("content", "")}]})
+            native_payload = {
+                "contents": native_contents,
+                "generationConfig": {"temperature": 0.7}
+            }
+            native_headers = {
+                "x-goog-api-key": config["api_key"],
+                "Content-Type": "application/json",
+            }
+            native_resp = requests.post(native_url, headers=native_headers, json=native_payload, timeout=30)
+            native_resp.raise_for_status()
+            native_data = native_resp.json()
+            reply_text = native_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        if not reply_text:
+            reply_text = "I received your message, but was unable to generate a response. Please try again."
+
         return {
             "success": True,
+            "response": reply_text,
             "reply": reply_text,
             "products": products_data
         }
         
     except Exception as e:
-        logger.exception("Chat pipeline failed")
+        err_msg = str(e)
+        api_key = config.get("api_key", "") if "config" in locals() else ""
+        if api_key and api_key in err_msg:
+            err_msg = err_msg.replace(api_key, "[REDACTED]")
+        logger.error("Chat pipeline failed: %s", err_msg)
+        fallback_msg = "Sorry, I'm having trouble connecting right now. Please try again."
         return {
             "success": False,
-            "reply": "Sorry, I'm having trouble connecting right now. Please try again.",
+            "response": fallback_msg,
+            "reply": fallback_msg,
             "products": []
         }

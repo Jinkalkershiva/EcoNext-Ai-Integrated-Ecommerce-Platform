@@ -7,19 +7,24 @@ import {
   Cpu,
   TrendingUp,
   CheckCircle,
-  ShoppingBag,
-  ShieldCheck,
-  Globe,
+  Tag,
+  Zap,
+  Flame,
+  Baby,
+  Backpack,
+  User,
+  Users,
+  Shirt,
 } from 'lucide-react';
 import { apiService } from '../api';
 import { useNavigation } from '../context/NavigationContext';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 
-// Reusable UI Components
-import Hero from '../components/common/Hero';
-import Marquee from '../components/common/Marquee';
-import FeatureGrid from '../components/common/FeatureGrid';
+// Marketplace UI Components
+import HeroCarousel from '../components/common/HeroCarousel';
+import BenefitStrip from '../components/common/BenefitStrip';
+import CategoryDiscovery from '../components/common/CategoryDiscovery';
 import ProductSlider from '../components/product/ProductSlider';
 import ProductGrid from '../components/product/ProductGrid';
 import RecommendationWidget from '../components/ai/RecommendationWidget';
@@ -35,6 +40,7 @@ export const HomePage = () => {
 
   const [products, setProducts] = useState([]);
   const [trendingProducts, setTrendingProducts] = useState([]);
+  const [budgetProducts, setBudgetProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -43,20 +49,26 @@ export const HomePage = () => {
       setLoading(true);
       try {
         const [prodData, trendData] = await Promise.all([
-          apiService.getProducts(1, 8),
+          apiService.getProducts(1, 16),
           apiService.getTrendingProducts(),
         ]);
 
         if (isMounted) {
           if (prodData && prodData.status === 'success') {
-            setProducts(prodData.products || []);
+            const allProds = prodData.products || [];
+            setProducts(allProds);
+            // Budget deals: items under ₹1500 or sorted by price
+            const underBudget = allProds.filter(p => Number(p.current_price || p.price || 0) <= 1500);
+            setBudgetProducts(underBudget.length >= 4 ? underBudget : allProds.slice(0, 6));
           }
           if (trendData && trendData.status === 'success') {
-            setTrendingProducts(trendData.trending_products || []);
+            const rawTrending = trendData.trending_products || [];
+            const normalizedTrending = rawTrending.map(item => item.product || item);
+            setTrendingProducts(normalizedTrending);
           }
         }
       } catch (err) {
-        console.warn('Error loading homepage data:', err.message);
+        console.warn('Error loading homepage marketplace data:', err.message);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -68,324 +80,233 @@ export const HomePage = () => {
   }, []);
 
   const segments = [
-    { key: 'kids', title: 'EcoNext Kids', desc: 'Safe, organic, and non-toxic essentials', icon: '🌱' },
-    { key: 'teens', title: 'EcoNext Teens', desc: 'Ethical street fashion & accessories', icon: '⚡' },
-    { key: 'men', title: 'EcoNext Men', desc: 'Sustainable apparel, grooming & daily goods', icon: '👔' },
-    { key: 'women', title: 'EcoNext Women', desc: 'Conscious fashion, skincare & home goods', icon: '🌿' },
-    { key: 'unisex', title: 'EcoNext Unisex', desc: 'Universal sustainable lifestyle picks', icon: '✨' },
+    { key: 'kids', title: 'EcoNext Kids', desc: 'Organic, non-toxic certified baby & kids essentials', icon: Baby, badge: 'Certified Safe' },
+    { key: 'teens', title: 'EcoNext Teens', desc: 'Ethical street fashion, bags & recycled accessories', icon: Backpack, badge: 'Trending Now' },
+    { key: 'men', title: 'EcoNext Men', desc: 'Sustainable apparel, grooming & daily eco gear', icon: Shirt, badge: 'Pure Organic' },
+    { key: 'women', title: 'EcoNext Women', desc: 'Conscious fashion, botanical beauty & home goods', icon: User, badge: 'Cruelty Free' },
+    { key: 'unisex', title: 'EcoNext Unisex', desc: 'Universal sustainable picks & zero-waste lifestyle', icon: Users, badge: '100% Vegan' },
   ];
 
-  const featuredProduct = products.length > 0 ? products[0] : null;
-
-  // Marquee Band Items
-  const marqueeItems = [
-    { text: '100% Eco-Certified Materials', icon: <Leaf size={14} /> },
-    { text: 'Machine Learning Price Forecasts', icon: <Cpu size={14} /> },
-    { text: 'Carbon-Neutral Worldwide Delivery', icon: <Globe size={14} /> },
-    { text: 'Zero Plastic Packaging Guarantee', icon: <ShieldCheck size={14} /> },
-    { text: 'Visual AI Snap & Shop', icon: <Sparkles size={14} /> },
-    { text: 'Transparent Supply Chains', icon: <CheckCircle size={14} /> },
-  ];
-
-  // 3-Column AI Feature Cards
   const aiFeatures = [
     {
-      icon: <Camera size={24} />,
-      title: 'Snap & Shop (Visual Search)',
-      description:
-        'Upload any photo or screenshot. Our computer vision model instantly matches visually similar sustainable alternatives in our verified catalog.',
-      variant: 'primary',
-      footer: (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigateTo('visual-search')}
-        >
-          Try Visual Search
-        </Button>
-      ),
+      icon: <Camera size={22} />,
+      title: 'Snap & Shop Visual Search',
+      description: 'Upload any product photo or screenshot. Our computer vision neural network matches verified sustainable alternatives instantly.',
+      cta: 'Try Visual Search',
+      action: () => navigateTo('visual-search'),
     },
     {
-      icon: <Cpu size={24} />,
-      title: '7-Day Price Forecasting',
-      description:
-        'Trained linear regression models analyze product price volatility to forecast upcoming trends and advise the best time to purchase.',
-      variant: 'accent',
-      footer: (
-        <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-primary)' }}>
-          Available on all product detail pages
-        </span>
-      ),
+      icon: <Cpu size={22} />,
+      title: '7-Day Price Regression Forecasts',
+      description: 'Predictive pricing intelligence analyzes volatility patterns and recommends the optimal day to purchase at the lowest price.',
+      cta: 'Explore Catalog',
+      action: () => navigateTo('products'),
     },
     {
-      icon: <Sparkles size={24} />,
-      title: 'EcoNext AI Assistant',
-      description:
-        'Chat with our intelligent shopping assistant to evaluate material biodegradability, compare sustainability scores, and get curated recommendations.',
-      variant: 'tertiary',
-      footer: (
-        <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-primary)' }}>
-          Click the AI assistant widget in bottom-right
-        </span>
-      ),
+      icon: <Sparkles size={22} />,
+      title: 'EcoNext AI Sustainability Copilot',
+      description: 'Consult our conversational AI assistant to compare carbon footprints, check GOTS certifications, and curate eco gift sets.',
+      cta: 'Chat with Copilot',
+      action: () => {
+        const copilotBtn = document.querySelector('.copilot-toggle-btn');
+        if (copilotBtn) copilotBtn.click();
+      },
     },
   ];
 
   return (
-    <div className="container">
-      {/* 1. Hero Section (Two-column with CTAs and animated visual panel) */}
-      <Hero
-        tag="AI-Driven Sustainable Commerce"
-        tagIcon={<Sparkles size={14} />}
-        headline={
-          <>
-            Shop Smarter. <br />
-            Live <span className="highlight">Greener.</span>
-          </>
-        }
-        subtext="Discover verified eco-friendly goods powered by machine learning price predictions, visual snap-search, and personalized sustainability curation."
-        primaryCta={{
-          text: 'Explore Collection',
-          onClick: () => navigateTo('products'),
-          icon: <ArrowRight size={18} />,
-        }}
-        secondaryCta={{
-          text: 'Snap & Shop (Visual AI)',
-          onClick: () => navigateTo('visual-search'),
-          icon: <Camera size={18} />,
-        }}
-        stats={[
-          { value: '100%', label: 'Eco-Certified Goods' },
-          { value: '7-Day', label: 'Price Forecasting' },
-          { value: '0 kg', label: 'Net Carbon Footprint' },
-        ]}
-        visual={
-          featuredProduct ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-              <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 'var(--radius-md)' }}>
-                {featuredProduct.image_url ? (
-                  <img
-                    src={featuredProduct.image_url}
-                    alt={featuredProduct.name}
-                    style={{
-                      width: '100%',
-                      aspectRatio: '16/11',
-                      objectFit: 'cover',
-                      display: 'block',
-                      borderRadius: 'var(--radius-md)',
-                    }}
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: '100%',
-                      aspectRatio: '16/11',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: 'var(--bg-surface-sunken)',
-                      color: 'var(--text-muted)',
-                      borderRadius: 'var(--radius-md)',
-                      fontSize: '0.9rem',
-                      fontWeight: 500,
-                    }}
-                  >
-                    Image unavailable
-                  </div>
-                )}
-                <div style={{ position: 'absolute', top: '10px', left: '10px' }}>
-                  <Badge variant="eco" size="sm" icon={<Leaf size={11} />}>
-                    Eco Verified Pick
-                  </Badge>
-                </div>
-              </div>
+    <div className="homepage-wrapper">
+      {/* 1. Promotional Marketplace Hero Carousel */}
+      <HeroCarousel />
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '4px' }}>
-                <div>
-                  <h3
-                    style={{
-                      fontSize: '1.05rem',
-                      fontWeight: 700,
-                      margin: 0,
-                      cursor: 'pointer',
-                      color: 'var(--text-primary)',
-                    }}
-                    onClick={() => navigateTo(`product/${featuredProduct.id}`)}
-                  >
-                    {featuredProduct.name}
-                  </h3>
-                  <div
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '1.2rem',
-                      fontWeight: 700,
-                      color: 'var(--color-price)',
-                      marginTop: '4px',
-                    }}
-                  >
-                    ₹
-                    {Number(featuredProduct.current_price || 0).toLocaleString('en-IN', {
-                      minimumFractionDigits: 2,
-                    })}
-                  </div>
-                </div>
+      {/* 2. Marketplace Trust & Value Benefit Strip */}
+      <BenefitStrip />
 
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => addToCart(featuredProduct, 1)}
-                  icon={<ShoppingBag size={15} />}
-                >
-                  Add
-                </Button>
-              </div>
+      {/* 3. Visual Category Discovery Row */}
+      <CategoryDiscovery />
 
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  padding: 'var(--space-2) var(--space-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: 'var(--bg-surface-sunken)',
-                  border: '1px solid var(--border-subtle)',
-                  marginTop: '4px',
-                }}
-              >
-                <ShieldCheck size={18} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Best Price Guarantee
-                  </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                    AI Forecast: Buy today for lowest weekly rate
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center',
-                padding: 'var(--space-6)',
-                backgroundColor: 'var(--bg-surface-sunken)',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px dashed var(--border-subtle)',
-                textAlign: 'center',
-                minHeight: '260px',
-                gap: 'var(--space-3)',
-              }}
-            >
-              <Leaf size={40} style={{ color: 'var(--color-primary)' }} />
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                Eco-Verified Catalog
-              </h3>
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '280px' }}>
-                Explore database-verified sustainable products curated with ESG metrics.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => navigateTo('products')}>
-                Browse Catalog
-              </Button>
-            </div>
-          )
-        }
-      />
-
-      {/* 2. Full-Width Marquee Band Directly Under Hero */}
-      <Marquee items={marqueeItems} speed={32} />
-
-      {/* 3. Trending Picks Section using ProductSlider */}
-      <section style={{ margin: 'var(--space-10) 0' }}>
+      {/* 4. Trending Eco Picks (Horizontal High-Density Slider) */}
+      <section className="merchandising-section">
         <ProductSlider
-          title="Trending Eco Picks"
-          subtitle="Most loved sustainable essentials curated by our community"
-          products={trendingProducts.length > 0 ? trendingProducts : products.slice(0, 6)}
+          title={
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Flame size={22} style={{ color: '#EF4444' }} />
+              Trending Sustainable Picks
+            </span>
+          }
+          subtitle="Top-rated conscious essentials loved by 50,000+ eco-conscious shoppers this week"
+          products={trendingProducts.length > 0 ? trendingProducts : products.slice(0, 8)}
           onViewDetails={(id) => navigateTo(`product/${id}`)}
           onAddToCart={(prod) => addToCart(prod, 1)}
           headerAction={
-            <Button
-              variant="outline"
-              size="sm"
+            <button
+              type="button"
+              className="section-view-all-btn"
               onClick={() => navigateTo('trending')}
-              icon={<TrendingUp size={14} />}
             >
-              View All
-            </Button>
+              View All <ArrowRight size={15} />
+            </button>
           }
         />
       </section>
 
-      {/* 4. FeatureGrid (3 Columns of Key Capabilities) */}
-      <section style={{ margin: 'var(--space-12) 0' }}>
-        <FeatureGrid
-          title="Intelligent Eco-Commerce"
-          subtitle="We leverage practical machine learning to save you money, eliminate greenwashing, and make conscious shopping effortless."
-          features={aiFeatures}
-        />
+      {/* 5. Mid-Page High-Conversion Promotional Banner */}
+      <section className="promotional-mid-banner">
+        <div className="promo-banner-content">
+          <div className="promo-badge">
+            <Zap size={13} />
+            <span>SEASONAL SUSTAINABLE FESTIVAL</span>
+          </div>
+          <h2 className="promo-banner-title">
+            Switch to Zero-Waste Living with Up to 40% OFF
+          </h2>
+          <p className="promo-banner-desc">
+            Explore 100% plastic-free kitchenware, compostable home essentials, and certified organic textiles. Handcrafted by ethical artisan cooperatives with zero carbon footprint.
+          </p>
+          <div style={{ marginTop: '0.5rem' }}>
+            <button
+              type="button"
+              className="promo-banner-btn"
+              onClick={() => navigateTo('products')}
+            >
+              Shop Sustainable Festival <ArrowRight size={16} />
+            </button>
+          </div>
+        </div>
       </section>
 
-      {/* 5. Shop By Persona Segment Cards */}
-      <section style={{ margin: 'var(--space-10) 0' }}>
-        <div className="section-header">
-          <div className="section-title-group">
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0 }}>
-              Shop By Persona
+      {/* 6. Budget Deals & Eco Picks Under ₹1500 */}
+      {budgetProducts.length > 0 && (
+        <section className="merchandising-section">
+          <ProductSlider
+            title={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Tag size={20} style={{ color: 'var(--color-primary)' }} />
+                Eco Budget Deals &bull; Under ₹1,500
+              </span>
+            }
+            subtitle="Affordable sustainable alternatives that don't compromise on quality or planet impact"
+            products={budgetProducts}
+            onViewDetails={(id) => navigateTo(`product/${id}`)}
+            onAddToCart={(prod) => addToCart(prod, 1)}
+            headerAction={
+              <button
+                type="button"
+                className="section-view-all-btn"
+                onClick={() => navigateTo('products')}
+              >
+                Browse All Deals <ArrowRight size={15} />
+              </button>
+            }
+          />
+        </section>
+      )}
+
+      {/* 7. Shop By Persona Segment Cards */}
+      <section className="merchandising-section">
+        <div className="section-header-row">
+          <div className="section-title-wrap">
+            <h2 className="section-main-title">
+              <Leaf size={20} style={{ color: 'var(--color-primary)' }} />
+              Shop by Lifestyle & Persona
             </h2>
-            <span className="section-subtitle">
-              Tailored sustainable selections for every lifestyle
+            <span className="section-sub-title">
+              Curated conscious collections tailored for every member of the family
             </span>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
+          <button
+            type="button"
+            className="section-view-all-btn"
             onClick={() => navigateTo('products')}
-            icon={<ArrowRight size={14} />}
-            iconPosition="right"
           >
-            Explore All
-          </Button>
+            Explore All Segments <ArrowRight size={15} />
+          </button>
         </div>
 
         <div className="segment-cards-grid">
-          {segments.map((seg) => (
-            <div
-              key={seg.key}
-              className="segment-card"
-              onClick={() => navigateTo(seg.key)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && navigateTo(seg.key)}
-            >
-              <div className="segment-card-icon">{seg.icon}</div>
-              <div className="segment-card-title">{seg.title}</div>
-              <div className="segment-card-desc">{seg.desc}</div>
+          {segments.map((seg) => {
+            const IconComponent = seg.icon;
+            return (
+              <div
+                key={seg.key}
+                className="segment-card"
+                onClick={() => navigateTo(seg.key)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && navigateTo(seg.key)}
+              >
+                <div className="segment-card-icon">
+                  <IconComponent size={26} strokeWidth={1.8} aria-hidden="true" />
+                </div>
+                <div className="segment-card-title">{seg.title}</div>
+                <div className="segment-card-desc">{seg.desc}</div>
+                {seg.badge && (
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <Badge variant="eco" size="sm">
+                      {seg.badge}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 8. AI Innovation & Machine Learning Showcase */}
+      <section className="ai-showcase-section">
+        <div className="section-title-wrap">
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: 'var(--color-primary)', fontWeight: 800, fontSize: '0.8125rem' }}>
+            <Sparkles size={16} />
+            <span>AI-POWERED COMMERCE</span>
+          </div>
+          <h2 className="section-main-title" style={{ fontSize: '1.45rem' }}>
+            Next-Generation Smart Shopping Technology
+          </h2>
+          <span className="section-sub-title">
+            EcoNext integrates computer vision, machine learning price forecasting, and neural conversational assistants to make conscious buying seamless.
+          </span>
+        </div>
+
+        <div className="ai-cards-grid">
+          {aiFeatures.map((feature, idx) => (
+            <div key={idx} className="ai-card">
+              <div className="ai-card-icon-wrap">{feature.icon}</div>
+              <div className="ai-card-title">{feature.title}</div>
+              <div className="ai-card-desc">{feature.description}</div>
+              <div className="ai-card-action">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={feature.action}
+                  icon={<ArrowRight size={14} />}
+                  iconPosition="right"
+                >
+                  {feature.cta}
+                </Button>
+              </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* 6. Authenticated Personalized Recommendations */}
+      {/* 9. Personalized Recommendations (When Authenticated) */}
       {isAuthenticated && (
-        <section style={{ margin: 'var(--space-10) 0' }}>
+        <section className="merchandising-section">
           <RecommendationWidget />
         </section>
       )}
 
-      {/* 7. Curated Full Eco Catalog Grid */}
-      <section style={{ margin: 'var(--space-12) 0' }}>
-        <div className="section-header">
-          <div className="section-title-group">
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0 }}>
-              Explore Full Catalog
+      {/* 10. Verified Full Marketplace Catalog Grid (4-5 Column Dense Grid) */}
+      <section className="merchandising-section">
+        <div className="section-header-row">
+          <div className="section-title-wrap">
+            <h2 className="section-main-title">
+              <TrendingUp size={20} style={{ color: 'var(--color-primary)' }} />
+              Explore Full Marketplace Catalog
             </h2>
-            <span className="section-subtitle">
-              Verified sustainable products made from renewable, recycled, and non-toxic materials
+            <span className="section-sub-title">
+              All items verified for sustainable sourcing, fair-trade manufacturing, and recyclable packaging
             </span>
           </div>
           <Button variant="primary" size="sm" onClick={() => navigateTo('products')}>
@@ -400,57 +321,32 @@ export const HomePage = () => {
         />
       </section>
 
-      {/* 8. Sustainability & Impact Banner */}
-      <section className="sustainability-banner">
-        <div>
+      {/* 11. Sustainability & ESG Impact Trust Banner */}
+      <section className="sustainability-trust-card">
+        <div className="trust-card-content">
           <Badge variant="eco" size="sm" icon={<Leaf size={12} />}>
-            Our Commitment
+            Verified ESG Commitment
           </Badge>
-          <h2 style={{ margin: 'var(--space-3) 0 var(--space-4) 0', fontSize: '1.75rem', fontWeight: 800 }}>
-            Transparent Sustainability. Zero Greenwashing.
+          <h2 className="trust-card-title">
+            100% Transparent Sustainability. Zero Greenwashing.
           </h2>
-          <p
-            style={{
-              color: 'var(--text-secondary)',
-              marginBottom: 'var(--space-6)',
-              lineHeight: 1.6,
-              fontSize: '0.95rem',
-            }}
-          >
-            Every product on EcoNext passes our strict verification framework: fair-trade labor, non-toxic organic materials, plastic-free packaging, and certified carbon-offset shipping.
+          <p className="trust-card-desc">
+            Every product on EcoNext passes our strict 4-point verification framework: fair-trade labor, non-toxic organic materials, plastic-free packaging, and certified carbon-neutral shipping.
           </p>
-          <Button variant="primary" size="md" onClick={() => navigateTo('products')}>
-            Shop With Impact
-          </Button>
         </div>
 
-        <div className="sustainability-points">
-          <div className="sustainability-point-item">
-            <CheckCircle
-              size={22}
-              style={{ color: 'var(--color-primary)', flexShrink: 0, marginTop: '2px' }}
-            />
-            <div className="sustainability-point-text">
-              <strong>Verified Certifications:</strong> We cross-check GOTS, FSC, Fair-Trade, and Cruelty-Free credentials.
-            </div>
+        <div className="trust-card-stats">
+          <div className="trust-stat-box">
+            <div className="trust-stat-num">100%</div>
+            <div className="trust-stat-label">Verified Certifications</div>
           </div>
-          <div className="sustainability-point-item">
-            <CheckCircle
-              size={22}
-              style={{ color: 'var(--color-primary)', flexShrink: 0, marginTop: '2px' }}
-            />
-            <div className="sustainability-point-text">
-              <strong>Plastic-Neutral Packaging:</strong> All merchant partners use compostable or 100% recycled shipping boxes.
-            </div>
+          <div className="trust-stat-box">
+            <div className="trust-stat-num">0 kg</div>
+            <div className="trust-stat-label">Net Carbon Footprint</div>
           </div>
-          <div className="sustainability-point-item">
-            <CheckCircle
-              size={22}
-              style={{ color: 'var(--color-primary)', flexShrink: 0, marginTop: '2px' }}
-            />
-            <div className="sustainability-point-text">
-              <strong>Community Carbon Offsets:</strong> A percentage of every sale funds verified local reforestation projects.
-            </div>
+          <div className="trust-stat-box">
+            <div className="trust-stat-num">4.9/5</div>
+            <div className="trust-stat-label">Customer Quality Rating</div>
           </div>
         </div>
       </section>

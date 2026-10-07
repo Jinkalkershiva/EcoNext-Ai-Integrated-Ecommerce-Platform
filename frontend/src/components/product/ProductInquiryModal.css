@@ -1,0 +1,334 @@
+/* Product Inquiry & Discussion Modal Styles */
+
+.inquiry-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 1rem;
+}
+
+.inquiry-modal-card {
+  background-color: #ffffff;
+  border-radius: var(--radius-xl, 12px);
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.inquiry-header {
+  padding: 1.15rem 1.25rem;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inquiry-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.inquiry-bot-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md, 8px);
+  background-color: #ecfdf5;
+  color: var(--color-primary, #059669);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inquiry-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-primary, #0f172a);
+  margin: 0;
+}
+
+.inquiry-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted, #64748b);
+  margin: 0.1rem 0 0 0;
+}
+
+.inquiry-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted, #64748b);
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.inquiry-close-btn:hover {
+  color: var(--text-primary, #0f172a);
+}
+
+/* Product Context */
+.inquiry-product-context {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.75rem 1.25rem;
+  background-color: #f8fafc;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.inquiry-prod-img {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm, 6px);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  background-color: #ffffff;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted, #94a3b8);
+}
+
+.inquiry-prod-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.inquiry-prod-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.inquiry-prod-name {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inquiry-prod-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+.inquiry-prod-price {
+  font-family: var(--font-mono, monospace);
+  font-weight: 800;
+  color: var(--color-primary, #059669);
+}
+
+.inquiry-prod-variant {
+  color: var(--text-muted, #64748b);
+}
+
+/* Chat Body */
+.inquiry-chat-body {
+  flex: 1;
+  padding: 1.25rem;
+  overflow-y: auto;
+  min-height: 240px;
+  max-height: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.inquiry-auth-prompt, .inquiry-empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-muted, #64748b);
+  margin: auto 0;
+}
+
+.inquiry-empty-hint {
+  font-size: 0.75rem;
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.inquiry-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.inquiry-msg-row {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+}
+
+.inquiry-msg-row.customer {
+  flex-direction: row-reverse;
+}
+
+.inquiry-msg-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+}
+
+.inquiry-msg-row.assistant .inquiry-msg-avatar {
+  background-color: #ecfdf5;
+  color: #059669;
+}
+
+.inquiry-msg-row.customer .inquiry-msg-avatar {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
+.inquiry-msg-bubble {
+  max-width: 82%;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-md, 8px);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.inquiry-msg-row.assistant .inquiry-msg-bubble {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: var(--text-primary, #0f172a);
+}
+
+.inquiry-msg-row.customer .inquiry-msg-bubble {
+  background-color: #059669;
+  color: #ffffff;
+}
+
+.inquiry-msg-sender {
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+  opacity: 0.85;
+}
+
+.inquiry-msg-text {
+  word-break: break-word;
+}
+
+.inquiry-msg-time {
+  font-size: 0.65rem;
+  margin-top: 0.25rem;
+  opacity: 0.65;
+  text-align: right;
+}
+
+.inquiry-msg-bubble.typing {
+  font-style: italic;
+  color: var(--text-muted, #64748b);
+}
+
+/* Quick Prompts */
+.inquiry-quick-prompts {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.5rem 1.25rem;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+  background-color: #ffffff;
+}
+
+.quick-prompt-pill {
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-primary, #059669);
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: var(--radius-full, 9999px);
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.quick-prompt-pill:hover:not(:disabled) {
+  background-color: #059669;
+  color: #ffffff;
+}
+
+/* Input Form */
+.inquiry-input-form {
+  padding: 0.75rem 1.25rem 1rem 1.25rem;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+  background-color: #ffffff;
+}
+
+.inquiry-error-banner {
+  color: #dc2626;
+  font-size: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.inquiry-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.inquiry-input-field {
+  flex: 1;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-default, #cbd5e1);
+  font-size: 0.8125rem;
+  color: var(--text-primary, #0f172a);
+  outline: none;
+}
+
+.inquiry-input-field:focus {
+  border-color: var(--color-primary, #059669);
+}
+
+.inquiry-send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm, 6px);
+  background-color: var(--color-primary, #059669);
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.inquiry-send-btn:hover:not(:disabled) {
+  background-color: var(--color-primary-hover, #047857);
+}
+
+.inquiry-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

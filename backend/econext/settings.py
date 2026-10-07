@@ -244,8 +244,6 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 12,
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'accounts.authentication.DualJWTAuthentication',
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
@@ -256,12 +254,17 @@ REST_FRAMEWORK = {
 # JWT Configuration
 from datetime import timedelta
 
+JWT_SIGNING_KEY = os.getenv('JWT_SECRET') or os.getenv('JWT_SECRET_KEY') or os.getenv('DJANGO_SECRET_KEY') or SECRET_KEY
+if len(JWT_SIGNING_KEY) < 32:
+    JWT_SIGNING_KEY = JWT_SIGNING_KEY.ljust(32, '_')
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=24),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'SIGNING_KEY': JWT_SIGNING_KEY,
 }
 
 # Redis Configuration

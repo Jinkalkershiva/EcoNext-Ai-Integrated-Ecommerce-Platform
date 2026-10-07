@@ -1,0 +1,101 @@
+/* ==========================================================================
+   EcoNext UI Accessibility Scaling Segmented Control: [ A− ] 100% [ A+ ]
+   Compact, vertically aligned with ThemeToggle, Cart, and Profile
+   ========================================================================== */
+
+.ui-scale-control {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--bg-surface-sunken);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  padding: 2px 4px;
+  gap: 2px;
+  height: 40px;
+  position: relative;
+  user-select: none;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.ui-scale-control:hover {
+  border-color: var(--color-primary);
+}
+
+.ui-scale-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 32px;
+  padding: 0 6px;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  line-height: 1;
+}
+
+.ui-scale-btn:hover:not(:disabled) {
+  color: var(--color-primary);
+  background-color: var(--bg-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.ui-scale-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.ui-scale-label-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  height: 30px;
+  min-width: 44px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ui-scale-percent {
+  font-size: 0.75rem;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.ui-scale-label-btn.is-scaled {
+  background-color: var(--color-primary-light);
+  border-color: var(--color-primary);
+}
+
+.ui-scale-label-btn.is-scaled .ui-scale-percent {
+  color: var(--color-primary);
+}
+
+.ui-scale-label-btn:hover {
+  background-color: var(--bg-surface);
+  border-color: var(--border-default);
+}
+
+.ui-scale-text {
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+@media (max-width: 900px) {
+  .navbar-actions .ui-scale-control {
+    display: none;
+  }
+}

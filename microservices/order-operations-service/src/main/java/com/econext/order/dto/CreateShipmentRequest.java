@@ -17,8 +17,15 @@ import java.util.List;
 @AllArgsConstructor
 public class CreateShipmentRequest {
 
-    @NotNull(message = "Order ID is required")
     private Long orderId;
+
+    private List<Long> orderIds;
+
+    private List<String> orderRefNumbers;
+
+    private Boolean routeException;
+
+    private String exceptionReason;
 
     private Long containerId;
 

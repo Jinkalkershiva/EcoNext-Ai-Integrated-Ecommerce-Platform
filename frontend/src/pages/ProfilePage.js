@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 import { apiService } from '../api';
+import { formatOrderReference } from '../utils/orderUtils';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import ErrorMessage from '../components/common/ErrorMessage';
-import { Package, Edit3, Check, ArrowLeft, LogOut, SlidersHorizontal } from 'lucide-react';
+import { Package, Edit3, Check, ArrowLeft, LogOut, SlidersHorizontal, AlertCircle } from 'lucide-react';
 import './ProfilePage.css';
 
 export const ProfilePage = () => {
@@ -50,8 +51,11 @@ export const ProfilePage = () => {
         });
       }
 
-      if (ordersData && ordersData.status === 'success') {
-        setOrders(ordersData.orders || []);
+      if (ordersData) {
+        const orderList = Array.isArray(ordersData)
+          ? ordersData
+          : (ordersData.orders || ordersData.data || []);
+        setOrders(orderList);
       }
     } catch (err) {
       console.warn('Profile loading note:', err.message);
@@ -346,7 +350,7 @@ export const ProfilePage = () => {
                   <div key={order.id} className="order-history-card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
-                        Order #{order.id}
+                        Order #{order.order_reference_number || formatOrderReference(order.id)}
                       </div>
                       <Badge variant={badgeVariant} size="sm">
                         {status.toUpperCase()}
@@ -371,28 +375,37 @@ export const ProfilePage = () => {
                         </div>
 
                         <div className={`order-tracker-step ${currentStep >= 1 ? 'completed' : ''}`}>
-                          <div className="order-tracker-dot">✓</div>
+                          <div className="order-tracker-dot">
+                            <Check size={12} aria-hidden="true" />
+                          </div>
                           <span>Placed</span>
                         </div>
 
                         <div className={`order-tracker-step ${currentStep >= 2 ? (currentStep === 2 ? 'active' : 'completed') : ''}`}>
-                          <div className="order-tracker-dot">{currentStep >= 2 ? '✓' : '2'}</div>
+                          <div className="order-tracker-dot">
+                            {currentStep >= 2 ? <Check size={12} aria-hidden="true" /> : '2'}
+                          </div>
                           <span>Processing</span>
                         </div>
 
                         <div className={`order-tracker-step ${currentStep >= 3 ? (currentStep === 3 ? 'active' : 'completed') : ''}`}>
-                          <div className="order-tracker-dot">{currentStep >= 3 ? '✓' : '3'}</div>
+                          <div className="order-tracker-dot">
+                            {currentStep >= 3 ? <Check size={12} aria-hidden="true" /> : '3'}
+                          </div>
                           <span>Shipped</span>
                         </div>
 
                         <div className={`order-tracker-step ${currentStep >= 4 ? 'completed' : ''}`}>
-                          <div className="order-tracker-dot">{currentStep >= 4 ? '✓' : '4'}</div>
+                          <div className="order-tracker-dot">
+                            {currentStep >= 4 ? <Check size={12} aria-hidden="true" /> : '4'}
+                          </div>
                           <span>Delivered</span>
                         </div>
                       </div>
                     ) : (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--color-danger)', fontWeight: 600 }}>
-                        ⚠️ Order was cancelled.
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-danger)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <AlertCircle size={14} aria-hidden="true" />
+                        <span>Order was cancelled.</span>
                       </div>
                     )}
 
@@ -403,7 +416,10 @@ export const ProfilePage = () => {
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => navigateTo('order-tracking', { orderId: order.id, id: order.id })}
+                        onClick={() => navigateTo('order-tracking', {
+                          orderId: order.order_reference_number || order.id,
+                          id: order.order_reference_number || order.id
+                        })}
                       >
                         Track Full Order →
                       </Button>

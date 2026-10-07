@@ -30,6 +30,12 @@ urlpatterns = [
     path("<int:product_id>/prediction/", api_views.price_prediction, name="price_prediction"),
     path("trending/", api_views.trending_now, name="trending_now"),
     
+    # Reviews & Variants endpoints
+    path("<int:product_id>/reviews/", api_views.product_reviews, name="product_reviews"),
+    path("reviews/<int:review_id>/helpful/", api_views.review_helpful, name="review_helpful"),
+    path("<int:product_id>/variants/", api_views.product_variants_list, name="product_variants_list"),
+    path("<int:product_id>/inquiries/", api_views.product_inquiries, name="product_inquiries"),
+
     # Analytics
     path("search/trending/", api_views.search_history, name="search_history"),
 

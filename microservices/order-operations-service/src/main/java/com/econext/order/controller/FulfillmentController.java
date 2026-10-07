@@ -2,6 +2,7 @@ package com.econext.order.controller;
 
 import com.econext.order.dto.*;
 import com.econext.order.entity.ContainerStatus;
+import com.econext.order.entity.RouteExceptionAudit;
 import com.econext.order.entity.ShipmentStatus;
 import com.econext.order.security.JwtTokenFilter.OperationalStaffPrincipal;
 import com.econext.order.service.ContainerService;
@@ -20,6 +21,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @RestController
@@ -30,6 +32,7 @@ public class FulfillmentController {
 
     private final ShipmentService shipmentService;
     private final ContainerService containerService;
+    private final com.econext.order.service.DriverService driverService;
     private final com.econext.order.service.DeliveryOtpService deliveryOtpService;
 
     // ==========================================
@@ -89,8 +92,6 @@ public class FulfillmentController {
         return ResponseEntity.ok(ApiResponse.ok(events));
     }
 
-    // Called by API Gateway (/api/order-ops/shipments) when staff creates a shipment from packed order items.
-    // Persists shipment in MySQL and publishes SHIPMENT_CREATED to Kafka topic 'shipment.status.updated'.
     @PostMapping("/shipments")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
     @Operation(summary = "Create and allocate order items to a new shipment")
@@ -105,8 +106,70 @@ public class FulfillmentController {
                 .body(ApiResponse.ok("Shipment #" + created.getShipmentNumber() + " created successfully", created));
     }
 
-    // Called by API Gateway when staff transitions shipment status (DISPATCHED, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED).
-    // Dispatches Kafka event 'shipment.status.updated' which WebSocket consumer broadcasts to live tracking clients.
+    @PostMapping("/shipments/{id}/orders")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Assign an order to an existing shipment with capacity and route compatibility checks")
+    public ResponseEntity<ApiResponse<ShipmentResponse>> assignOrderToShipment(
+            @PathVariable Long id,
+            @Valid @RequestBody AssignOrderRequest request,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        ShipmentResponse updated = shipmentService.assignOrderToShipment(id, request, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Order assigned to Shipment #" + updated.getShipmentNumber(), updated));
+    }
+
+    @DeleteMapping("/shipments/{id}/orders/{orderId}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Remove an order from a shipment and restore capacity")
+    public ResponseEntity<ApiResponse<ShipmentResponse>> removeOrderFromShipment(
+            @PathVariable Long id,
+            @PathVariable Long orderId,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        ShipmentResponse updated = shipmentService.removeOrderFromShipment(id, orderId, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Order #" + orderId + " removed from Shipment #" + updated.getShipmentNumber(), updated));
+    }
+
+    @PostMapping({"/shipments/{id}/mark-full", "/shipments/{id}/full"})
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Mark shipment FULL and READY_FOR_DISPATCH, locking further automatic assignments")
+    public ResponseEntity<ApiResponse<ShipmentResponse>> markShipmentFull(
+            @PathVariable Long id,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        ShipmentResponse updated = shipmentService.markShipmentFull(id, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Shipment #" + updated.getShipmentNumber() + " marked FULL and READY_FOR_DISPATCH", updated));
+    }
+
+    @PostMapping({"/shipments/{id}/dispatch"})
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Dispatch shipment into transit, transitioning assigned orders to IN_TRANSIT")
+    public ResponseEntity<ApiResponse<ShipmentResponse>> dispatchShipment(
+            @PathVariable Long id,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        ShipmentResponse updated = shipmentService.dispatchShipment(id, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Shipment #" + updated.getShipmentNumber() + " successfully dispatched into transit", updated));
+    }
+
+    @GetMapping("/shipments/{id}/route-exceptions")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
+    @Operation(summary = "Get route exception audit logs for a shipment")
+    public ResponseEntity<ApiResponse<List<RouteExceptionAudit>>> getRouteExceptions(
+            @PathVariable Long id
+    ) {
+        List<RouteExceptionAudit> audits = shipmentService.getRouteExceptionAudits(id);
+        return ResponseEntity.ok(ApiResponse.ok(audits));
+    }
+
     @PatchMapping("/shipments/{id}/status")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_STATUS_UPDATE') or hasAuthority('ORDER_PROCESS')")
     @Operation(summary = "Transition shipment lifecycle state")
@@ -121,8 +184,6 @@ public class FulfillmentController {
         return ResponseEntity.ok(ApiResponse.ok("Shipment status transitioned to " + updated.getStatus(), updated));
     }
 
-    // Called by API Gateway / mobile courier app when GPS coordinates update for a vehicle in transit.
-    // Publishes to Kafka topic 'shipment.location.updated' which pushes live coordinates to STOMP destination /topic/shipments/{id}.
     @PatchMapping("/shipments/{id}/location")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_STATUS_UPDATE') or hasAuthority('ORDER_PROCESS')")
     @Operation(summary = "Update physical GPS coordinates and location milestone for a shipment")
@@ -241,7 +302,6 @@ public class FulfillmentController {
         return ResponseEntity.ok(ApiResponse.ok(summary));
     }
 
-
     // ==========================================
     // Container Endpoints
     // ==========================================
@@ -324,5 +384,102 @@ public class FulfillmentController {
     public ResponseEntity<ApiResponse<List<LogisticsTrackingResponse>>> getContainerTracking(@PathVariable Long id) {
         List<LogisticsTrackingResponse> tracking = containerService.getContainerTracking(id);
         return ResponseEntity.ok(ApiResponse.ok(tracking));
+    }
+
+    // ==========================================
+    // Warehouse-Based Compatible Shipments & Re-use
+    // ==========================================
+
+    @GetMapping("/shipments/compatible")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
+    @Operation(summary = "Find existing compatible open shipments in the warehouse for one or more ready orders")
+    public ResponseEntity<ApiResponse<List<ShipmentResponse>>> getCompatibleShipments(
+            @RequestParam(required = false) List<Long> orderIds,
+            @RequestParam(required = false) Long orderId,
+            @RequestParam(required = false) String warehouse,
+            @RequestParam(required = false) String destination
+    ) {
+        List<Long> targetIds = new ArrayList<>();
+        if (orderId != null) targetIds.add(orderId);
+        if (orderIds != null) targetIds.addAll(orderIds);
+
+        List<ShipmentResponse> compatible = shipmentService.findCompatibleShipments(targetIds, warehouse, destination);
+        return ResponseEntity.ok(ApiResponse.ok(compatible));
+    }
+
+    @PostMapping("/shipments/{id}/batch-assign")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Batch assign multiple ready orders to an existing compatible shipment")
+    public ResponseEntity<ApiResponse<ShipmentResponse>> batchAssignOrders(
+            @PathVariable Long id,
+            @Valid @RequestBody BatchAssignOrdersRequest request,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        ShipmentResponse updated = shipmentService.batchAssignOrdersToShipment(id, request, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Batch of " + request.getOrderIds().size() + " orders assigned to Shipment #" + updated.getShipmentNumber(), updated));
+    }
+
+    @PostMapping("/shipments/{id}/assign-driver-truck")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Assign authorized driver and available fleet truck to shipment")
+    public ResponseEntity<ApiResponse<ShipmentResponse>> assignDriverAndTruck(
+            @PathVariable Long id,
+            @RequestBody AssignDriverTruckRequest request,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        ShipmentResponse updated = shipmentService.assignDriverAndTruck(id, request, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Driver & Truck assigned to Shipment #" + updated.getShipmentNumber(), updated));
+    }
+
+    // ==========================================
+    // Driver Management Endpoints
+    // ==========================================
+
+    @GetMapping("/drivers")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
+    @Operation(summary = "Search and filter logistics drivers")
+    public ResponseEntity<ApiResponse<List<DriverResponse>>> getDrivers(
+            @RequestParam(required = false) String warehouse,
+            @RequestParam(required = false) com.econext.order.entity.DriverStatus status,
+            @RequestParam(required = false) String search
+    ) {
+        List<DriverResponse> drivers = driverService.getDrivers(warehouse, status, search);
+        return ResponseEntity.ok(ApiResponse.ok(drivers));
+    }
+
+    @GetMapping("/drivers/available")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
+    @Operation(summary = "Get available drivers for a warehouse")
+    public ResponseEntity<ApiResponse<List<DriverResponse>>> getAvailableDrivers(
+            @RequestParam(required = false) String warehouse
+    ) {
+        List<DriverResponse> drivers = driverService.getAvailableDrivers(warehouse);
+        return ResponseEntity.ok(ApiResponse.ok(drivers));
+    }
+
+    @PostMapping("/drivers")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Provision a new logistics driver")
+    public ResponseEntity<ApiResponse<DriverResponse>> createDriver(
+            @Valid @RequestBody CreateDriverRequest request
+    ) {
+        DriverResponse created = driverService.createDriver(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok("Driver [" + created.getDriverCode() + "] provisioned successfully", created));
+    }
+
+    @PatchMapping("/drivers/{id}/status")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_STATUS_UPDATE') or hasAuthority('ORDER_PROCESS')")
+    @Operation(summary = "Update driver operational status")
+    public ResponseEntity<ApiResponse<DriverResponse>> updateDriverStatus(
+            @PathVariable Long id,
+            @RequestParam com.econext.order.entity.DriverStatus status
+    ) {
+        DriverResponse updated = driverService.updateDriverStatus(id, status);
+        return ResponseEntity.ok(ApiResponse.ok("Driver status updated to " + updated.getStatus(), updated));
     }
 }

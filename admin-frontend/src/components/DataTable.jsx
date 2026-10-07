@@ -92,14 +92,14 @@ export const DataTable = ({
             <tr>
               {columns.map((col) => (
                 <th
-                  key={col.key || col.header}
-                  onClick={() => col.sortable !== false && handleSort(col.key)}
-                  className={col.sortable !== false ? 'sortable' : ''}
+                  key={col.key || col.header || col.title}
+                  onClick={() => col.sortable !== false && col.key && handleSort(col.key)}
+                  className={col.sortable !== false && col.key ? 'sortable' : ''}
                   style={col.style || {}}
                 >
                   <div className="th-content" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span>{col.header}</span>
-                    {col.sortable !== false && (
+                    <span>{col.header || col.title}</span>
+                    {col.sortable !== false && col.key && (
                       <span className="sort-arrow" style={{ opacity: sortColumn === col.key ? 1 : 0.4 }}>
                         {sortColumn === col.key ? (
                           sortDirection === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />
@@ -131,7 +131,7 @@ export const DataTable = ({
               paginatedData.map((row, rowIdx) => (
                 <tr key={row.id || rowIdx} className="table-row">
                   {columns.map((col) => (
-                    <td key={col.key || col.header} style={col.cellStyle || {}}>
+                    <td key={col.key || col.header || col.title} style={col.cellStyle || {}}>
                       {col.render ? col.render(row, rowIdx) : row[col.key]}
                     </td>
                   ))}

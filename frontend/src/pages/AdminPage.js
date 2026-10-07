@@ -23,7 +23,8 @@ import {
   Leaf,
   X,
   RefreshCw,
-  Eye
+  Eye,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './AdminPage.css';
@@ -872,7 +873,14 @@ export const AdminPage = () => {
                           {u.role || (u.is_staff ? 'admin' : 'customer')}
                         </span>
                       </td>
-                      <td>{u.is_staff || u.is_superuser ? '✅ Yes' : 'No'}</td>
+                      <td>
+                        {u.is_staff || u.is_superuser ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-primary)', fontWeight: 600 }}>
+                            <Check size={14} aria-hidden="true" />
+                            <span>Yes</span>
+                          </span>
+                        ) : 'No'}
+                      </td>
                       <td>
                         <span className={`status-badge ${u.is_active ? 'delivered' : 'cancelled'}`}>
                           {u.is_active ? 'Active' : 'Disabled'}

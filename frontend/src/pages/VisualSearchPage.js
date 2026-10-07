@@ -227,10 +227,15 @@ export const VisualSearchPage = () => {
                         borderRadius: 'var(--radius-md)',
                         fontSize: '0.75rem',
                         fontWeight: 700,
-                        textAlign: 'center'
+                        textAlign: 'center',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem'
                       }}
                     >
-                      🎯 {Math.round(similarity_score * 100)}% Visual Match
+                      <Target size={13} aria-hidden="true" />
+                      <span>{Math.round(similarity_score * 100)}% Visual Match</span>
                     </div>
                   )}
                 </ProductCard>

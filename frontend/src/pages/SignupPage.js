@@ -109,8 +109,9 @@ export const SignupPage = ({ onSignupSuccess, onSwitchPage }) => {
             </div>
           </div>
 
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            🌿 Fast, secure, and encrypted account creation.
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <ShieldCheck size={14} aria-hidden="true" style={{ color: 'var(--color-primary)' }} />
+            <span>Fast, secure, and encrypted account creation.</span>
           </div>
         </div>
 

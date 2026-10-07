@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigation } from '../context/NavigationContext';
 import { useAuth } from '../context/AuthContext';
-import { apiService } from '../api';
+import { apiService, tokenStore } from '../api';
 import { createTrackingClient } from '../utils/stompClient';
+import { normalizeOrderId, formatOrderReference, matchesOrderId } from '../utils/orderUtils';
 import Button from '../components/common/Button';
 import {
   CheckCircle2,
@@ -23,10 +24,34 @@ import {
   Lock,
   KeyRound,
   Send,
-  AlertCircle
+  AlertCircle,
+  RotateCcw,
+  AlertTriangle,
+  X,
+  FileText,
+  ShieldAlert,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './OrderTrackingPage.css';
+
+const RETURN_REASONS = [
+  'Damaged / Defective product received',
+  'Quality not as expected',
+  'Wrong item or size delivered',
+  'Missing items or accessories in package',
+  'Product differs from website description',
+  'Other'
+];
+
+const CANCELLATION_REASONS = [
+  'Ordered by mistake',
+  'Expected delivery date too late',
+  'Found a better price elsewhere',
+  'Need to change shipping address',
+  'Item not needed anymore',
+  'Other'
+];
 
 export const OrderTrackingPage = () => {
   const { params, navigateTo } = useNavigation();
@@ -38,6 +63,7 @@ export const OrderTrackingPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   const [wsStatus, setWsStatus] = useState('connecting'); // 'connected' | 'connecting' | 'disconnected'
   const [liveLocation, setLiveLocation] = useState(null);
   const [lastLiveEvent, setLastLiveEvent] = useState(null);
@@ -49,47 +75,123 @@ export const OrderTrackingPage = () => {
   const [otpError, setOtpError] = useState(null);
   const [otpResent, setOtpResent] = useState(false);
 
-  const targetOrderId = params?.orderId || params?.id;
+  // Cancellation Modal States
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('Ordered by mistake');
+  const [cancelCustomReason, setCancelCustomReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+
+  // Return Request Modal States
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnReason, setReturnReason] = useState('Damaged / Defective product received');
+  const [returnCustomReason, setReturnCustomReason] = useState('');
+  const [conditionCheck1, setConditionCheck1] = useState(true);
+  const [conditionCheck2, setConditionCheck2] = useState(true);
+  const [conditionCheck3, setConditionCheck3] = useState(true);
+  const [conditionNote, setConditionNote] = useState('');
+  const [submittingReturn, setSubmittingReturn] = useState(false);
+
+  const targetOrderId = params?.orderId || params?.id || params?.rawOrderId;
   const stompClientRef = useRef(null);
 
   const loadOrders = useCallback(async (selectId = null) => {
+    if (!isAuthenticated && !tokenStore.isAuthenticated()) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setError(null);
+      const targetId = selectId || targetOrderId;
+      const cleanTargetId = targetId ? normalizeOrderId(targetId) : null;
+
       const res = await apiService.getOrders();
       const orderList = Array.isArray(res) ? res : (res?.orders || res?.data || []);
       setOrders(orderList);
 
       if (orderList.length > 0) {
-        if (selectId) {
-          const matched = orderList.find(
-            o => String(o.id) === String(selectId) || o.order_reference_number === selectId
-          );
-          setSelectedOrder(matched || orderList[0]);
-        } else if (!selectedOrder) {
-          setSelectedOrder(orderList[0]);
+        if (targetId) {
+          let matched = orderList.find((o) => matchesOrderId(o, targetId));
+
+          if (!matched && cleanTargetId) {
+            // Try fetching directly via single order endpoint
+            try {
+              const singleRes = await apiService.getOrderDetail(cleanTargetId);
+              if (singleRes && singleRes.order) {
+                matched = singleRes.order;
+                setOrders((prev) => [singleRes.order, ...prev.filter((x) => !matchesOrderId(x, singleRes.order))]);
+              }
+            } catch (singleErr) {
+              console.warn('Single order fetch fallback failed:', singleErr);
+            }
+          }
+
+          if (matched) {
+            setSelectedOrder(matched);
+            setError(null);
+          } else {
+            setSelectedOrder(null);
+            setError(`Order #${targetId} not found.`);
+          }
         } else {
-          // Re-sync currently selected order
-          const refreshed = orderList.find(o => o.id === selectedOrder.id);
-          if (refreshed) setSelectedOrder(refreshed);
+          // Re-sync currently selected order or select first
+          setSelectedOrder((prev) => {
+            if (prev) {
+              const refreshed = orderList.find((o) => matchesOrderId(o, prev));
+              if (refreshed) return refreshed;
+            }
+            return orderList[0];
+          });
+        }
+      } else if (targetId) {
+        // orderList is empty from list endpoint, attempt fetching single order directly
+        try {
+          const singleRes = await apiService.getOrderDetail(cleanTargetId || targetId);
+          if (singleRes && singleRes.order) {
+            setOrders((prev) => [singleRes.order, ...prev.filter((x) => !matchesOrderId(x, singleRes.order))]);
+            setSelectedOrder(singleRes.order);
+            setError(null);
+          } else {
+            setSelectedOrder(null);
+            setError(`Order #${targetId} not found.`);
+          }
+        } catch (singleErr) {
+          setSelectedOrder(null);
+          setError(`Order #${targetId} not found.`);
         }
       } else {
         setSelectedOrder(null);
       }
     } catch (err) {
       console.error('Failed to load user orders:', err);
-      setError('Unable to load orders from backend. Please ensure you are logged in.');
+      // Fallback single order attempt without clearing prior order list
+      const targetId = selectId || targetOrderId;
+      const cleanTargetId = targetId ? normalizeOrderId(targetId) : null;
+      if (cleanTargetId || targetId) {
+        try {
+          const singleRes = await apiService.getOrderDetail(cleanTargetId || targetId);
+          if (singleRes && singleRes.order) {
+            setOrders((prev) => [singleRes.order, ...prev.filter((x) => !matchesOrderId(x, singleRes.order))]);
+            setSelectedOrder(singleRes.order);
+            setError(null);
+            return;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      setError(targetId ? `Order #${targetId} not found.` : (err.message || 'Unable to load orders.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedOrder]);
+  }, [targetOrderId, isAuthenticated]);
 
   useEffect(() => {
     loadOrders(targetOrderId);
   }, [targetOrderId]);
 
-  // idx-11: Order Operations Service (WebSocket / STOMP) → Customer Frontend
-  // reason: Stream real-time vehicle GPS coordinates and shipment milestone state transitions.
+  // WebSocket Live Stomp
   useEffect(() => {
     if (!selectedOrder?.id) return;
 
@@ -107,7 +209,7 @@ export const OrderTrackingPage = () => {
 
     client.connect();
 
-    // Subscribe to STOMP channel for this specific order
+    // 1. Subscribe to order-specific topic
     const orderSub = client.subscribe(`/topic/orders/${selectedOrder.id}`, (data) => {
       if (!data) return;
       setLastLiveEvent(data);
@@ -117,7 +219,6 @@ export const OrderTrackingPage = () => {
         setSelectedOrder((prev) => {
           if (!prev || String(prev.id) !== String(data.orderId)) return prev;
 
-          // Dynamically update timeline steps based on incoming state
           const updatedTimeline = (prev.tracking_timeline || []).map((step) => {
             if (newStatus === 'DELIVERED') {
               return { ...step, state: 'completed' };
@@ -153,26 +254,51 @@ export const OrderTrackingPage = () => {
       }
     });
 
+    // 2. If shipment ID is available, also subscribe to shipment topic
+    const activeShipmentId = selectedOrder.shipment_id || selectedOrder.shipments?.[0]?.id;
+    let shipmentSub = null;
+    if (activeShipmentId) {
+      shipmentSub = client.subscribe(`/topic/shipments/${activeShipmentId}`, (data) => {
+        if (!data) return;
+        if (data.eventType === 'SHIPMENT_LOCATION_UPDATED' || (data.latitude && data.longitude)) {
+          setLiveLocation({
+            latitude: data.latitude,
+            longitude: data.longitude,
+            locationName: data.locationName,
+            status: data.status || selectedOrder.status,
+            trackingNumber: data.trackingNumber,
+            vehicleNumber: data.vehicleNumber,
+            shipmentNumber: data.shipmentNumber,
+            note: data.note,
+            timestamp: data.timestamp || new Date().toISOString()
+          });
+        }
+      });
+    }
+
     return () => {
       if (orderSub && orderSub.unsubscribe) {
         orderSub.unsubscribe();
       }
+      if (shipmentSub && shipmentSub.unsubscribe) {
+        shipmentSub.unsubscribe();
+      }
       client.disconnect();
       setWsStatus('disconnected');
     };
-  }, [selectedOrder?.id]);
+  }, [selectedOrder?.id, selectedOrder?.shipment_id]);
 
   const handleRefreshStatus = async () => {
     setRefreshing(true);
     await loadOrders(selectedOrder?.id);
   };
 
-  const handleSearch = (e) => {
+  const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-    const cleanQuery = searchQuery.trim().replace(/^ORD-/, '').replace(/^#/, '');
+    const query = searchQuery.trim();
     const found = orders.find(
-      o => String(o.id) === cleanQuery || o.order_reference_number?.includes(searchQuery.trim())
+      (o) => matchesOrderId(o, query) || o.order_reference_number?.toLowerCase().includes(query.toLowerCase())
     );
     if (found) {
       setSelectedOrder(found);
@@ -180,6 +306,38 @@ export const OrderTrackingPage = () => {
       setOtpSuccess(null);
       setOtpError(null);
     } else {
+      // Authoritative backend fallback query by order ID or reference
+      try {
+        const cleanId = normalizeOrderId(query);
+        const singleRes = await apiService.getOrderDetail(cleanId || query);
+        if (singleRes && singleRes.order) {
+          setSelectedOrder(singleRes.order);
+          setOrders((prev) => [singleRes.order, ...prev.filter((x) => !matchesOrderId(x, singleRes.order))]);
+          setError(null);
+          setOtpSuccess(null);
+          setOtpError(null);
+          return;
+        }
+      } catch (searchErr) {
+        // Fallback to searching order list endpoint
+        try {
+          const listRes = await apiService.getOrders();
+          const list = Array.isArray(listRes) ? listRes : (listRes?.orders || listRes?.data || []);
+          if (list.length > 0) {
+            setOrders(list);
+            const refound = list.find(
+              (o) => matchesOrderId(o, query) || o.order_reference_number?.toLowerCase().includes(query.toLowerCase())
+            );
+            if (refound) {
+              setSelectedOrder(refound);
+              setError(null);
+              setOtpSuccess(null);
+              setOtpError(null);
+              return;
+            }
+          }
+        } catch (ignored) {}
+      }
       setError(`No order found matching "${searchQuery}".`);
     }
   };
@@ -200,7 +358,6 @@ export const OrderTrackingPage = () => {
       setOtpSuccess(successMsg);
       setDeliveryOtp('');
 
-      // Instantly update selected order status locally and in order list
       setSelectedOrder((prev) => {
         if (!prev) return prev;
         const updatedTimeline = (prev.tracking_timeline || []).map((step) => ({
@@ -246,9 +403,60 @@ export const OrderTrackingPage = () => {
     }
   };
 
+  // Cancellation Handler
+  const handleCancelOrderSubmit = async () => {
+    if (!selectedOrder) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      const finalReason = cancelReason === 'Other' ? cancelCustomReason : cancelReason;
+      await apiService.cancelOrder(selectedOrder.id, finalReason);
+      setSuccess(`Order #${selectedOrder.order_reference_number || selectedOrder.id} cancelled successfully.`);
+      setShowCancelModal(false);
+      await loadOrders(selectedOrder.id);
+    } catch (err) {
+      setError(err.message || 'Failed to cancel order.');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  // Return Request Handler
+  const handleReturnSubmit = async () => {
+    if (!selectedOrder) return;
+    if (!conditionCheck1 || !conditionCheck2 || !conditionCheck3) {
+      setError('Please acknowledge all product condition requirements before submitting return.');
+      return;
+    }
+
+    setSubmittingReturn(true);
+    setError(null);
+    try {
+      const finalReason = returnReason === 'Other' ? returnCustomReason : returnReason;
+      const conditionSummary = `Checklist confirmed: [Unused: yes, Tags: intact, Packaging: original]. Notes: ${conditionNote || 'Standard condition'}`;
+      await apiService.requestOrderReturn(selectedOrder.id, {
+        reason: finalReason,
+        condition_note: conditionSummary
+      });
+      setSuccess('Return request submitted successfully. Reverse pickup label is being prepared.');
+      setShowReturnModal(false);
+      await loadOrders(selectedOrder.id);
+    } catch (err) {
+      setError(err.message || 'Failed to submit return request.');
+    } finally {
+      setSubmittingReturn(false);
+    }
+  };
+
   const getStatusBadgeStyle = (status) => {
     const s = (status || '').toUpperCase();
     if (s.includes('DELIVERED')) return { bg: '#dcfce7', text: '#15803d', border: '#bbf7d0', label: 'Delivered' };
+    if (s.includes('RETURN_REQUESTED')) return { bg: '#ffedd5', text: '#c2410c', border: '#fed7aa', label: 'Return Requested' };
+    if (s.includes('RETURN_APPROVED')) return { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe', label: 'Return Approved' };
+    if (s.includes('RETURN_IN_TRANSIT')) return { bg: '#e0f2fe', text: '#0369a1', border: '#bae6fd', label: 'Return In Transit' };
+    if (s.includes('RETURN_RECEIVED')) return { bg: '#f3e8ff', text: '#6b21a8', border: '#e9d5ff', label: 'Return Received' };
+    if (s.includes('RETURNED') || s.includes('REFUNDED')) return { bg: '#dcfce7', text: '#15803d', border: '#bbf7d0', label: 'Refunded' };
+    if (s.includes('RETURN_REJECTED')) return { bg: '#fee2e2', text: '#991b1b', border: '#fecaca', label: 'Return Rejected' };
     if (s.includes('SHIPPED') || s.includes('TRANSIT')) return { bg: '#e0f2fe', text: '#0369a1', border: '#bae6fd', label: 'In Transit' };
     if (s.includes('OUT_FOR_DELIVERY')) return { bg: '#fef3c7', text: '#b45309', border: '#fde68a', label: 'Out for Delivery' };
     if (s.includes('PROCESSING') || s.includes('ACCEPTED') || s.includes('CONFIRMED')) return { bg: '#f3e8ff', text: '#7e22ce', border: '#e9d5ff', label: 'Processing' };
@@ -267,7 +475,7 @@ export const OrderTrackingPage = () => {
     );
   }
 
-  if (orders.length === 0) {
+  if (!isAuthenticated && !tokenStore.isAuthenticated()) {
     return (
       <div className="container tracking-page-container">
         <div className="tracking-header-section">
@@ -278,28 +486,89 @@ export const OrderTrackingPage = () => {
         </div>
 
         <div style={{ textAlign: 'center', padding: '4rem 1rem', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}>
-          <ShoppingBag size={56} style={{ color: 'var(--text-muted)', margin: '0 auto 1rem auto' }} />
-          <h2 style={{ fontSize: '1.35rem', marginBottom: '0.5rem' }}>No Orders Found Yet</h2>
-          <p style={{ color: 'var(--text-muted)', maxWidth: '420px', margin: '0 auto 1.5rem auto', fontSize: '0.9rem' }}>
-            You haven't placed any sustainable orders yet. Discover our collection of eco-certified fashion and lifestyle products.
+          <Lock size={52} style={{ color: 'var(--color-primary)', margin: '0 auto 1rem auto' }} />
+          <h2 style={{ fontSize: '1.35rem', marginBottom: '0.5rem' }}>Sign In Required</h2>
+          <p style={{ color: 'var(--text-muted)', maxWidth: '440px', margin: '0 auto 1.5rem auto', fontSize: '0.9rem' }}>
+            Please sign in to your EcoNext account to view your past orders, delivery details, and live GPS tracking telemetry.
           </p>
-          <Button variant="primary" size="md" onClick={() => navigateTo('products')}>
-            Explore Sustainable Products
-          </Button>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <Button variant="primary" size="md" onClick={() => navigateTo('login')}>
+              Sign In to View Orders
+            </Button>
+            <Button variant="ghost" size="md" onClick={() => navigateTo('products')}>
+              Explore Products
+            </Button>
+          </div>
         </div>
+      </div>
+    );
+  }
+
+  if (orders.length === 0 && !selectedOrder) {
+    return (
+      <div className="container tracking-page-container">
+        <div className="tracking-header-section">
+          <div>
+            <h1 className="tracking-header-title">Order Tracking & History</h1>
+            <p className="tracking-header-subtitle">Track your carbon-neutral deliveries in real-time</p>
+          </div>
+        </div>
+
+        {error ? (
+          <div style={{ textAlign: 'center', padding: '3.5rem 1rem', background: 'var(--bg-surface)', border: '1px solid #fecaca', borderRadius: 'var(--radius-lg)' }}>
+            <AlertCircle size={52} style={{ color: '#dc2626', margin: '0 auto 1rem auto' }} />
+            <h2 style={{ fontSize: '1.35rem', color: '#991b1b', marginBottom: '0.5rem' }}>
+              {targetOrderId ? 'Order Not Found' : 'Unable to Load Orders'}
+            </h2>
+            <p style={{ color: 'var(--text-muted)', maxWidth: '460px', margin: '0 auto 1.5rem auto', fontSize: '0.9rem' }}>
+              {error}
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Button variant="primary" size="md" onClick={() => loadOrders(targetOrderId)}>
+                Try Again
+              </Button>
+              <Button variant="ghost" size="md" onClick={() => navigateTo('products')}>
+                Explore Products
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '4rem 1rem', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}>
+            <ShoppingBag size={56} style={{ color: 'var(--text-muted)', margin: '0 auto 1rem auto' }} />
+            <h2 style={{ fontSize: '1.35rem', marginBottom: '0.5rem' }}>No Orders Found Yet</h2>
+            <p style={{ color: 'var(--text-muted)', maxWidth: '420px', margin: '0 auto 1.5rem auto', fontSize: '0.9rem' }}>
+              You haven't placed any sustainable orders yet. Discover our collection of eco-certified fashion and lifestyle products.
+            </p>
+            <Button variant="primary" size="md" onClick={() => navigateTo('products')}>
+              Explore Sustainable Products
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
 
   const badge = getStatusBadgeStyle(selectedOrder?.status);
   const timeline = selectedOrder?.tracking_timeline || [];
-  const isOutForDelivery = (selectedOrder?.status || '').toUpperCase() === 'OUT_FOR_DELIVERY';
-  const isDelivered = (selectedOrder?.status || '').toUpperCase() === 'DELIVERED';
+  const statusUpper = (selectedOrder?.status || '').toUpperCase();
+  const isOutForDelivery = statusUpper === 'OUT_FOR_DELIVERY';
+  const isDelivered = statusUpper === 'DELIVERED';
+  const isCancellable = ['ORDER_PLACED', 'ORDER_CONFIRMED', 'PROCESSING', 'PACKED', 'READY_FOR_SHIPMENT'].includes(statusUpper);
+  const isReturnActive = ['RETURN_REQUESTED', 'INSPECTION_REQUIRED', 'RETURN_APPROVED', 'RETURN_IN_TRANSIT', 'RETURN_RECEIVED', 'INSPECTION_PASSED', 'REFUND_PENDING', 'REFUNDED', 'RETURNED', 'RETURN_REJECTED'].includes(statusUpper);
 
-  // Compute active GPS coordinates
-  const currentLat = liveLocation?.latitude || selectedOrder?.current_latitude;
-  const currentLon = liveLocation?.longitude || selectedOrder?.current_longitude;
+  // Return policy calculation
+  const isReturnEligible = selectedOrder?.return_eligibility?.is_eligible !== false && (selectedOrder?.is_return_eligible !== false);
+  const returnWindowDays = selectedOrder?.return_eligibility?.window_days || 7;
+
+  // Compute active GPS coordinates and carrier data
+  const currentLat = liveLocation?.latitude || selectedOrder?.current_latitude || selectedOrder?.shipments?.[0]?.current_latitude;
+  const currentLon = liveLocation?.longitude || selectedOrder?.current_longitude || selectedOrder?.shipments?.[0]?.current_longitude;
+  const currentVehicle = liveLocation?.vehicleNumber || selectedOrder?.vehicle_number || selectedOrder?.shipments?.[0]?.vehicle_number || 'EcoLogistics Electric Fleet';
+  const currentCarrier = selectedOrder?.carrier_name || selectedOrder?.shipments?.[0]?.carrier_name || 'EcoExpress Carbon-Neutral';
+  const currentTrackingNumber = selectedOrder?.tracking_number || selectedOrder?.shipments?.[0]?.tracking_number || (selectedOrder?.id ? `ECO-AWB-${selectedOrder.id + 100000}` : '');
+  const currentRoute = selectedOrder?.route || selectedOrder?.shipments?.[0]?.route;
   const mapsUrl = (currentLat && currentLon) ? `https://www.google.com/maps?q=${currentLat},${currentLon}` : null;
+  const isStaged = isCancellable && !currentLat;
 
   return (
     <div className="container tracking-page-container">
@@ -312,7 +581,60 @@ export const OrderTrackingPage = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {isCancellable && (
+            <button
+              onClick={() => {
+                setCancelReason('Ordered by mistake');
+                setCancelCustomReason('');
+                setShowCancelModal(true);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '6px',
+                border: '1px solid #ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                color: '#dc2626',
+                fontWeight: 600,
+                fontSize: '0.82rem',
+                cursor: 'pointer'
+              }}
+            >
+              <AlertCircle size={14} />
+              Cancel Order
+            </button>
+          )}
+
+          {isDelivered && !isReturnActive && (
+            <button
+              onClick={() => {
+                setReturnReason('Damaged / Defective product received');
+                setReturnCustomReason('');
+                setConditionNote('');
+                setShowReturnModal(true);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '6px',
+                border: '1px solid #059669',
+                backgroundColor: 'rgba(5, 150, 105, 0.08)',
+                color: '#059669',
+                fontWeight: 600,
+                fontSize: '0.82rem',
+                cursor: 'pointer'
+              }}
+            >
+              <RotateCcw size={14} />
+              Request Return
+            </button>
+          )}
+
           <Button
             variant="secondary"
             size="sm"
@@ -340,6 +662,12 @@ export const OrderTrackingPage = () => {
         </div>
       )}
 
+      {success && (
+        <div style={{ padding: '0.75rem 1rem', backgroundColor: '#dcfce7', color: '#15803d', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+          {success}
+        </div>
+      )}
+
       {/* Grid: Left Orders List, Right Detailed Tracking */}
       <div className="tracking-grid-layout">
         {/* Left Sidebar: My Orders */}
@@ -348,7 +676,6 @@ export const OrderTrackingPage = () => {
             <span>Your Orders ({orders.length})</span>
           </div>
 
-          {/* Quick Search */}
           <form onSubmit={handleSearch} style={{ display: 'flex', gap: '0.35rem' }}>
             <input
               type="text"
@@ -380,8 +707,10 @@ export const OrderTrackingPage = () => {
                   onClick={() => {
                     setSelectedOrder(ord);
                     setError(null);
+                    setSuccess(null);
                     setOtpSuccess(null);
                     setOtpError(null);
+                    window.history.replaceState({ page: 'order-tracking', params: { orderId: ord.id, id: ord.id } }, '', `#/orders/${ord.id}/tracking`);
                   }}
                 >
                   <div className="order-mini-header">
@@ -474,6 +803,67 @@ export const OrderTrackingPage = () => {
               </div>
             </div>
 
+            {/* Return Policy Snapshot Banner (For Delivered Orders) */}
+            {isDelivered && (
+              <div style={{ padding: '1rem', backgroundColor: 'rgba(5, 150, 105, 0.06)', border: '1px solid #10b981', borderRadius: '8px', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <ShieldCheck size={24} style={{ color: '#059669', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#065f46' }}>
+                      {isReturnEligible ? `${returnWindowDays}-Day Return Policy Guaranteed` : 'Product Policy: Non-Returnable'}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#047857' }}>
+                      {isReturnEligible
+                        ? 'Snapshotted policy at checkout: 7-day doorstep return window with original tags intact.'
+                        : 'This product was purchased under non-returnable policy terms.'}
+                    </div>
+                  </div>
+                </div>
+
+                {!isReturnActive && isReturnEligible && (
+                  <button
+                    onClick={() => {
+                      setReturnReason('Damaged / Defective product received');
+                      setReturnCustomReason('');
+                      setConditionNote('');
+                      setShowReturnModal(true);
+                    }}
+                    className="btn btn-primary btn-sm"
+                    style={{ backgroundColor: '#059669', borderColor: '#059669', fontSize: '0.8rem' }}
+                  >
+                    Initiate Return
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Reverse Logistics Stepper (When Return is in Progress) */}
+            {isReturnActive && (
+              <div style={{ padding: '1.25rem', backgroundColor: 'rgba(59, 130, 246, 0.06)', border: '1px solid #3b82f6', borderRadius: '8px', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <RotateCcw size={18} style={{ color: '#2563eb' }} />
+                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#1e40af' }}>
+                    Reverse Logistics & Refund Lifecycle
+                  </h4>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', textAlign: 'center' }}>
+                  <div style={{ padding: '8px', backgroundColor: '#dbeafe', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, color: '#1e40af' }}>
+                    1. Return Requested
+                  </div>
+                  <div style={{ padding: '8px', backgroundColor: statusUpper.includes('APPROVED') || statusUpper.includes('IN_TRANSIT') || statusUpper.includes('RECEIVED') || statusUpper.includes('RETURNED') ? '#dbeafe' : '#f1f5f9', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, color: '#1e40af' }}>
+                    2. Reverse Label Created
+                  </div>
+                  <div style={{ padding: '8px', backgroundColor: statusUpper.includes('RECEIVED') || statusUpper.includes('RETURNED') ? '#dbeafe' : '#f1f5f9', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, color: '#1e40af' }}>
+                    3. Warehouse Inspection
+                  </div>
+                  <div style={{ padding: '8px', backgroundColor: statusUpper.includes('RETURNED') || statusUpper.includes('REFUNDED') ? '#dcfce7' : '#f1f5f9', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, color: '#15803d' }}>
+                    4. Refund Credited (₹{Number(selectedOrder.total_price || 0).toFixed(2)})
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Visual Order-Status Timeline */}
             <div className="timeline-section-card">
               <div className="timeline-section-header">
@@ -526,7 +916,7 @@ export const OrderTrackingPage = () => {
                 </div>
                 <div className="carrier-item-text">
                   <span className="carrier-item-label">Delivery Partner</span>
-                  <span className="carrier-item-val">{selectedOrder.carrier_name || 'EcoExpress Carbon-Neutral'}</span>
+                  <span className="carrier-item-val">{currentCarrier}</span>
                 </div>
               </div>
 
@@ -537,7 +927,7 @@ export const OrderTrackingPage = () => {
                 <div className="carrier-item-text">
                   <span className="carrier-item-label">Tracking / AWB Number</span>
                   <span className="carrier-item-val" style={{ fontFamily: 'var(--font-mono)' }}>
-                    {selectedOrder.tracking_number || `ECO-AWB-${selectedOrder.id + 100000}`}
+                    {currentTrackingNumber}
                   </span>
                 </div>
               </div>
@@ -561,7 +951,48 @@ export const OrderTrackingPage = () => {
               </div>
             </div>
 
-            {/* Interactive Delivery PIN / OTP Verification Widget (Shown when OUT_FOR_DELIVERY) */}
+            {/* Staging State Notice: When order is paid/confirmed but not yet dispatched */}
+            {isStaged && (
+              <div
+                style={{
+                  padding: '1.15rem 1.35rem',
+                  backgroundColor: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: 'var(--radius-lg, 12px)',
+                  marginBottom: '1.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem'
+                }}
+              >
+                <div
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '50%',
+                    backgroundColor: '#dcfce7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#15803d',
+                    flexShrink: 0
+                  }}
+                >
+                  <Package size={22} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#166534', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Check size={14} aria-hidden="true" />
+                    <span>Warehouse Staging & Eco-Packaging Active</span>
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
+                    Your order is confirmed and payment verified. Items are being packed in 100% biodegradable materials at our fulfillment center. Real-time GPS telemetry will activate once the carrier vehicle is dispatched.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Interactive Delivery PIN / OTP Verification Widget */}
             {isOutForDelivery && (
               <div
                 style={{
@@ -569,7 +1000,8 @@ export const OrderTrackingPage = () => {
                   border: '2px solid #10b981',
                   borderRadius: 'var(--radius-lg, 12px)',
                   padding: '1.5rem',
-                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.12)'
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.12)',
+                  marginBottom: '1.5rem'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -586,117 +1018,31 @@ export const OrderTrackingPage = () => {
                       </p>
                     </div>
                   </div>
-
-                  <span
-                    style={{
-                      padding: '0.25rem 0.65rem',
-                      borderRadius: '9999px',
-                      backgroundColor: '#d1fae5',
-                      color: '#065f46',
-                      fontWeight: 700,
-                      fontSize: '0.75rem',
-                      border: '1px solid #a7f3d0'
-                    }}
-                  >
-                    🔐 PIN Active (10m TTL)
-                  </span>
                 </div>
 
-                <form onSubmit={handleVerifyDeliveryOtp} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                    <input
-                      type="text"
-                      maxLength={6}
-                      pattern="[0-9]*"
-                      className="form-input"
-                      placeholder="Enter 6-Digit PIN"
-                      value={deliveryOtp}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, '');
-                        setDeliveryOtp(val);
-                        setOtpError(null);
-                      }}
-                      style={{
-                        maxWidth: '220px',
-                        fontSize: '1.25rem',
-                        fontWeight: 800,
-                        letterSpacing: '4px',
-                        textAlign: 'center',
-                        fontFamily: 'var(--font-mono, monospace)',
-                        border: '2px solid #059669',
-                        padding: '0.55rem 0.75rem',
-                        backgroundColor: '#ffffff'
-                      }}
-                    />
+                {otpSuccess && <div style={{ color: '#059669', fontSize: '0.85rem', marginBottom: '8px' }}>{otpSuccess}</div>}
+                {otpError && <div style={{ color: '#dc2626', fontSize: '0.85rem', marginBottom: '8px' }}>{otpError}</div>}
 
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      size="md"
-                      disabled={otpLoading || deliveryOtp.length < 4}
-                      icon={<CheckCheck size={18} />}
-                      style={{ backgroundColor: '#059669', borderColor: '#059669', fontWeight: 700 }}
-                    >
-                      {otpLoading ? 'Verifying...' : 'Verify & Mark Delivered'}
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="md"
-                      onClick={handleResendDeliveryOtp}
-                      disabled={otpLoading || otpResent}
-                      icon={<Send size={15} />}
-                    >
-                      {otpResent ? 'PIN Resent' : 'Resend PIN'}
-                    </Button>
-                  </div>
-
-                  {otpError && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#b91c1c', fontSize: '0.85rem', fontWeight: 600, marginTop: '0.35rem' }}>
-                      <AlertCircle size={16} />
-                      {otpError}
-                    </div>
-                  )}
-
-                  {otpSuccess && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#047857', fontSize: '0.85rem', fontWeight: 700, marginTop: '0.35rem' }}>
-                      <CheckCircle2 size={16} />
-                      {otpSuccess}
-                    </div>
-                  )}
+                <form onSubmit={handleVerifyDeliveryOtp} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    placeholder="6-digit PIN"
+                    value={deliveryOtp}
+                    onChange={(e) => setDeliveryOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                    style={{ padding: '8px 12px', fontSize: '1.1rem', letterSpacing: '3px', textAlign: 'center', borderRadius: '6px', border: '1px solid #10b981', width: '160px', fontWeight: 700 }}
+                  />
+                  <Button type="submit" variant="primary" size="md" disabled={otpLoading || deliveryOtp.length !== 6}>
+                    {otpLoading ? 'Verifying...' : 'Confirm Handover'}
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={handleResendDeliveryOtp} disabled={otpResent || otpLoading}>
+                    {otpResent ? 'Code Resent' : 'Resend PIN'}
+                  </Button>
                 </form>
               </div>
             )}
 
-            {/* Delivery Success Confirmation Card */}
-            {isDelivered && (
-              <div
-                style={{
-                  backgroundColor: '#f0fdf4',
-                  border: '1px solid #86efac',
-                  borderRadius: 'var(--radius-lg, 12px)',
-                  padding: '1.2rem 1.4rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem'
-                }}
-              >
-                <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#16a34a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <CheckCheck size={22} />
-                </div>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#166534' }}>
-                    Package Delivered Successfully!
-                  </h4>
-                  <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.85rem', color: '#15803d' }}>
-                    Thank you for supporting 100% sustainable, carbon-neutral commerce with EcoNext.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Live Real-Time Vehicle GPS Telemetry Stream */}
+            {/* GPS Telemetry Stream */}
             <div
               style={{
                 background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(6, 95, 70, 0.03) 100%)',
@@ -716,30 +1062,13 @@ export const OrderTrackingPage = () => {
                       width: '10px',
                       height: '10px',
                       borderRadius: '50%',
-                      backgroundColor: wsStatus === 'connected' ? '#10b981' : wsStatus === 'connecting' ? '#f59e0b' : '#94a3b8',
-                      boxShadow: wsStatus === 'connected' ? '0 0 0 3px rgba(16, 185, 129, 0.3)' : 'none',
-                      animation: wsStatus === 'connected' ? 'pulse 2s infinite' : 'none'
+                      backgroundColor: wsStatus === 'connected' ? '#10b981' : '#f59e0b'
                     }}
                   />
                   <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Radio size={16} color={wsStatus === 'connected' ? '#10b981' : 'var(--text-muted)'} />
-                    Live Logistics & GPS Telemetry Stream
+                    Live Logistics Telemetry Stream
                   </h4>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem' }}>
-                  <span
-                    style={{
-                      padding: '0.2rem 0.55rem',
-                      borderRadius: '9999px',
-                      backgroundColor: wsStatus === 'connected' ? '#dcfce7' : wsStatus === 'connecting' ? '#fef3c7' : '#f1f5f9',
-                      color: wsStatus === 'connected' ? '#15803d' : wsStatus === 'connecting' ? '#b45309' : '#64748b',
-                      fontWeight: 700,
-                      border: wsStatus === 'connected' ? '1px solid #bbf7d0' : wsStatus === 'connecting' ? '1px solid #fde68a' : '1px solid #e2e8f0'
-                    }}
-                  >
-                    {wsStatus === 'connected' ? '● STOMP WebSocket Live' : wsStatus === 'connecting' ? '○ Connecting...' : '○ Standby Mode'}
-                  </span>
                 </div>
               </div>
 
@@ -758,72 +1087,46 @@ export const OrderTrackingPage = () => {
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
                     Current GPS Coordinates
                   </span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                    <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: '0.9rem', color: currentLat ? '#059669' : 'var(--text-secondary)' }}>
-                      {currentLat && currentLon
-                        ? `${Number(currentLat).toFixed(4)}° N, ${Number(currentLon).toFixed(4)}° E`
-                        : 'Awaiting first GPS ping'}
+                  <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: '0.9rem', color: currentLat ? '#059669' : 'var(--text-secondary)' }}>
+                    {currentLat && currentLon
+                      ? `${Number(currentLat).toFixed(4)}° N, ${Number(currentLon).toFixed(4)}° E`
+                      : (isStaged ? 'Fulfillment Hub Staging' : 'Telemetry Ready')}
+                  </span>
+                  {mapsUrl && (
+                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '0.75rem', color: '#059669', marginTop: '4px' }}>
+                      <ExternalLink size={12} /> Google Maps
+                    </a>
+                  )}
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
+                    Vehicle / Fleet
+                  </span>
+                  <span style={{ fontWeight: 600, fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Truck size={14} aria-hidden="true" />
+                    <span>{currentVehicle}</span>
+                  </span>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
+                    Destination
+                  </span>
+                  <span style={{ fontWeight: 600, fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <MapPin size={14} aria-hidden="true" />
+                    <span>{selectedOrder.city}, {selectedOrder.state}</span>
+                  </span>
+                  {currentRoute && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
+                      Route: {currentRoute}
                     </span>
-
-                    {mapsUrl && (
-                      <a
-                        href={mapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          fontSize: '0.78rem',
-                          color: '#059669',
-                          fontWeight: 700,
-                          textDecoration: 'none',
-                          padding: '0.2rem 0.55rem',
-                          borderRadius: '4px',
-                          backgroundColor: '#ecfdf5',
-                          border: '1px solid #a7f3d0',
-                          width: 'fit-content'
-                        }}
-                      >
-                        <ExternalLink size={13} />
-                        Open in Google Maps
-                      </a>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
-                    Logistics Vehicle
-                  </span>
-                  <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
-                    🚚 {liveLocation?.vehicleNumber || selectedOrder.vehicle_number || 'EcoLogistics Electric Fleet'}
-                  </span>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
-                    Current Location / Hub
-                  </span>
-                  <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
-                    📍 {liveLocation?.locationName || selectedOrder.city || 'Regional Fulfillment Hub'}
-                  </span>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>
-                    Telemetry Timestamp
-                  </span>
-                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    {liveLocation?.timestamp
-                      ? new Date(liveLocation.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                      : 'Real-time telemetry ready'}
-                  </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Order Items List */}
+            {/* Order Items with Snapshot Return Policy */}
             <div className="tracking-items-section">
               <h3>Items in this Order ({selectedOrder.items?.length || 0})</h3>
               <div>
@@ -836,29 +1139,35 @@ export const OrderTrackingPage = () => {
                     <div key={item.id} className="tracking-item-row">
                       <div className="tracking-item-left">
                         {imgUrl ? (
-                          <img
-                            src={imgUrl}
-                            alt={product.name || 'Product'}
-                            className="tracking-item-img"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
+                          <img src={imgUrl} alt={product.name || 'Product'} className="tracking-item-img" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                         ) : (
-                          <div className="tracking-item-img-placeholder">
-                            Image unavailable
-                          </div>
+                          <div className="tracking-item-img-placeholder">Product</div>
                         )}
                         <div className="tracking-item-details">
                           <span className="tracking-item-name">{product.name || 'Eco-Certified Product'}</span>
                           <span className="tracking-item-qty">
                             Quantity: <strong>{item.quantity}</strong> • Unit Price: ₹{Number(item.price_at_purchase || product.current_price || 0).toFixed(2)}
                           </span>
-                          {product.category && (
-                            <span style={{ fontSize: '0.75rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-                              🌿 {typeof product.category === 'object' ? product.category.name : product.category}
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.72rem', padding: '2px 6px', backgroundColor: 'rgba(5, 150, 105, 0.1)', color: '#059669', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                              {item.return_eligible !== false ? (
+                                <>
+                                  <Check size={11} aria-hidden="true" />
+                                  <span>{item.return_window_days || 7}-Day Return Policy</span>
+                                </>
+                              ) : (
+                                <>
+                                  <X size={11} aria-hidden="true" />
+                                  <span>Non-Returnable</span>
+                                </>
+                              )}
                             </span>
-                          )}
+                            {item.condition_required && (
+                              <span style={{ fontSize: '0.72rem', padding: '2px 6px', backgroundColor: '#f1f5f9', color: '#475569', borderRadius: '4px' }}>
+                                Condition: {item.condition_required}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -873,56 +1182,20 @@ export const OrderTrackingPage = () => {
 
             {/* Two Column: Shipping Address & Payment Summary */}
             <div className="tracking-info-grid">
-              {/* Shipping Address */}
               <div className="tracking-info-block">
-                <h4>
-                  <MapPin size={16} /> Delivery Address
-                </h4>
-                <p>
-                  <strong>{selectedOrder.recipient_name || selectedOrder.customer_name || 'Customer'}</strong>
-                </p>
+                <h4><MapPin size={16} /> Delivery Address</h4>
+                <p><strong>{selectedOrder.recipient_name || selectedOrder.customer_name || 'Customer'}</strong></p>
                 <p>{selectedOrder.shipping_address}</p>
-                <p>
-                  {selectedOrder.city}, {selectedOrder.state} - {selectedOrder.zipcode}
-                </p>
+                <p>{selectedOrder.city}, {selectedOrder.state} - {selectedOrder.zipcode}</p>
                 <p>{selectedOrder.country || 'India'}</p>
-                {selectedOrder.phone && (
-                  <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                    Contact Phone: {selectedOrder.phone}
-                  </p>
-                )}
               </div>
 
-              {/* Payment Details */}
               <div className="tracking-info-block">
-                <h4>
-                  <CreditCard size={16} /> Payment Information
-                </h4>
-                <p>
-                  <strong>Method: </strong>
-                  {selectedOrder.payment_method === 'razorpay'
-                    ? 'Razorpay Online Gateway (UPI / Cards)'
-                    : selectedOrder.payment_method === 'cod'
-                    ? 'Cash on Delivery (COD)'
-                    : selectedOrder.payment_method?.toUpperCase()}
-                </p>
-                <p>
-                  <strong>Payment Status: </strong>
-                  <span
-                    style={{
-                      color: selectedOrder.payment_status === 'VERIFIED' || selectedOrder.payment_status === 'PAID'
-                        ? 'var(--color-success, #16a34a)'
-                        : 'var(--color-warning, #d97706)',
-                      fontWeight: 700
-                    }}
-                  >
-                    {selectedOrder.payment_status || 'PENDING'}
-                  </span>
-                </p>
-                {selectedOrder.razorpay_payment_id && (
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    Transaction ID: <span style={{ fontFamily: 'var(--font-mono)' }}>{selectedOrder.razorpay_payment_id}</span>
-                  </p>
+                <h4><CreditCard size={16} /> Payment Information</h4>
+                <p><strong>Method: </strong>{selectedOrder.payment_method?.toUpperCase() || 'RAZORPAY / UPI'}</p>
+                <p><strong>Status: </strong><span style={{ color: '#16a34a', fontWeight: 700 }}>{selectedOrder.payment_status || 'PAID'}</span></p>
+                {selectedOrder.refund_status && selectedOrder.refund_status !== 'NONE' && (
+                  <p><strong>Refund Status: </strong><span style={{ color: '#2563eb', fontWeight: 700 }}>{selectedOrder.refund_status}</span></p>
                 )}
 
                 <div className="order-totals-summary">
@@ -948,6 +1221,108 @@ export const OrderTrackingPage = () => {
           </div>
         )}
       </div>
+
+      {/* Modal: Cancel Order */}
+      {showCancelModal && selectedOrder && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: 'var(--bg-surface, #fff)', padding: '24px', borderRadius: '12px', maxWidth: '480px', width: '90%' }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.15rem' }}>Cancel Order #{selectedOrder.order_reference_number || selectedOrder.id}</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+              Are you sure you want to cancel this order? An automatic refund will be triggered immediately.
+            </p>
+
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>Reason for cancellation:</label>
+            <select
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-default)', marginBottom: '12px' }}
+            >
+              {CANCELLATION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+
+            {cancelReason === 'Other' && (
+              <textarea
+                placeholder="Please describe why you are cancelling..."
+                value={cancelCustomReason}
+                onChange={(e) => setCancelCustomReason(e.target.value)}
+                rows={2}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-default)', marginBottom: '12px' }}
+              />
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <Button variant="ghost" size="sm" onClick={() => setShowCancelModal(false)}>Keep Order</Button>
+              <Button variant="primary" size="sm" onClick={handleCancelOrderSubmit} disabled={cancelling} style={{ backgroundColor: '#dc2626', borderColor: '#dc2626' }}>
+                {cancelling ? 'Cancelling...' : 'Confirm Cancellation'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Request Return */}
+      {showReturnModal && selectedOrder && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: 'var(--bg-surface, #fff)', padding: '24px', borderRadius: '12px', maxWidth: '520px', width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.15rem' }}>Request Return for Order #{selectedOrder.order_reference_number || selectedOrder.id}</h3>
+
+            <div style={{ padding: '10px', backgroundColor: '#f0fdf4', border: '1px solid #10b981', borderRadius: '6px', fontSize: '0.8rem', color: '#065f46', marginBottom: '14px' }}>
+              <strong>Return Policy:</strong> {returnWindowDays}-day return window. Full refund of ₹{Number(selectedOrder.total_price || 0).toFixed(2)} upon physical warehouse inspection.
+            </div>
+
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>Reason for Return:</label>
+            <select
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-default)', marginBottom: '12px' }}
+            >
+              {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+
+            {returnReason === 'Other' && (
+              <textarea
+                placeholder="Specify reason..."
+                value={returnCustomReason}
+                onChange={(e) => setReturnCustomReason(e.target.value)}
+                rows={2}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-default)', marginBottom: '12px' }}
+              />
+            )}
+
+            <div style={{ marginTop: '10px', marginBottom: '14px', borderTop: '1px solid var(--border-default)', paddingTop: '10px' }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: '8px' }}>Product Condition Confirmation:</div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', marginBottom: '6px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={conditionCheck1} onChange={(e) => setConditionCheck1(e.target.checked)} />
+                Product is in unused and unwashed condition
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', marginBottom: '6px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={conditionCheck2} onChange={(e) => setConditionCheck2(e.target.checked)} />
+                Original brand tags and barcodes are intact
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', marginBottom: '6px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={conditionCheck3} onChange={(e) => setConditionCheck3(e.target.checked)} />
+                Original product packaging and box are undamaged
+              </label>
+            </div>
+
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Additional Comments (Optional):</label>
+            <input
+              type="text"
+              placeholder="e.g. Size was slightly tight on waist..."
+              value={conditionNote}
+              onChange={(e) => setConditionNote(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-default)', marginBottom: '16px' }}
+            />
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <Button variant="ghost" size="sm" onClick={() => setShowReturnModal(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={handleReturnSubmit} disabled={submittingReturn} style={{ backgroundColor: '#059669', borderColor: '#059669' }}>
+                {submittingReturn ? 'Submitting...' : 'Submit Return Request'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

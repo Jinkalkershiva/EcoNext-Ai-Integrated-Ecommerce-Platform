@@ -19,6 +19,8 @@ public interface OperationalOrderRepository extends JpaRepository<OperationalOrd
 
     Optional<OperationalOrder> findByDjangoOrderId(Long djangoOrderId);
 
+    List<OperationalOrder> findByShipmentId(Long shipmentId);
+
     Page<OperationalOrder> findByCurrentStatus(OrderStatus status, Pageable pageable);
 
     @Query("SELECT o FROM OperationalOrder o WHERE " +

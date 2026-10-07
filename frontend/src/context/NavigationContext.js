@@ -1,45 +1,84 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { normalizeOrderId, formatOrderReference } from '../utils/orderUtils';
 
 const NavigationContext = createContext();
 
+const parseRoute = (pathOrHash, searchStr = '') => {
+  let clean = (pathOrHash || '').replace(/^[#/]+/, '').replace(/\/+$/, '');
+  let queryPart = searchStr || '';
+  if (clean.includes('?')) {
+    const parts = clean.split('?');
+    clean = parts[0];
+    queryPart = parts[1] || '';
+  }
+  const searchParams = new URLSearchParams(queryPart);
+
+  // Orders / Tracking routes
+  // Matches: orders/123/tracking, orders/123, orders/ORD-101/tracking, order-tracking, order/123, tracking
+  if (
+    clean.startsWith('orders/') ||
+    clean === 'orders' ||
+    clean.startsWith('order/') ||
+    clean.startsWith('order-tracking') ||
+    clean === 'tracking'
+  ) {
+    let orderId = searchParams.get('id') || searchParams.get('orderId') || searchParams.get('order_id') || '';
+
+    const segments = clean.split('/');
+    if (segments.length >= 2) {
+      if (segments[0] === 'orders') {
+        orderId = segments[1];
+      } else if (segments[0] === 'order') {
+        orderId = segments[1];
+      } else if (segments[0] === 'order-tracking' && segments[1]) {
+        orderId = segments[1];
+      }
+    }
+
+    const normId = normalizeOrderId(orderId);
+    return {
+      page: 'order-tracking',
+      params: orderId ? { orderId: normId || orderId, id: normId || orderId, rawOrderId: orderId } : {}
+    };
+  }
+
+  // Product routes
+  if (clean.startsWith('product-') || clean.startsWith('product/') || clean.startsWith('products/')) {
+    const id = clean.replace(/^products?\/?/, '').replace(/^product-/, '');
+    return { page: 'product-detail', params: { id } };
+  }
+
+  // Search routes
+  if (clean.startsWith('search')) {
+    return { page: 'search', params: { q: searchParams.get('q') || '' } };
+  }
+
+  // Segment routes
+  if (['kids', 'teens', 'men', 'women', 'unisex'].includes(clean.toLowerCase())) {
+    return { page: 'segment', params: { segment: clean.toLowerCase() } };
+  }
+
+  if (clean) {
+    return { page: clean, params: {} };
+  }
+
+  return { page: 'home', params: {} };
+};
+
 export const NavigationProvider = ({ children }) => {
-  // Parse initial route from window.location.hash
-  const getRouteFromHash = () => {
-    const hash = window.location.hash.replace(/^#\/?/, '');
-    if (!hash) return { page: 'home', params: {} };
-
-    // Format: search?q=shirts or product/12 or product-12
-    if (hash.startsWith('product-') || hash.startsWith('product/')) {
-      const id = hash.replace(/^product[-/]/, '');
-      return { page: 'product-detail', params: { id } };
+  const getInitialRoute = () => {
+    const hash = window.location.hash;
+    if (hash && hash.length > 1) {
+      return parseRoute(hash, window.location.search);
     }
-
-    if (hash.startsWith('search')) {
-      const queryPart = hash.includes('?') ? hash.split('?')[1] : '';
-      const params = new URLSearchParams(queryPart);
-      return { page: 'search', params: { q: params.get('q') || '' } };
+    const pathname = window.location.pathname;
+    if (pathname && pathname !== '/' && pathname !== '') {
+      return parseRoute(pathname, window.location.search);
     }
-
-    if (hash.startsWith('order-tracking') || hash.startsWith('order/')) {
-      const queryPart = hash.includes('?') ? hash.split('?')[1] : '';
-      const params = new URLSearchParams(queryPart);
-      const idFromPath = hash.replace(/^order-tracking\/?/, '').replace(/^order\//, '');
-      const orderId = params.get('id') || (idFromPath && !idFromPath.includes('?') ? idFromPath : '');
-      return { page: 'order-tracking', params: { orderId, id: orderId } };
-    }
-
-    if (hash.startsWith('orders')) {
-      return { page: 'order-tracking', params: {} };
-    }
-
-    if (['kids', 'teens', 'men', 'women', 'unisex'].includes(hash.toLowerCase())) {
-      return { page: 'segment', params: { segment: hash.toLowerCase() } };
-    }
-
-    return { page: hash, params: {} };
+    return { page: 'home', params: {} };
   };
 
-  const [history, setHistory] = useState(() => [getRouteFromHash()]);
+  const [history, setHistory] = useState(() => [getInitialRoute()]);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   // Update hash when navigating
@@ -51,8 +90,9 @@ export const NavigationProvider = ({ children }) => {
       hashString = route.params.q ? `search?q=${encodeURIComponent(route.params.q)}` : 'search';
     } else if (route.page === 'segment') {
       hashString = route.params.segment;
-    } else if (route.page === 'order-tracking') {
-      hashString = (route.params.orderId || route.params.id) ? `order-tracking?id=${route.params.orderId || route.params.id}` : 'order-tracking';
+    } else if (route.page === 'order-tracking' || route.page === 'orders' || route.page === 'tracking') {
+      const orderId = route.params.rawOrderId || route.params.orderId || route.params.id;
+      hashString = orderId ? `orders/${orderId}/tracking` : 'orders';
     }
     window.history.pushState(route, '', `#${hashString}`);
   };
@@ -61,13 +101,24 @@ export const NavigationProvider = ({ children }) => {
     let page = pageName;
     let finalParams = { ...params };
 
-    if (pageName.startsWith('product-') || pageName.startsWith('product/')) {
+    if (pageName.startsWith('/') || pageName.startsWith('#') || pageName.includes('/')) {
+      const parsed = parseRoute(pageName, '');
+      page = parsed.page;
+      finalParams = { ...parsed.params, ...params };
+    } else if (pageName.startsWith('product-') || pageName.startsWith('product/')) {
       const id = pageName.replace(/^product[-/]/, '');
       page = 'product-detail';
       finalParams.id = id;
     } else if (['kids', 'teens', 'men', 'women', 'unisex'].includes(pageName.toLowerCase())) {
       page = 'segment';
       finalParams.segment = pageName.toLowerCase();
+    } else if (pageName === 'order-tracking' || pageName === 'orders' || pageName === 'tracking') {
+      page = 'order-tracking';
+      if (params.orderId || params.id) {
+        const normId = normalizeOrderId(params.orderId || params.id);
+        finalParams.orderId = normId || params.orderId || params.id;
+        finalParams.id = normId || params.id || params.orderId;
+      }
     }
 
     const newRoute = { page, params: finalParams };
@@ -100,7 +151,7 @@ export const NavigationProvider = ({ children }) => {
     }
   }, [currentIndex, history.length]);
 
-  // Handle browser back/forward buttons
+  // Handle browser back/forward buttons & hash changes
   useEffect(() => {
     const handlePopState = (e) => {
       if (e.state && e.state.page) {
@@ -113,15 +164,25 @@ export const NavigationProvider = ({ children }) => {
           return [...prev, e.state];
         });
       } else {
-        const parsed = getRouteFromHash();
+        const parsed = getInitialRoute();
         setHistory(prev => [...prev, parsed]);
         setCurrentIndex(prev => prev + 1);
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    const handleHashChange = () => {
+      const parsed = getInitialRoute();
+      setHistory(prev => [...prev, parsed]);
+      setCurrentIndex(prev => prev + 1);
+    };
+
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
 
   const canGoBack = currentIndex > 0;

@@ -1,10 +1,6 @@
 package com.econext.order.controller;
 
-import com.econext.order.dto.ApiResponse;
-import com.econext.order.dto.OrderResponse;
-import com.econext.order.dto.OrderStatusTransitionResponse;
-import com.econext.order.dto.OrderStatusUpdateRequest;
-import com.econext.order.dto.OrderSummaryResponse;
+import com.econext.order.dto.*;
 import com.econext.order.entity.OrderStatus;
 import com.econext.order.security.JwtTokenFilter.OperationalStaffPrincipal;
 import com.econext.order.service.OperationalOrderService;
@@ -17,6 +13,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -28,7 +25,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/order-ops")
 @RequiredArgsConstructor
-@Tag(name = "Order Lifecycle Operations", description = "Endpoints for order lifecycle state tracking, transitions, staff attribution and summary KPIs")
+@Tag(name = "Order Lifecycle Operations", description = "Endpoints for order lifecycle state tracking, transitions, staff attribution, returns and refunds")
 public class OrderOperationsController {
 
     private final OperationalOrderService orderService;
@@ -79,6 +76,19 @@ public class OrderOperationsController {
         return ResponseEntity.ok(ApiResponse.ok("Order status updated successfully to " + updated.getCurrentStatus(), updated));
     }
 
+    @PostMapping("/orders/{id}/cancel")
+    @Operation(summary = "Cancel an active customer order before physical dispatch")
+    public ResponseEntity<ApiResponse<OrderResponse>> cancelOrder(
+            @PathVariable Long id,
+            @RequestParam(required = false) String reason,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long customerId = principal != null ? principal.getId() : null;
+        String customerUsername = principal != null ? principal.getUsername() : "CUSTOMER";
+        OrderResponse cancelled = orderService.cancelOrder(id, reason, customerId, customerUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Order #" + id + " cancelled successfully", cancelled));
+    }
+
     @GetMapping("/orders/{id}/timeline")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
     @Operation(summary = "Get audit timeline of status transitions for an order")
@@ -87,11 +97,93 @@ public class OrderOperationsController {
         return ResponseEntity.ok(ApiResponse.ok(timeline));
     }
 
+    @GetMapping("/orders/{id}/delivery-audits")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
+    @Operation(summary = "Get delivery verification audit history for an order")
+    public ResponseEntity<ApiResponse<List<DeliveryVerificationAuditResponse>>> getDeliveryAudits(@PathVariable Long id) {
+        List<DeliveryVerificationAuditResponse> audits = orderService.getDeliveryAudits(id);
+        return ResponseEntity.ok(ApiResponse.ok(audits));
+    }
+
     @GetMapping("/summary")
     @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
     @Operation(summary = "Get order analytics summary (orders by status, total revenue, delivered revenue)")
     public ResponseEntity<ApiResponse<OrderSummaryResponse>> getOrderSummary() {
         OrderSummaryResponse summary = orderService.getOrderSummary();
         return ResponseEntity.ok(ApiResponse.ok(summary));
+    }
+
+    // ==========================================
+    // Return & Refund Endpoints
+    // ==========================================
+
+    @PostMapping("/returns")
+    @Operation(summary = "Create customer return request for a delivered order")
+    public ResponseEntity<ApiResponse<OrderReturnResponse>> createReturnRequest(
+            @Valid @RequestBody CreateOrderReturnRequest request,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long customerId = principal != null ? principal.getId() : null;
+        String customerUsername = principal != null ? principal.getUsername() : "CUSTOMER";
+        OrderReturnResponse created = orderService.createReturnRequest(request, customerId, customerUsername);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok("Return request submitted successfully", created));
+    }
+
+    @GetMapping("/returns")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_READ')")
+    @Operation(summary = "List all customer return requests for inspection")
+    public ResponseEntity<ApiResponse<List<OrderReturnResponse>>> getAllReturns() {
+        List<OrderReturnResponse> returns = orderService.getAllReturns();
+        return ResponseEntity.ok(ApiResponse.ok(returns));
+    }
+
+    @GetMapping("/orders/{orderId}/returns")
+    @Operation(summary = "Get return requests for a specific order")
+    public ResponseEntity<ApiResponse<List<OrderReturnResponse>>> getReturnsByOrderId(@PathVariable Long orderId) {
+        List<OrderReturnResponse> returns = orderService.getReturnsByOrderId(orderId);
+        return ResponseEntity.ok(ApiResponse.ok(returns));
+    }
+
+    @PostMapping("/returns/{id}/approve")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Approve return request and generate reverse logistics label")
+    public ResponseEntity<ApiResponse<OrderReturnResponse>> approveReturn(
+            @PathVariable Long id,
+            @RequestBody(required = false) ReturnActionRequest request,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        OrderReturnResponse approved = orderService.approveReturn(id, request, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Return request #" + id + " approved", approved));
+    }
+
+    @PostMapping("/returns/{id}/reject")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Reject customer return request with reason")
+    public ResponseEntity<ApiResponse<OrderReturnResponse>> rejectReturn(
+            @PathVariable Long id,
+            @RequestBody(required = false) ReturnActionRequest request,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        OrderReturnResponse rejected = orderService.rejectReturn(id, request, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Return request #" + id + " rejected", rejected));
+    }
+
+    @PostMapping("/returns/{id}/receive")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ORDER_PROCESS') or hasAuthority('ORDER_STATUS_UPDATE')")
+    @Operation(summary = "Mark returned item received at warehouse, complete inspection and trigger refund")
+    public ResponseEntity<ApiResponse<OrderReturnResponse>> receiveReturn(
+            @PathVariable Long id,
+            @RequestBody(required = false) ReturnActionRequest request,
+            @AuthenticationPrincipal OperationalStaffPrincipal principal
+    ) {
+        Long staffId = principal != null ? principal.getId() : null;
+        String staffUsername = principal != null ? principal.getUsername() : "ADMIN";
+        OrderReturnResponse received = orderService.receiveReturn(id, request, staffId, staffUsername);
+        return ResponseEntity.ok(ApiResponse.ok("Return item received at warehouse and marked complete", received));
     }
 }

@@ -607,7 +607,15 @@ def admin_orders_list(request):
     search = request.GET.get('search', '').strip()
     if search:
         # Search by order ID, customer name, email, city, tracking number
-        clean_id = search.replace('ORD-', '').replace('ord-', '').replace('#', '').strip()
+        clean_id = (
+            search.replace('ORD-', '')
+            .replace('ord-', '')
+            .replace('ORD', '')
+            .replace('ord', '')
+            .replace('#', '')
+            .strip()
+            .lstrip('0') or '0'
+        )
         search_filter = (
             Q(user__username__icontains=search) |
             Q(user__first_name__icontains=search) |
@@ -705,8 +713,16 @@ def admin_order_status_update(request, order_id):
     is_internal_call = (
         request.headers.get('X-Internal-Service-Key') == 'econext-internal-microservice-key-2026'
         or getattr(request, 'is_internal_service', False)
-        or (request.user and (request.user.is_superuser or request.user.is_staff))
     )
+
+    # SECURITY ENFORCEMENT: DELIVERED cannot be set directly from admin without OTP verification or internal sync
+    if target_canonical == 'DELIVERED' and not is_internal_call:
+        has_delivery_audit = order.delivery_audits.filter(new_status='DELIVERED').exists()
+        if not has_delivery_audit:
+            return Response({
+                'status': 'error',
+                'message': 'Direct transition to DELIVERED is forbidden. Secure Customer Delivery OTP verification is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     allowed_targets = ALLOWED_STATE_TRANSITIONS.get(curr_canonical, [])
     # Check if transition is allowed (unless authoritative internal sync)
@@ -722,11 +738,21 @@ def admin_order_status_update(request, order_id):
     tracking_number = request.data.get('trackingNumber') or request.data.get('tracking_number') or order.tracking_number
 
     order.status = target_canonical
+    if target_canonical == 'DELIVERED' and not order.delivered_at:
+        order.delivered_at = timezone.now()
     if carrier_name:
         order.carrier_name = carrier_name
     if tracking_number:
         order.tracking_number = tracking_number
     order.save()
+
+    # Synchronize linked shipments if any exist
+    if hasattr(order, 'shipments'):
+        for shp in order.shipments.all():
+            shp.status = target_canonical
+            if target_canonical == 'DELIVERED' and not shp.delivered_at:
+                shp.delivered_at = timezone.now()
+            shp.save()
 
     staff_name = 'Staff Member'
     if request.user and request.user.is_authenticated:

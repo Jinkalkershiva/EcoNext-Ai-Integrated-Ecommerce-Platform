@@ -9,7 +9,7 @@ const ChatAssistant = ({ onViewDetails }) => {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: "Hi! 👋 I'm EcoNext AI. I can help you find products, compare options, understand product features, and make smarter shopping decisions. What are you looking for today?",
+      content: "Hi! I'm EcoNext AI. I can help you find products, compare options, understand product features, and make smarter shopping decisions. What are you looking for today?",
       timestamp: new Date().toISOString()
     }
   ]);
@@ -71,7 +71,7 @@ const ChatAssistant = ({ onViewDetails }) => {
   const clearChat = () => {
     setMessages([{
       role: 'assistant',
-      content: "Hi! 👋 I'm EcoNext AI. I can help you find products, compare options, understand product features, and make smarter shopping decisions. What are you looking for today?",
+      content: "Hi! I'm EcoNext AI. I can help you find products, compare options, understand product features, and make smarter shopping decisions. What are you looking for today?",
       timestamp: new Date().toISOString()
     }]);
   };

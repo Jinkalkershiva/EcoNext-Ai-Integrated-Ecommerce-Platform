@@ -48,7 +48,7 @@ export const NotificationDrawer = () => {
           {
             id: 'sample-1',
             title: 'Welcome to EcoNext!',
-            message: 'Your carbon-neutral shopping journey begins today. 🌿',
+            message: 'Your carbon-neutral shopping journey begins today.',
             type: 'SUSTAINABILITY',
             isRead: false,
             createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),

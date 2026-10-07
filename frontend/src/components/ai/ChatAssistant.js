@@ -9,7 +9,7 @@ export const ChatAssistant = ({ onViewDetails }) => {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: "Hello! 👋 I'm your EcoNext AI Shopping Assistant. Ask me anything about our eco-friendly products, materials, price predictions, or recommendations!",
+      content: "Hello! I'm your EcoNext AI Shopping Assistant. Ask me anything about our eco-friendly products, materials, price predictions, or recommendations!",
       timestamp: new Date().toISOString()
     }
   ]);
@@ -48,7 +48,7 @@ export const ChatAssistant = ({ onViewDetails }) => {
       const response = await apiService.sendChatMessage(text, history);
       const assistantMessage = {
         role: 'assistant',
-        content: response?.reply || "Here is what I found for your request.",
+        content: response?.reply || response?.response || "Here is what I found for your request.",
         timestamp: new Date().toISOString(),
         products: response?.products || []
       };
@@ -73,7 +73,7 @@ export const ChatAssistant = ({ onViewDetails }) => {
     setMessages([
       {
         role: 'assistant',
-        content: "Hello! 👋 I'm your EcoNext AI Shopping Assistant. Ask me anything about our eco-friendly products, materials, price predictions, or recommendations!",
+        content: "Hello! I'm your EcoNext AI Shopping Assistant. Ask me anything about our eco-friendly products, materials, price predictions, or recommendations!",
         timestamp: new Date().toISOString()
       }
     ]);

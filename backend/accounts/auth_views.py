@@ -8,8 +8,8 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.views.decorators.http import require_http_methods
-from .serializers import SignUpSerializer, LoginSerializer, UserSerializer, UserProfileSerializer
-from .models import UserProfile
+from .serializers import SignUpSerializer, LoginSerializer, UserSerializer, UserProfileSerializer, UserAddressSerializer
+from .models import UserProfile, UserAddress
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -823,5 +823,124 @@ def admin_permissions_list(request):
         'data': sorted(list(all_perms)),
         'count': len(all_perms)
     })
+
+
+# ============ Customer Saved Delivery Addresses ============
+
+@api_view(['GET', 'POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def user_addresses_list_create(request):
+    """List customer's saved delivery addresses or create a new one."""
+    if request.method == 'GET':
+        addresses = UserAddress.objects.filter(user=request.user)
+        serializer = UserAddressSerializer(addresses, many=True)
+        return Response({
+            'status': 'success',
+            'data': serializer.data,
+            'addresses': serializer.data
+        })
+
+    # POST: Add new address
+    data = request.data.copy()
+
+    # Address Deduplication: check if identical address already saved for this user
+    addr_line = (data.get('address_line') or '').strip()
+    city = (data.get('city') or '').strip()
+    zipcode = (data.get('zipcode') or '').strip()
+    addr_type = (data.get('address_type') or 'HOME').strip().upper()
+
+    if addr_line and city and zipcode:
+        existing = UserAddress.objects.filter(
+            user=request.user,
+            address_line__iexact=addr_line,
+            city__iexact=city,
+            zipcode__iexact=zipcode,
+            address_type=addr_type
+        ).first()
+        if existing:
+            return Response({
+                'status': 'duplicate',
+                'message': 'An address with these details is already saved.',
+                'data': UserAddressSerializer(existing).data,
+                'address': UserAddressSerializer(existing).data,
+                'duplicate': True
+            }, status=status.HTTP_200_OK)
+
+    serializer = UserAddressSerializer(data=data)
+    if serializer.is_valid():
+        address = serializer.save(user=request.user)
+        # If this is user's first address, make it default
+        if UserAddress.objects.filter(user=request.user).count() == 1:
+            address.is_default = True
+            address.save(update_fields=['is_default'])
+        return Response({
+            'status': 'success',
+            'message': 'Address saved successfully',
+            'data': UserAddressSerializer(address).data,
+            'address': UserAddressSerializer(address).data
+        }, status=status.HTTP_201_CREATED)
+
+    return Response({
+        'status': 'error',
+        'message': 'Invalid address data',
+        'errors': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def user_address_detail(request, pk):
+    """Retrieve, update, or delete a saved delivery address (strictly scoped to authenticated user)."""
+    try:
+        address = UserAddress.objects.get(pk=pk, user=request.user)
+    except UserAddress.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Address not found or access denied.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': UserAddressSerializer(address).data})
+
+    if request.method in ['PUT', 'PATCH']:
+        serializer = UserAddressSerializer(address, data=request.data, partial=True)
+        if serializer.is_valid():
+            updated = serializer.save()
+            return Response({
+                'status': 'success',
+                'message': 'Address updated successfully',
+                'data': UserAddressSerializer(updated).data,
+                'address': UserAddressSerializer(updated).data
+            })
+        return Response({'status': 'error', 'message': 'Invalid address data', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == 'DELETE':
+        was_default = address.is_default
+        address.delete()
+        if was_default:
+            next_addr = UserAddress.objects.filter(user=request.user).first()
+            if next_addr:
+                next_addr.is_default = True
+                next_addr.save(update_fields=['is_default'])
+        return Response({'status': 'success', 'message': 'Address removed successfully'})
+
+
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def user_address_set_default(request, pk):
+    """Set a saved address as the default shipping address."""
+    try:
+        address = UserAddress.objects.get(pk=pk, user=request.user)
+    except UserAddress.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Address not found or access denied.'}, status=status.HTTP_404_NOT_FOUND)
+
+    address.is_default = True
+    address.save()
+    return Response({
+        'status': 'success',
+        'message': 'Default address updated successfully',
+        'data': UserAddressSerializer(address).data
+    })
+
 
 

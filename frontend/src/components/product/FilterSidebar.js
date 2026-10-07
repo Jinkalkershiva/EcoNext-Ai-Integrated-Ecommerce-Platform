@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Filter, Check, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Filter, Check, Sparkles, SlidersHorizontal, RotateCcw } from 'lucide-react';
 import { apiService } from '../../api';
+import PriceRangeSlider from '../common/PriceRangeSlider';
 import './FilterSidebar.css';
 
 export const FilterSidebar = ({
   initialFilters = {},
   onFilterChange,
-  hideSegments = false
+  hideSegments = false,
 }) => {
   const [categories, setCategories] = useState([]);
   const [ageGroups, setAgeGroups] = useState([]);
@@ -22,6 +23,18 @@ export const FilterSidebar = ({
     eco_tags: initialFilters.eco_tags || [],
     sort_by: initialFilters.sort_by || '-created_at',
   });
+
+  useEffect(() => {
+    setFilters({
+      category: initialFilters.category || '',
+      age_group: initialFilters.age_group || '',
+      gender_category: initialFilters.gender_category || '',
+      price_min: initialFilters.price_min || '',
+      price_max: initialFilters.price_max || '',
+      eco_tags: initialFilters.eco_tags || [],
+      sort_by: initialFilters.sort_by || '-created_at',
+    });
+  }, [initialFilters]);
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -43,21 +56,48 @@ export const FilterSidebar = ({
     fetchMetadata();
   }, []);
 
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.category) count++;
+    if (filters.gender_category) count++;
+    if (filters.age_group) count++;
+    if (filters.price_min !== '' || filters.price_max !== '') count++;
+    if (filters.eco_tags && filters.eco_tags.length > 0) count += filters.eco_tags.length;
+    return count;
+  }, [filters]);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     const nextFilters = { ...filters, [name]: value };
     setFilters(nextFilters);
-    onFilterChange && onFilterChange(nextFilters);
+    if (onFilterChange) onFilterChange(nextFilters);
+  };
+
+  const handleCategorySelect = (catName) => {
+    const nextCat = filters.category === catName ? '' : catName;
+    const nextFilters = { ...filters, category: nextCat };
+    setFilters(nextFilters);
+    if (onFilterChange) onFilterChange(nextFilters);
+  };
+
+  const handlePriceSliderChange = ({ price_min, price_max }) => {
+    const nextFilters = {
+      ...filters,
+      price_min: price_min !== '' ? price_min : '',
+      price_max: price_max !== '' ? price_max : '',
+    };
+    setFilters(nextFilters);
+    if (onFilterChange) onFilterChange(nextFilters);
   };
 
   const toggleEcoTag = (tagName) => {
     const nextTags = filters.eco_tags.includes(tagName)
-      ? filters.eco_tags.filter(t => t !== tagName)
+      ? filters.eco_tags.filter((t) => t !== tagName)
       : [...filters.eco_tags, tagName];
 
     const nextFilters = { ...filters, eco_tags: nextTags };
     setFilters(nextFilters);
-    onFilterChange && onFilterChange(nextFilters);
+    if (onFilterChange) onFilterChange(nextFilters);
   };
 
   const handleReset = () => {
@@ -71,23 +111,30 @@ export const FilterSidebar = ({
       sort_by: '-created_at',
     };
     setFilters(cleared);
-    onFilterChange && onFilterChange(cleared);
+    if (onFilterChange) onFilterChange(cleared);
   };
 
   return (
     <aside className="filter-sidebar-container">
+      {/* Header */}
       <div className="filter-sidebar-header">
         <div className="filter-sidebar-title">
-          <Filter size={18} />
-          <span>Filters & Sort</span>
+          <Filter size={18} style={{ color: 'var(--color-primary)' }} />
+          <span>Filters</span>
+          {activeFilterCount > 0 && (
+            <span className="filter-count-badge">{activeFilterCount}</span>
+          )}
         </div>
-        <button type="button" className="filter-clear-btn" onClick={handleReset}>
-          Reset all
-        </button>
+        {activeFilterCount > 0 && (
+          <button type="button" className="filter-clear-btn" onClick={handleReset}>
+            <RotateCcw size={12} style={{ display: 'inline', marginRight: '3px' }} />
+            Reset all
+          </button>
+        )}
       </div>
 
-      {/* Sort By */}
-      <div>
+      {/* 1. Sort By Dropdown */}
+      <div className="filter-group">
         <div className="filter-section-title">Sort By</div>
         <select
           name="sort_by"
@@ -95,36 +142,67 @@ export const FilterSidebar = ({
           value={filters.sort_by}
           onChange={handleInputChange}
         >
-          <option value="-created_at">✨ Newest Arrivals</option>
-          <option value="popularity_score">🔥 Most Popular</option>
-          <option value="current_price">💰 Price: Low to High</option>
-          <option value="-current_price">💎 Price: High to Low</option>
+          <option value="-created_at">Newest Arrivals</option>
+          <option value="popularity_score">Most Popular</option>
+          <option value="current_price">Price: Low to High</option>
+          <option value="-current_price">Price: High to Low</option>
+          <option value="-rating">Highest Rated</option>
         </select>
       </div>
 
-      {/* Categories */}
+      {/* 2. Dual-Handle Price Range Slider */}
+      <div className="filter-group">
+        <div className="filter-section-title">
+          <span>Price Range</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'none', fontWeight: 600 }}>
+            ₹{filters.price_min || 0} - ₹{filters.price_max || '5000+'}
+          </span>
+        </div>
+        <PriceRangeSlider
+          min={0}
+          max={5000}
+          step={50}
+          valueMin={filters.price_min}
+          valueMax={filters.price_max}
+          onChange={handlePriceSliderChange}
+        />
+      </div>
+
+      {/* 3. Category List */}
       {categories.length > 0 && (
-        <div>
-          <div className="filter-section-title">Category</div>
-          <select
-            name="category"
-            className="form-select"
-            value={filters.category}
-            onChange={handleInputChange}
-          >
-            <option value="">All Categories</option>
-            {categories.map((c) => (
-              <option key={c.id || c.name} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+        <div className="filter-group">
+          <div className="filter-section-title">Categories</div>
+          <div className="filter-category-list">
+            <button
+              type="button"
+              className={`filter-category-item ${filters.category === '' ? 'active' : ''}`}
+              onClick={() => handleCategorySelect('')}
+            >
+              <div className="filter-radio-circle" />
+              <span>All Categories</span>
+            </button>
+            {categories.map((c) => {
+              const catName = c.name || c;
+              const isSelected = filters.category === catName;
+              return (
+                <button
+                  key={c.id || catName}
+                  type="button"
+                  className={`filter-category-item ${isSelected ? 'active' : ''}`}
+                  onClick={() => handleCategorySelect(catName)}
+                >
+                  <div className="filter-radio-circle" />
+                  <span>{catName}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Gender Category (if not on a dedicated segment page) */}
+      {/* 4. Target Persona (Gender) */}
       {!hideSegments && genderCategories.length > 0 && (
-        <div>
+        <div className="filter-group">
           <div className="filter-section-title">Target Persona</div>
           <select
             name="gender_category"
@@ -142,10 +220,10 @@ export const FilterSidebar = ({
         </div>
       )}
 
-      {/* Age Group */}
+      {/* 5. Age Demographic */}
       {!hideSegments && ageGroups.length > 0 && (
-        <div>
-          <div className="filter-section-title">Age Demographic</div>
+        <div className="filter-group">
+          <div className="filter-section-title">Age Group</div>
           <select
             name="age_group"
             className="form-select"
@@ -162,32 +240,9 @@ export const FilterSidebar = ({
         </div>
       )}
 
-      {/* Price Range */}
-      <div>
-        <div className="filter-section-title">Price Range (₹)</div>
-        <div className="price-inputs-row">
-          <input
-            type="number"
-            name="price_min"
-            placeholder="Min ₹"
-            className="form-input"
-            value={filters.price_min}
-            onChange={handleInputChange}
-          />
-          <input
-            type="number"
-            name="price_max"
-            placeholder="Max ₹"
-            className="form-input"
-            value={filters.price_max}
-            onChange={handleInputChange}
-          />
-        </div>
-      </div>
-
-      {/* Eco Sustainability Tags */}
+      {/* 6. Eco Sustainability Verification Tags */}
       {ecoTags.length > 0 && (
-        <div>
+        <div className="filter-group">
           <div className="filter-section-title">
             <span>Eco Verification</span>
             <Sparkles size={14} style={{ color: 'var(--color-primary)' }} />
@@ -203,7 +258,9 @@ export const FilterSidebar = ({
                   className={`filter-tag-chip ${isSelected ? 'active' : ''}`}
                   onClick={() => toggleEcoTag(name)}
                 >
-                  {isSelected && <Check size={12} style={{ display: 'inline', marginRight: '3px' }} />}
+                  {isSelected && (
+                    <Check size={12} style={{ display: 'inline', marginRight: '3px' }} />
+                  )}
                   {name}
                 </button>
               );

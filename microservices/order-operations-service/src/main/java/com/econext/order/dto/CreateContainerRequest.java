@@ -25,6 +25,12 @@ public class CreateContainerRequest {
 
     private String route;
 
+    private String vehicleNumber;
+
+    private BigDecimal maxWeightKg;
+
+    private BigDecimal maxVolumeM3;
+
     private BigDecimal currentLatitude;
 
     private BigDecimal currentLongitude;

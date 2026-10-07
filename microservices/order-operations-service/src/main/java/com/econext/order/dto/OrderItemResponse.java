@@ -18,4 +18,10 @@ public class OrderItemResponse {
     private Integer quantity;
     private BigDecimal priceAtPurchase;
     private BigDecimal subtotal;
+    private Boolean returnEligible;
+    private Integer returnWindowDays;
+    private String returnPolicy;
+    private String conditionRequired;
+    private BigDecimal weightKg;
+    private BigDecimal volumeM3;
 }

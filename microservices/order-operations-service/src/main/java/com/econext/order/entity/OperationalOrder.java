@@ -1,5 +1,6 @@
 package com.econext.order.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -14,7 +15,8 @@ import java.util.List;
 @Table(name = "operational_orders", indexes = {
     @Index(name = "idx_op_order_customer", columnList = "customer_username"),
     @Index(name = "idx_op_order_status", columnList = "current_status"),
-    @Index(name = "idx_op_order_created", columnList = "created_at")
+    @Index(name = "idx_op_order_created", columnList = "created_at"),
+    @Index(name = "idx_op_order_shipment_id", columnList = "shipment_id")
 })
 @Getter
 @Setter
@@ -65,6 +67,11 @@ public class OperationalOrder {
     @Builder.Default
     private OrderStatus currentStatus = OrderStatus.ORDER_PLACED;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shipment_id")
+    @JsonIgnore
+    private Shipment shipment;
+
     @Column(name = "carrier_name", length = 100)
     private String carrierName;
 
@@ -73,6 +80,24 @@ public class OperationalOrder {
 
     @Column(name = "django_order_id")
     private Long djangoOrderId;
+
+    @Column(name = "total_weight_kg", precision = 10, scale = 3)
+    @Builder.Default
+    private BigDecimal totalWeightKg = new BigDecimal("1.500");
+
+    @Column(name = "total_volume_m3", precision = 10, scale = 4)
+    @Builder.Default
+    private BigDecimal totalVolumeM3 = new BigDecimal("0.0060");
+
+    @Column(name = "delivered_at")
+    private LocalDateTime deliveredAt;
+
+    @Column(name = "cancellation_reason", length = 500)
+    private String cancellationReason;
+
+    @Column(name = "refund_status", length = 32)
+    @Builder.Default
+    private String refundStatus = "NONE";
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @Builder.Default
@@ -91,5 +116,35 @@ public class OperationalOrder {
             return "ORD-" + djangoOrderId;
         }
         return id != null ? "ORD-" + id : "ORD-PENDING";
+    }
+
+    public BigDecimal resolveWeight() {
+        if (totalWeightKg != null && totalWeightKg.compareTo(BigDecimal.ZERO) > 0) {
+            return totalWeightKg;
+        }
+        if (items != null && !items.isEmpty()) {
+            BigDecimal sum = BigDecimal.ZERO;
+            for (OperationalOrderItem it : items) {
+                BigDecimal w = it.getWeightKg() != null ? it.getWeightKg() : new BigDecimal("1.000");
+                sum = sum.add(w.multiply(new BigDecimal(it.getQuantity() != null ? it.getQuantity() : 1)));
+            }
+            return sum;
+        }
+        return new BigDecimal("1.500");
+    }
+
+    public BigDecimal resolveVolume() {
+        if (totalVolumeM3 != null && totalVolumeM3.compareTo(BigDecimal.ZERO) > 0) {
+            return totalVolumeM3;
+        }
+        if (items != null && !items.isEmpty()) {
+            BigDecimal sum = BigDecimal.ZERO;
+            for (OperationalOrderItem it : items) {
+                BigDecimal v = it.getVolumeM3() != null ? it.getVolumeM3() : new BigDecimal("0.0050");
+                sum = sum.add(v.multiply(new BigDecimal(it.getQuantity() != null ? it.getQuantity() : 1)));
+            }
+            return sum;
+        }
+        return new BigDecimal("0.0060");
     }
 }
