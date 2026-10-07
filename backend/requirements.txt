@@ -41,10 +41,10 @@ celery==5.3.4
 redis==5.0.1
 django-redis==5.4.0
 
-# --- Optional: real CLIP visual search ---
-# The visual search engine uses colour-histogram matching out of the box and
-# automatically upgrades to CLIP embeddings if these are installed. They are
-# left out by default because they add several gigabytes.
-# torch>=2.2.0
-# transformers>=4.38.0
-# faiss-cpu>=1.8.0
+# --- CLIP visual search (active) ---
+# The visual search engine prefers CLIP embeddings when these are present and
+# falls back to colour-histogram matching when they are absent.
+# Installed: torch 2.14.1, transformers 5.19.0, faiss-cpu 1.15.1 (Python 3.13 wheels).
+torch>=2.2.0
+transformers>=4.47.0           # 4.47+ ships tokenizers>=0.19 wheels for Python 3.13
+faiss-cpu>=1.8.0

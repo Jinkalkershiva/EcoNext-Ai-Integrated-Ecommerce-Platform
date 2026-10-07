@@ -144,3 +144,4 @@ docker-compose.local.yml
 *.pth
 *.model
 test.jpg
+backup_clip_*/
