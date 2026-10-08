@@ -156,8 +156,8 @@ public class DeliveryOtpService {
 
         OperationalOrder order = null;
         if (targetOrderId != null) {
-            order = orderRepository.findById(targetOrderId)
-                    .or(() -> orderRepository.findByDjangoOrderId(targetOrderId))
+            order = orderRepository.findByDjangoOrderId(targetOrderId)
+                    .or(() -> orderRepository.findById(targetOrderId))
                     .orElse(null);
         }
         if (order == null && shipment.getOrderId() != null) {
@@ -176,6 +176,10 @@ public class DeliveryOtpService {
 
         if (order.getCurrentStatus() == OrderStatus.DELIVERED) {
             throw new BadRequestException("Order #" + order.getId() + " is already DELIVERED.");
+        }
+
+        if (order.getCurrentStatus() != OrderStatus.OUT_FOR_DELIVERY && shipment.getStatus() != ShipmentStatus.OUT_FOR_DELIVERY) {
+            throw new BadRequestException("Delivery OTP can only be generated when the order or shipment is OUT_FOR_DELIVERY. Current status: " + order.getCurrentStatus() + " (Shipment: " + shipment.getStatus() + ")");
         }
 
         Long orderId = order.getId();
@@ -276,8 +280,8 @@ public class DeliveryOtpService {
 
         OperationalOrder order = null;
         if (targetOrderId != null) {
-            order = orderRepository.findById(targetOrderId)
-                    .or(() -> orderRepository.findByDjangoOrderId(targetOrderId))
+            order = orderRepository.findByDjangoOrderId(targetOrderId)
+                    .or(() -> orderRepository.findById(targetOrderId))
                     .orElse(null);
         }
         if (order == null && shipment.getOrderId() != null) {
@@ -292,6 +296,14 @@ public class DeliveryOtpService {
 
         if (order == null) {
             throw new ResourceNotFoundException("No order found associated with shipment #" + shipmentId);
+        }
+
+        if (order.getCurrentStatus() == OrderStatus.DELIVERED) {
+            throw new BadRequestException("Order #" + order.getId() + " is already DELIVERED.");
+        }
+
+        if (order.getCurrentStatus() != OrderStatus.OUT_FOR_DELIVERY && shipment.getStatus() != ShipmentStatus.OUT_FOR_DELIVERY) {
+            throw new BadRequestException("Delivery OTP can only be verified when the order or shipment is OUT_FOR_DELIVERY. Current status: " + order.getCurrentStatus() + " (Shipment: " + shipment.getStatus() + ")");
         }
 
         Long orderId = order.getId();
@@ -358,7 +370,14 @@ public class DeliveryOtpService {
                 .build();
         transitionRepository.save(transition);
 
-        djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.DELIVERED);
+        djangoOrderSyncService.syncOrderStatusToDjango(
+                order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(),
+                OrderStatus.DELIVERED,
+                shipment.getShipmentNumber(),
+                shipment.getTrackingNumber(),
+                shipment.getCarrierName(),
+                "PAID"
+        );
 
         // Check if all assigned orders in shipment are now delivered
         boolean allDelivered = shipment.getAssignedOrders() == null || shipment.getAssignedOrders().isEmpty()

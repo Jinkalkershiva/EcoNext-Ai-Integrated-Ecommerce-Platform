@@ -126,6 +126,7 @@ public class OrderOperationsServiceApplicationTests {
         // 5. Create Shipment and Assign Order -> ASSIGNED_TO_SHIPMENT
         ShipmentResponse shp = shipmentService.createShipment(
                 CreateShipmentRequest.builder()
+                        .orderId(order.getId())
                         .origin("Gujarat Warehouse")
                         .destination("Mumbai Hub")
                         .route("Gujarat Warehouse -> Maharashtra Hub -> Mumbai Hub")
@@ -134,13 +135,7 @@ public class OrderOperationsServiceApplicationTests {
                 101L, "staff"
         );
         assertEquals(ShipmentStatus.OPEN, shp.getStatus());
-
-        ShipmentResponse assignedShp = shipmentService.assignOrderToShipment(
-                shp.getId(),
-                AssignOrderRequest.builder().orderId(order.getId()).routeException(false).build(),
-                101L, "staff"
-        );
-        assertEquals(1, assignedShp.getAssignedOrderCount());
+        assertEquals(1, shp.getAssignedOrderCount());
         OperationalOrder refreshed = orderRepository.findById(order.getId()).orElseThrow();
         assertEquals(OrderStatus.ASSIGNED_TO_SHIPMENT, refreshed.getCurrentStatus());
 
@@ -304,9 +299,23 @@ public class OrderOperationsServiceApplicationTests {
     @Test
     @DisplayName("5. Route Compatibility Check and Authorized Route Exception Audit")
     void testRouteCompatibilityAndExceptionAuditing() {
+        OperationalOrder baseOrder = orderRepository.save(OperationalOrder.builder()
+                .customerId(25L)
+                .customerUsername("mumbai_buyer")
+                .shippingAddress("Bandra West")
+                .city("Mumbai")
+                .state("Maharashtra")
+                .country("India")
+                .totalAmount(new BigDecimal("1200.00"))
+                .totalWeightKg(new BigDecimal("1.200"))
+                .totalVolumeM3(new BigDecimal("0.0060"))
+                .currentStatus(OrderStatus.READY_FOR_SHIPMENT)
+                .build());
+
         // Shipment route: Gujarat -> Maharashtra Hub -> Mumbai Hub
         ShipmentResponse shp = shipmentService.createShipment(
                 CreateShipmentRequest.builder()
+                        .orderId(baseOrder.getId())
                         .origin("Gujarat Warehouse")
                         .destination("Mumbai Hub")
                         .route("Gujarat Warehouse -> Maharashtra Hub -> Mumbai Hub")
@@ -507,5 +516,20 @@ public class OrderOperationsServiceApplicationTests {
         fulfillmentKafkaConsumer.handleOrderEvent(orderPayload);
         long count = orderRepository.findAll().stream().filter(o -> Long.valueOf(9901L).equals(o.getDjangoOrderId())).count();
         assertEquals(1, count, "Duplicate order-events delivery must NOT create duplicate OperationalOrder records");
+    }
+
+    @Test
+    @DisplayName("10. Reject Empty Shipment Creation Without Eligible Orders")
+    void testEmptyShipmentCreationRejected() {
+        assertThrows(com.econext.order.exception.GlobalExceptionHandler.BadRequestException.class, () -> {
+            shipmentService.createShipment(
+                    CreateShipmentRequest.builder()
+                            .origin("Gujarat Warehouse")
+                            .destination("Mumbai Hub")
+                            .route("Gujarat Warehouse -> Mumbai Hub")
+                            .build(),
+                    101L, "staff"
+            );
+        });
     }
 }

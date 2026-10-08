@@ -82,14 +82,13 @@ public class ShipmentService {
 
         List<OperationalOrder> targetOrders = new ArrayList<>();
         for (Long oId : targetOrderIds) {
-            OperationalOrder order = orderRepository.findById(oId)
-                    .or(() -> orderRepository.findByDjangoOrderId(oId))
+            OperationalOrder order = orderRepository.findByDjangoOrderId(oId)
                     .orElseGet(() -> {
                         OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(oId);
                         if (fetched != null) {
                             return orderRepository.save(fetched);
                         }
-                        return null;
+                        return orderRepository.findById(oId).orElse(null);
                     });
             if (order == null) {
                 throw new ResourceNotFoundException("Order not found with ID: " + oId);
@@ -101,6 +100,10 @@ public class ShipmentService {
                 throw new BadRequestException("Order #" + order.getOrderReferenceNumber() + " is " + order.getCurrentStatus() + " and cannot be shipped.");
             }
             targetOrders.add(order);
+        }
+
+        if (targetOrders.isEmpty()) {
+            throw new BadRequestException("Cannot create shipment without at least one eligible order.");
         }
 
         Container container = null;
@@ -172,6 +175,10 @@ public class ShipmentService {
                 ? request.getCarrierName()
                 : (!targetOrders.isEmpty() && targetOrders.get(0).getCarrierName() != null ? targetOrders.get(0).getCarrierName() : "EcoExpress Carbon-Neutral Fleet");
 
+        String warehouse = request.getWarehouse() != null && !request.getWarehouse().isBlank()
+                ? request.getWarehouse().trim()
+                : (container != null && container.getWarehouse() != null ? container.getWarehouse() : origin);
+
         Shipment shipment = Shipment.builder()
                 .shipmentNumber(shipmentNumber)
                 .orderId(!targetOrders.isEmpty() ? targetOrders.get(0).getId() : null)
@@ -179,6 +186,7 @@ public class ShipmentService {
                 .status(ShipmentStatus.OPEN)
                 .carrierName(carrierName)
                 .trackingNumber(trackingNumber)
+                .warehouse(warehouse)
                 .vehicleNumber(request.getVehicleNumber() != null && !request.getVehicleNumber().isBlank() ? request.getVehicleNumber() : "KA-01-EQ-9124 (EV Heavy Truck)")
                 .origin(origin)
                 .destination(destination)
@@ -233,6 +241,7 @@ public class ShipmentService {
             }
         }
         shipment.setItems(allShipmentItems);
+        shipment.setAssignedOrders(new ArrayList<>(targetOrders));
 
         Shipment saved = shipmentRepository.save(shipment);
 
@@ -255,7 +264,14 @@ public class ShipmentService {
                     .build();
             transitionRepository.save(transition);
 
-            djangoOrderSyncService.syncOrderStatusToDjango(o.getDjangoOrderId() != null ? o.getDjangoOrderId() : o.getId(), OrderStatus.ASSIGNED_TO_SHIPMENT);
+            djangoOrderSyncService.syncOrderStatusToDjango(
+                    o.getDjangoOrderId() != null ? o.getDjangoOrderId() : o.getId(),
+                    OrderStatus.ASSIGNED_TO_SHIPMENT,
+                    saved.getShipmentNumber(),
+                    saved.getTrackingNumber(),
+                    saved.getCarrierName(),
+                    null
+            );
         }
 
         // If route exception was logged
@@ -328,14 +344,13 @@ public class ShipmentService {
             throw new BadRequestException("Shipment #" + shipment.getShipmentNumber() + " is in status " + shipment.getStatus() + " and cannot accept new orders.");
         }
 
-        OperationalOrder order = orderRepository.findById(request.getOrderId())
-                .or(() -> orderRepository.findByDjangoOrderId(request.getOrderId()))
+        OperationalOrder order = orderRepository.findByDjangoOrderId(request.getOrderId())
                 .orElseGet(() -> {
                     OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(request.getOrderId());
                     if (fetched != null) {
                         return orderRepository.save(fetched);
                     }
-                    return null;
+                    return orderRepository.findById(request.getOrderId()).orElse(null);
                 });
 
         if (order == null) {
@@ -459,7 +474,14 @@ public class ShipmentService {
                 .build();
         transitionRepository.save(t);
 
-        djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.ASSIGNED_TO_SHIPMENT);
+        djangoOrderSyncService.syncOrderStatusToDjango(
+                order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(),
+                OrderStatus.ASSIGNED_TO_SHIPMENT,
+                shipment.getShipmentNumber(),
+                shipment.getTrackingNumber(),
+                shipment.getCarrierName(),
+                null
+        );
 
         return mapToResponse(updated);
     }
@@ -469,7 +491,8 @@ public class ShipmentService {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
 
-        OperationalOrder order = orderRepository.findById(orderId)
+        OperationalOrder order = orderRepository.findByDjangoOrderId(orderId)
+                .or(() -> orderRepository.findById(orderId))
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + orderId));
 
         if (order.getShipment() == null || !order.getShipment().getId().equals(shipmentId)) {
@@ -552,8 +575,10 @@ public class ShipmentService {
         Shipment updated = shipmentRepository.save(shipment);
 
         // Advance all assigned orders to IN_TRANSIT
-        if (shipment.getAssignedOrders() != null) {
-            for (OperationalOrder order : shipment.getAssignedOrders()) {
+        List<OperationalOrder> ordersToAdvance = (shipment.getAssignedOrders() != null && !shipment.getAssignedOrders().isEmpty())
+                ? shipment.getAssignedOrders()
+                : orderRepository.findByShipmentId(shipment.getId());
+        for (OperationalOrder order : ordersToAdvance) {
                 if (order.getCurrentStatus() != OrderStatus.DELIVERED && order.getCurrentStatus() != OrderStatus.CANCELLED) {
                     OrderStatus prev = order.getCurrentStatus();
                     order.setCurrentStatus(OrderStatus.IN_TRANSIT);
@@ -571,7 +596,6 @@ public class ShipmentService {
                     djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), OrderStatus.IN_TRANSIT);
                 }
             }
-        }
 
         String role = resolveStaffRole(staffUsername, ShipmentStatus.IN_TRANSIT);
 
@@ -631,14 +655,13 @@ public class ShipmentService {
 
         if (orderIds != null && !orderIds.isEmpty()) {
             for (Long oId : orderIds) {
-                OperationalOrder o = orderRepository.findById(oId)
-                        .or(() -> orderRepository.findByDjangoOrderId(oId))
+                OperationalOrder o = orderRepository.findByDjangoOrderId(oId)
                         .orElseGet(() -> {
                             OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(oId);
                             if (fetched != null) {
                                 return orderRepository.save(fetched);
                             }
-                            return null;
+                            return orderRepository.findById(oId).orElse(null);
                         });
                 if (o != null) {
                     orders.add(o);
@@ -842,7 +865,8 @@ public class ShipmentService {
     @Transactional(readOnly = true)
     public List<ShipmentResponse> getShipmentsByOrderId(Long orderId) {
         List<Shipment> byDirectOrderId = shipmentRepository.findByOrderId(orderId);
-        Optional<OperationalOrder> orderOpt = orderRepository.findById(orderId);
+        Optional<OperationalOrder> orderOpt = orderRepository.findByDjangoOrderId(orderId)
+                .or(() -> orderRepository.findById(orderId));
         if (orderOpt.isPresent() && orderOpt.get().getShipment() != null) {
             Shipment assignedShipment = orderOpt.get().getShipment();
             if (byDirectOrderId.stream().noneMatch(s -> s.getId().equals(assignedShipment.getId()))) {
@@ -1072,7 +1096,15 @@ public class ShipmentService {
                         .build();
                 transitionRepository.save(t);
 
-                djangoOrderSyncService.syncOrderStatusToDjango(order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(), newStatus);
+                Shipment primaryShp = !shipments.isEmpty() ? shipments.get(0) : null;
+                djangoOrderSyncService.syncOrderStatusToDjango(
+                        order.getDjangoOrderId() != null ? order.getDjangoOrderId() : order.getId(),
+                        newStatus,
+                        primaryShp != null ? primaryShp.getShipmentNumber() : null,
+                        primaryShp != null ? primaryShp.getTrackingNumber() : null,
+                        primaryShp != null ? primaryShp.getCarrierName() : null,
+                        null
+                );
             }
         } catch (Exception e) {
             log.warn("Could not derive order status for order ID {}: {}", orderId, e.getMessage());

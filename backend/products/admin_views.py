@@ -665,6 +665,7 @@ def admin_order_status_update(request, order_id):
             import json
             b_data = json.loads(request.body.decode('utf-8'))
             if isinstance(b_data, dict):
+                req_data = b_data
                 raw_new_status = b_data.get('status') or b_data.get('newStatus')
         except Exception:
             pass
@@ -733,9 +734,11 @@ def admin_order_status_update(request, order_id):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     old_status = order.status
-    note = request.data.get('reasonNote') or request.data.get('note', '')
-    carrier_name = request.data.get('carrierName') or request.data.get('carrier_name') or order.carrier_name
-    tracking_number = request.data.get('trackingNumber') or request.data.get('tracking_number') or order.tracking_number
+    note = req_data.get('reasonNote') or req_data.get('note', '')
+    carrier_name = req_data.get('carrierName') or req_data.get('carrier_name') or order.carrier_name
+    tracking_number = req_data.get('trackingNumber') or req_data.get('tracking_number') or order.tracking_number
+    shipment_number = req_data.get('shipmentNumber') or req_data.get('shipment_number')
+    payment_status_param = req_data.get('paymentStatus') or req_data.get('payment_status')
 
     order.status = target_canonical
     if target_canonical == 'DELIVERED' and not order.delivered_at:
@@ -744,12 +747,42 @@ def admin_order_status_update(request, order_id):
         order.carrier_name = carrier_name
     if tracking_number:
         order.tracking_number = tracking_number
+    if payment_status_param:
+        order.payment_status = payment_status_param.upper()
+    elif target_canonical == 'DELIVERED' and str(order.payment_method).lower() == 'cod':
+        order.payment_status = 'PAID'
     order.save()
 
-    # Synchronize linked shipments if any exist
+    # Synchronize or create linked shipment record
+    if shipment_number:
+        from order_service.models import Shipment
+        shp, created = Shipment.objects.get_or_create(
+            order=order,
+            shipment_number=shipment_number,
+            defaults={
+                'status': target_canonical,
+                'carrier_name': carrier_name or 'EcoExpress',
+                'tracking_number': tracking_number or '',
+                'destination': f"{order.city}, {order.state}".strip(', ')
+            }
+        )
+        shp.status = target_canonical
+        if carrier_name:
+            shp.carrier_name = carrier_name
+        if tracking_number:
+            shp.tracking_number = tracking_number
+        if target_canonical == 'DELIVERED' and not shp.delivered_at:
+            shp.delivered_at = timezone.now()
+        shp.save()
+
+    # Synchronize all linked shipments if any exist
     if hasattr(order, 'shipments'):
         for shp in order.shipments.all():
             shp.status = target_canonical
+            if carrier_name:
+                shp.carrier_name = carrier_name
+            if tracking_number:
+                shp.tracking_number = tracking_number
             if target_canonical == 'DELIVERED' and not shp.delivered_at:
                 shp.delivered_at = timezone.now()
             shp.save()

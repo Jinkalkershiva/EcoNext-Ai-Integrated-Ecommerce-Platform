@@ -541,15 +541,62 @@ def cancel_order(request, order_id):
     if curr_status in ['CANCELLED', 'REFUNDED']:
         return bad_request(f'Order #{order.id} is already {curr_status.lower()}.')
 
+    # Strictly allow cancellation only before dispatch / packaging
+    if curr_status not in ['ORDER_PLACED', 'ORDER_CONFIRMED', 'PROCESSING']:
+        return bad_request('Order has already entered fulfillment/dispatch and cannot be cancelled. Please request a return after delivery.')
+
     reason = request.data.get('reason') or request.data.get('cancellation_reason') or 'Customer requested cancellation'
 
     old_status = order.status
     order.status = 'CANCELLED'
     order.cancellation_reason = reason
 
-    if order.payment_status == 'PAID' or (order.payment_method in ['razorpay', 'upi'] and order.razorpay_payment_id):
-        order.payment_status = 'REFUND_PENDING'
-        order.refund_status = 'REFUND_PENDING'
+    refund_note = ""
+    is_online_paid = (order.payment_status == 'PAID' or (str(order.payment_method).lower() in ['razorpay', 'upi', 'card'] and order.razorpay_payment_id))
+
+    if is_online_paid and str(order.payment_method).lower() != 'cod':
+        from shop_cart.payment_views import get_razorpay_credentials
+        key_id, key_secret = get_razorpay_credentials()
+        amount_in_paise = int(Decimal(str(order.total_price)) * 100)
+        refund_success = False
+        refund_id = None
+        
+        if order.razorpay_payment_id and key_id and key_secret:
+            try:
+                import razorpay
+                client = razorpay.Client(auth=(key_id, key_secret))
+                rzp_refund = client.payment.refund(order.razorpay_payment_id, {'amount': amount_in_paise})
+                refund_id = rzp_refund.get('id') if isinstance(rzp_refund, dict) else str(rzp_refund)
+                refund_success = True
+                refund_note = f"Razorpay test refund processed (ID: {refund_id})"
+            except Exception as rzp_err:
+                try:
+                    import requests
+                    resp = requests.post(
+                        f"https://api.razorpay.com/v1/payments/{order.razorpay_payment_id}/refund",
+                        auth=(key_id, key_secret),
+                        json={"amount": amount_in_paise},
+                        timeout=10
+                    )
+                    if resp.status_code in [200, 201]:
+                        data = resp.json()
+                        refund_id = data.get('id')
+                        refund_success = True
+                        refund_note = f"Razorpay test refund processed (ID: {refund_id})"
+                    else:
+                        refund_note = f"Razorpay refund failed: {resp.text}"
+                except Exception as req_err:
+                    refund_note = f"Razorpay refund error: {req_err}"
+
+        if refund_success:
+            order.payment_status = 'REFUNDED'
+            order.refund_status = 'REFUNDED'
+        else:
+            order.payment_status = 'REFUND_PENDING'
+            order.refund_status = 'FAILED'
+    else:
+        # COD or unpaid order
+        order.refund_status = 'NOT_APPLICABLE'
 
     order.save()
 
@@ -560,7 +607,7 @@ def cancel_order(request, order_id):
         to_status='CANCELLED',
         changed_by=request.user,
         changed_by_name=f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
-        note=f"Cancellation: {reason}"
+        note=f"Cancellation: {reason}. {refund_note}".strip()
     )
 
     notify_order_status_change(order, old_status, 'CANCELLED', note=reason)
@@ -831,6 +878,8 @@ def update_order_status(request, order_id):
     order.status = status_value
     if status_value.upper() == 'DELIVERED' and not order.delivered_at:
         order.delivered_at = timezone.now()
+    if status_value.upper() == 'DELIVERED' and str(order.payment_method).lower() == 'cod':
+        order.payment_status = 'PAID'
 
     if carrier_name:
         order.carrier_name = carrier_name

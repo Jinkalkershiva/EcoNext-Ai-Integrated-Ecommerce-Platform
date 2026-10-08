@@ -51,13 +51,31 @@ public class DjangoOrderSyncService {
     }
 
     public void syncOrderStatusToDjango(Long djangoOrderId, OrderStatus status) {
+        syncOrderStatusToDjango(djangoOrderId, status, null, null, null, null);
+    }
+
+    public void syncOrderStatusToDjango(Long djangoOrderId, OrderStatus status, String shipmentNumber, String trackingNumber, String carrierName, String paymentStatus) {
         if (!syncEnabled || djangoOrderId == null) return;
         try {
-            String djangoStatus = status.toDjangoStatus();
+            String djangoStatus = status != null ? status.toDjangoStatus() : null;
             String url = djangoBackendUrl + "/api/admin/orders/" + djangoOrderId + "/status/";
 
             Map<String, Object> body = new HashMap<>();
-            body.put("status", djangoStatus);
+            if (djangoStatus != null) {
+                body.put("status", djangoStatus);
+            }
+            if (shipmentNumber != null) {
+                body.put("shipmentNumber", shipmentNumber);
+            }
+            if (trackingNumber != null) {
+                body.put("trackingNumber", trackingNumber);
+            }
+            if (carrierName != null) {
+                body.put("carrierName", carrierName);
+            }
+            if (paymentStatus != null) {
+                body.put("paymentStatus", paymentStatus);
+            }
 
             byte[] jsonBytes = objectMapper.writeValueAsBytes(body);
 
@@ -68,7 +86,7 @@ public class DjangoOrderSyncService {
             HttpEntity<byte[]> entity = new HttpEntity<>(jsonBytes, headers);
 
             restTemplate.exchange(url, HttpMethod.POST, entity, Map.class);
-            log.info("Synced order #{} status -> {} ({}) with Django backend", djangoOrderId, status, djangoStatus);
+            log.info("Synced order #{} status -> {} (shipment: {}, tracking: {}) with Django backend", djangoOrderId, djangoStatus, shipmentNumber, trackingNumber);
         } catch (Exception e) {
             log.warn("Django order status sync note: {}", e.getMessage());
         }

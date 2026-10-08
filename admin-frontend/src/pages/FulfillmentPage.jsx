@@ -245,7 +245,7 @@ export const FulfillmentPage = () => {
 
   // Enterprise Filters
   const [selectedStatus, setSelectedStatus] = useState('ALL');
-  const [searchQuery, setSearchQuery] = useState(initialOrderId ? `ORD-${initialOrderId}` : '');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedState, setSelectedState] = useState('All States');
   const [selectedCity, setSelectedCity] = useState('');
   const [selectedPincode, setSelectedPincode] = useState('');
@@ -254,7 +254,9 @@ export const FulfillmentPage = () => {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   // Multi-Order Selection State for Orders Ready Tab
-  const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [selectedOrderIds, setSelectedOrderIds] = useState(
+    initialOrderId ? [Number(initialOrderId.replace(/[^0-9]/g, ''))].filter(n => !isNaN(n) && n > 0) : []
+  );
   const [batchCompatibleShipments, setBatchCompatibleShipments] = useState([]);
   const [batchCompatibleLoading, setBatchCompatibleLoading] = useState(false);
 
@@ -548,7 +550,7 @@ export const FulfillmentPage = () => {
 
   // Available trucks in warehouse
   const availableTrucks = useMemo(() => {
-    return containers.filter(c => c.status === 'AVAILABLE' || c.status === 'OPEN');
+    return containers.filter(c => c.status === 'AVAILABLE' || c.status === 'OPEN' || c.status === 'CREATED');
   }, [containers]);
 
   // Summary Metrics Derived
@@ -779,7 +781,16 @@ export const FulfillmentPage = () => {
 
   // Open Multi-Order Create Shipment Modal
   const handleOpenCreateShipmentModal = (preselectedIds = null) => {
-    const targetIds = preselectedIds || selectedOrderIds;
+    let targetIds = (Array.isArray(preselectedIds) && preselectedIds.length > 0)
+      ? preselectedIds
+      : selectedOrderIds;
+
+    if (!targetIds || targetIds.length === 0) {
+      setError('Please select at least one order awaiting fulfillment to create a shipment.');
+      setActiveTab('awaiting');
+      return;
+    }
+
     const selected = ordersAwaiting.filter(o => targetIds.includes(o.id));
     const primaryDest = selected[0] ? `${selected[0].city || 'Bengaluru'}, ${selected[0].state || 'Karnataka'}` : 'Bengaluru Central Fulfillment Hub';
     const totalWeight = selected.reduce((acc, o) => acc + Number(o.total_weight_kg || 1.5), 0);
@@ -805,6 +816,10 @@ export const FulfillmentPage = () => {
   // Submit Multi-Order Shipment
   const handleCreateShipmentSubmit = async (e) => {
     e.preventDefault();
+    if (!createShipmentForm.targetOrderIds || createShipmentForm.targetOrderIds.length === 0) {
+      setError('Cannot create shipment without at least one eligible order.');
+      return;
+    }
     setShipmentSubmitting(true);
     setError('');
     setSuccess('');
@@ -1447,7 +1462,14 @@ export const FulfillmentPage = () => {
           </button>
 
           <button
-            onClick={() => handleOpenCreateShipmentModal([])}
+            onClick={() => {
+              if (selectedOrderIds.length > 0) {
+                handleOpenCreateShipmentModal(selectedOrderIds);
+              } else {
+                setError('Please select one or more ready orders from the list below to create a shipment.');
+                setActiveTab('awaiting');
+              }
+            }}
             className="btn btn-primary btn-sm"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: '#059669', borderColor: '#059669' }}
           >

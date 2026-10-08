@@ -37,6 +37,8 @@ public class CreateShipmentRequest {
 
     private String origin;
 
+    private String warehouse;
+
     private String destination;
 
     private String route;
