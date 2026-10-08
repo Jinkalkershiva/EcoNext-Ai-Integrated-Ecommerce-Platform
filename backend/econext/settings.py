@@ -14,7 +14,7 @@ import dj_database_url
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -96,6 +96,13 @@ else:
         if origin.strip()
     ]
 CORS_ALLOW_CREDENTIALS = True
+
+# CSRF Trusted Origins
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
 
 # Security hardening — only applied when DEBUG is off so local dev over plain
 # HTTP keeps working.

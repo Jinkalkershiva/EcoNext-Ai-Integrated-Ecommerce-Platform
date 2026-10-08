@@ -203,9 +203,10 @@ export class StompClient {
 }
 
 export function createTrackingClient() {
+  const envWsUrl = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL;
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
   const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const wsUrl = `${isHttps ? 'wss' : 'ws'}://${hostname}:8084/ws-tracking`;
+  const wsUrl = envWsUrl || `${isHttps ? 'wss' : 'ws'}://${hostname}:8084/ws-tracking`;
 
   return new StompClient(wsUrl, {
     debug: false,
