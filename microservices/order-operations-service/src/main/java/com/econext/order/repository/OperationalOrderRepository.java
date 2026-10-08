@@ -19,6 +19,8 @@ public interface OperationalOrderRepository extends JpaRepository<OperationalOrd
 
     Optional<OperationalOrder> findByDjangoOrderId(Long djangoOrderId);
 
+    Optional<OperationalOrder> findByOrderNumber(String orderNumber);
+
     List<OperationalOrder> findByShipmentId(Long shipmentId);
 
     Page<OperationalOrder> findByCurrentStatus(OrderStatus status, Pageable pageable);
@@ -28,6 +30,7 @@ public interface OperationalOrderRepository extends JpaRepository<OperationalOrd
            "(:search IS NULL OR LOWER(o.customerUsername) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            " LOWER(o.customerName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            " LOWER(o.customerEmail) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+           " LOWER(o.orderNumber) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            " CAST(o.id AS string) LIKE CONCAT('%', :search, '%')) AND " +
            "(:fromTime IS NULL OR o.createdAt >= :fromTime) AND " +
            "(:toTime IS NULL OR o.createdAt <= :toTime)")

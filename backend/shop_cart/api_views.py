@@ -451,7 +451,8 @@ def create_order(request):
             user_id=order.user_id,
             total_amount=order.total_price,
             status=order.canonical_status,
-            items_count=order.items.count()
+            items_count=order.items.count(),
+            order_number=order.order_number,
         )
     except Exception:
         pass
@@ -484,6 +485,7 @@ def order_list(request):
             .lstrip('0') or '0'
         )
         q_filter = (
+            Q(order_number__icontains=search) |
             Q(tracking_number__icontains=search) |
             Q(city__icontains=search) |
             Q(items__product_name__icontains=search)
@@ -502,23 +504,24 @@ def order_list(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def order_detail(request, order_id):
-    """Get one of the user's own orders, accepting numeric ID or ORD-formatted string."""
-    clean_id = str(order_id).strip().lstrip('#')
-    if clean_id.upper().startswith('ORD-'):
-        clean_id = clean_id[4:].lstrip('0') or '0'
-    elif clean_id.upper().startswith('ORD'):
-        clean_id = clean_id[3:].lstrip('0') or '0'
-    else:
-        clean_id = clean_id.lstrip('0') or '0'
+    """Get one of the user's own orders, accepting numeric ID or customer-facing order number."""
+    raw_str = str(order_id).strip()
+    clean_id = raw_str.lstrip('#')
+    qs = order_queryset() if request.user.is_staff else order_queryset(request.user)
 
-    try:
-        numeric_id = int(clean_id)
-        if request.user.is_staff:
-            order = get_object_or_404(order_queryset(), id=numeric_id)
-        else:
-            order = get_object_or_404(order_queryset(request.user), id=numeric_id)
-    except (ValueError, TypeError):
-        return Response({'status': 'error', 'message': f'Invalid order identifier: {order_id}'}, status=status.HTTP_400_BAD_REQUEST)
+    order = qs.filter(order_number__iexact=raw_str).first()
+    if not order and clean_id != raw_str:
+        order = qs.filter(order_number__iexact=clean_id).first()
+    if not order and clean_id.isdigit():
+        order = qs.filter(id=int(clean_id)).first()
+    if not order:
+        # Legacy format fallback
+        digits_only = clean_id.replace('ORD-', '').replace('ord-', '').lstrip('0')
+        if digits_only.isdigit():
+            order = qs.filter(id=int(digits_only)).first()
+
+    if not order:
+        return Response({'status': 'error', 'message': f'Order not found: {order_id}'}, status=status.HTTP_404_NOT_FOUND)
 
     return Response({'status': 'success', 'order': OrderSerializer(order).data})
 

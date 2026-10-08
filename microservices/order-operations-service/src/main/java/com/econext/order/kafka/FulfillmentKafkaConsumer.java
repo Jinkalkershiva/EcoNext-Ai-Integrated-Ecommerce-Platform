@@ -371,6 +371,9 @@ public class FulfillmentKafkaConsumer {
                     Long userId = 1L;
                     try { userId = Long.parseLong(userIdStr); } catch (Exception ignored) {}
 
+                    String ordNum = (String) data.get("orderNumber");
+                    if (ordNum == null) ordNum = (String) data.get("order_number");
+
                     order = OperationalOrder.builder()
                             .customerId(userId)
                             .customerUsername("CUSTOMER_" + userId)
@@ -379,6 +382,7 @@ public class FulfillmentKafkaConsumer {
                             .totalAmount(totalAmount)
                             .currentStatus(targetStatus)
                             .djangoOrderId(orderId)
+                            .orderNumber(ordNum)
                             .build();
                     order = orderRepository.save(order);
                     log.info("Created placeholder OperationalOrder #{} from Kafka order event", order.getId());

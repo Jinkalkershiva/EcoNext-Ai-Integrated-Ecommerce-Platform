@@ -32,6 +32,42 @@ a {
 button, input, select, textarea {
   font-family: inherit;
   font-size: inherit;
+  color: var(--text-primary);
+}
+
+select {
+  background-color: var(--input-bg, var(--bg-surface));
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+select option {
+  background-color: var(--bg-surface, #ffffff);
+  color: var(--text-primary, #0f172a);
+}
+
+[data-theme="dark"] select,
+[data-theme="dark"] select option {
+  background-color: #111827;
+  color: #f8fafc;
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea {
+  background-color: #1a2234;
+  color: #f8fafc;
+  border-color: #232f45;
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: #7c8ba1;
+}
+
+[data-theme="dark"] .modal-content,
+[data-theme="dark"] .modal {
+  background-color: #111827;
+  color: #f8fafc;
 }
 
 /* Custom Scrollbar */

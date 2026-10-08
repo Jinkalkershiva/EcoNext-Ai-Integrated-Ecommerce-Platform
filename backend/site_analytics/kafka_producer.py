@@ -111,10 +111,11 @@ def publish_product_view_event(user, product_id, category_name=None, duration_ms
     send_event_async(TOPIC_PRODUCT_VIEWS, payload, key=str(product_id))
 
 
-def publish_order_event(order_id, user_id, total_amount, status, items_count=1):
+def publish_order_event(order_id, user_id, total_amount, status, items_count=1, order_number=None):
     """Emits order lifecycle event."""
     payload = {
         'orderId': order_id,
+        'orderNumber': order_number,
         'userId': str(user_id),
         'totalAmount': float(total_amount),
         'status': status,

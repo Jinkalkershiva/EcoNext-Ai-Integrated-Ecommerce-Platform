@@ -69,19 +69,30 @@ public class ShipmentService {
         if (request.getOrderIds() != null) {
             targetOrderIds.addAll(request.getOrderIds());
         }
+        List<OperationalOrder> targetOrders = new ArrayList<>();
+        Set<Long> alreadyResolvedIds = new HashSet<>();
+
         if (request.getOrderRefNumbers() != null) {
             for (String ref : request.getOrderRefNumbers()) {
                 if (ref != null && !ref.isBlank()) {
-                    String clean = ref.replace("ORD-", "").trim();
-                    try {
-                        targetOrderIds.add(Long.parseLong(clean));
-                    } catch (NumberFormatException ignored) {}
+                    Optional<OperationalOrder> byNum = orderRepository.findByOrderNumber(ref.trim());
+                    if (byNum.isPresent()) {
+                        OperationalOrder ord = byNum.get();
+                        targetOrders.add(ord);
+                        if (ord.getId() != null) alreadyResolvedIds.add(ord.getId());
+                        if (ord.getDjangoOrderId() != null) alreadyResolvedIds.add(ord.getDjangoOrderId());
+                    } else {
+                        String clean = ref.replace("ORD-", "").trim();
+                        try {
+                            targetOrderIds.add(Long.parseLong(clean));
+                        } catch (NumberFormatException ignored) {}
+                    }
                 }
             }
         }
 
-        List<OperationalOrder> targetOrders = new ArrayList<>();
         for (Long oId : targetOrderIds) {
+            if (alreadyResolvedIds.contains(oId)) continue;
             OperationalOrder order = orderRepository.findByDjangoOrderId(oId)
                     .orElseGet(() -> {
                         OperationalOrder fetched = djangoOrderSyncService.fetchOrderFromDjango(oId);
@@ -93,13 +104,16 @@ public class ShipmentService {
             if (order == null) {
                 throw new ResourceNotFoundException("Order not found with ID: " + oId);
             }
+            targetOrders.add(order);
+        }
+
+        for (OperationalOrder order : targetOrders) {
             if (order.getShipment() != null) {
                 throw new BadRequestException("Order #" + order.getOrderReferenceNumber() + " is already assigned to active Shipment #" + order.getShipment().getShipmentNumber());
             }
             if (order.getCurrentStatus() == OrderStatus.CANCELLED || order.getCurrentStatus() == OrderStatus.DELIVERED) {
                 throw new BadRequestException("Order #" + order.getOrderReferenceNumber() + " is " + order.getCurrentStatus() + " and cannot be shipped.");
             }
-            targetOrders.add(order);
         }
 
         if (targetOrders.isEmpty()) {
@@ -893,6 +907,25 @@ public class ShipmentService {
             throw new BadRequestException("Invalid shipment state transition from " + currentStatus + " to " + targetStatus);
         }
 
+        if (targetStatus == ShipmentStatus.OUT_FOR_DELIVERY) {
+            List<OperationalOrder> currentAssigned = (shipment.getAssignedOrders() != null && !shipment.getAssignedOrders().isEmpty())
+                    ? shipment.getAssignedOrders()
+                    : orderRepository.findByShipmentId(shipment.getId());
+
+            if (currentAssigned.isEmpty()) {
+                throw new BadRequestException("Cannot transition shipment #" + shipment.getShipmentNumber() + " to OUT_FOR_DELIVERY: No customer orders are assigned to this shipment.");
+            }
+            if (shipment.getUsedWeight() == null || shipment.getUsedWeight().compareTo(BigDecimal.ZERO) <= 0) {
+                // If usedWeight is 0 or uncalculated, verify assigned orders have non-zero total weight
+                BigDecimal calculatedWeight = currentAssigned.stream()
+                        .map(OperationalOrder::resolveWeight)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                if (calculatedWeight.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new BadRequestException("Cannot transition shipment #" + shipment.getShipmentNumber() + " to OUT_FOR_DELIVERY: Shipment has 0 load capacity utilization.");
+                }
+            }
+        }
+
         shipment.setStatus(targetStatus);
         if (targetStatus == ShipmentStatus.DELIVERED) {
             List<OperationalOrder> currentAssigned = (shipment.getAssignedOrders() != null && !shipment.getAssignedOrders().isEmpty())
@@ -1348,6 +1381,8 @@ public class ShipmentService {
                     .state(o.getState())
                     .shippingAddress(o.getShippingAddress())
                     .currentStatus(o.getCurrentStatus())
+                    .orderNumber(o.getOrderNumber())
+                    .orderReferenceNumber(o.getOrderReferenceNumber())
                     .totalWeightKg(o.resolveWeight())
                     .totalVolumeM3(o.resolveVolume())
                     .deliveredAt(o.getDeliveredAt())

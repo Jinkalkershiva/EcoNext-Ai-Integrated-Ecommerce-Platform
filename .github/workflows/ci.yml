@@ -200,6 +200,9 @@ jobs:
             echo "$DOCKERFILES"
             for df in $DOCKERFILES; do
               dir=$(dirname "$df")
+              if [[ "$df" == *"microservices"* ]]; then
+                dir="microservices"
+              fi
               echo "Validating Docker build for $df in directory $dir..."
               docker build "$dir" -f "$df"
             done

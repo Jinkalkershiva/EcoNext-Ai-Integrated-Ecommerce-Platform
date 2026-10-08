@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction, IntegrityError
 from django.contrib.auth.models import User
 from django.utils import timezone
 from products.models import Product, ProductVariant
@@ -85,6 +85,14 @@ class Order(models.Model):
         ('REFUNDED', 'Refunded'),
     ]
     
+    order_number = models.CharField(
+        max_length=32,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='Unique customer-facing order number (ORD-YYYYMMDD-XXXX)'
+    )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
     status = models.CharField(max_length=40, choices=STATUS_CHOICES, default='ORDER_PLACED')
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -126,7 +134,7 @@ class Order(models.Model):
 
     @property
     def order_reference_number(self):
-        return f"ORD-{self.id:05d}"
+        return self.order_number or f"ORD-{self.id:05d}"
 
     @property
     def canonical_status(self):
@@ -213,19 +221,78 @@ class Order(models.Model):
 
         return True, 'Return eligible'
 
+    @classmethod
+    def generate_next_order_number(cls, order_date=None):
+        """
+        Generates a customer-facing business order number in format:
+        ORD-YYYYMMDD-XXXX
+        (e.g., ORD-20261009-0001, ORD-20261009-0002)
+        Uses select_for_update() inside an atomic transaction to ensure
+        concurrency safety and zero sequence collisions.
+        """
+        if order_date is None:
+            order_date = timezone.localdate() if timezone.is_aware(timezone.now()) else timezone.now().date()
+        date_str = order_date.strftime('%Y%m%d')
+        prefix = f"ORD-{date_str}-"
+
+        with transaction.atomic():
+            last_order = (
+                cls.objects.select_for_update()
+                .filter(order_number__startswith=prefix)
+                .order_by('-order_number')
+                .first()
+            )
+            if last_order and last_order.order_number:
+                try:
+                    last_seq = int(last_order.order_number.split('-')[-1])
+                    next_seq = last_seq + 1
+                except (ValueError, IndexError):
+                    next_seq = 1
+            else:
+                next_seq = 1
+
+            candidate = f"{prefix}{next_seq:04d}"
+            while cls.objects.filter(order_number=candidate).exists():
+                next_seq += 1
+                candidate = f"{prefix}{next_seq:04d}"
+
+            return candidate
+
     def save(self, *args, **kwargs):
         if not self.recipient_name and self.user:
             self.recipient_name = f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username
         if not self.email and self.user:
             self.email = self.user.email
-        if not self.tracking_number and self.id:
-            self.tracking_number = f"ECO-AWB-{self.id + 100000}"
         if not self.estimated_delivery:
             # Default estimated delivery: 4 days from creation
             self.estimated_delivery = timezone.now() + timezone.timedelta(days=4)
         if self.status in ['DELIVERED', 'delivered'] and not self.delivered_at:
             self.delivered_at = timezone.now()
-        super().save(*args, **kwargs)
+
+        is_new = self.pk is None
+        if not self.order_number:
+            order_date = timezone.localdate() if timezone.is_aware(timezone.now()) else timezone.now().date()
+            for attempt in range(10):
+                self.order_number = self.generate_next_order_number(order_date)
+                try:
+                    sid = transaction.savepoint()
+                    super().save(*args, **kwargs)
+                    transaction.savepoint_commit(sid)
+                    break
+                except IntegrityError as exc:
+                    transaction.savepoint_rollback(sid)
+                    if 'order_number' in str(exc) or 'Duplicate entry' in str(exc):
+                        self.order_number = None
+                        if attempt == 9:
+                            raise
+                        continue
+                    raise
+        else:
+            super().save(*args, **kwargs)
+
+        if is_new and not self.tracking_number and self.id:
+            self.tracking_number = f"ECO-AWB-{self.id + 100000}"
+            super().save(update_fields=['tracking_number'])
     
     class Meta:
         ordering = ['-created_at']

@@ -22,7 +22,6 @@ public class DeliveryOtpResponse {
     private String status;
     private long expiresInSeconds;
     private String message;
-    private String plainOtpForDev;
     private boolean verified;
     private LocalDateTime generatedAt;
 }

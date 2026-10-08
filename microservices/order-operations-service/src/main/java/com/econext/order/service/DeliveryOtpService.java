@@ -2,6 +2,7 @@ package com.econext.order.service;
 
 import com.econext.order.dto.DeliveryOtpResponse;
 import com.econext.order.dto.ShipmentResponse;
+import com.econext.order.dto.ws.ShipmentStatusWsMessage;
 import com.econext.order.entity.DeliveryVerificationAudit;
 import com.econext.order.entity.OperationalOrder;
 import com.econext.order.entity.OrderStatus;
@@ -23,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,6 +58,9 @@ public class DeliveryOtpService {
     private final DeliveryVerificationAuditRepository deliveryVerificationAuditRepository;
     private final OrderStatusTransitionRepository transitionRepository;
     private final DjangoOrderSyncService djangoOrderSyncService;
+
+    @Autowired(required = false)
+    private SimpMessagingTemplate messagingTemplate;
 
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
@@ -202,7 +207,6 @@ public class DeliveryOtpService {
                         .status(order.getCurrentStatus().name())
                         .expiresInSeconds((int) existingEntry.getRemainingSeconds())
                         .message("Active Delivery PIN already sent. Please enter PIN or wait for code to expire.")
-                        .plainOtpForDev(existingEntry.getPlainOtpForDev())
                         .verified(false)
                         .generatedAt(existingEntry.getGeneratedAt())
                         .build();
@@ -254,7 +258,6 @@ public class DeliveryOtpService {
                 .status(order.getCurrentStatus().name())
                 .expiresInSeconds(OTP_TTL_SECONDS)
                 .message("Secure 6-digit Delivery PIN dispatched to customer email.")
-                .plainOtpForDev(otp)
                 .verified(false)
                 .generatedAt(LocalDateTime.now())
                 .build();
@@ -392,6 +395,32 @@ public class DeliveryOtpService {
             );
         }
 
+        // Broadcast real-time STOMP event so customer order page and admin update instantly without refresh
+        if (messagingTemplate != null) {
+            try {
+                ShipmentStatusWsMessage wsMsg = ShipmentStatusWsMessage.builder()
+                        .eventType("SHIPMENT_STATUS_UPDATED")
+                        .shipmentId(shipment.getId())
+                        .shipmentNumber(shipment.getShipmentNumber())
+                        .orderId(order.getId())
+                        .status("DELIVERED")
+                        .carrierName(shipment.getCarrierName())
+                        .trackingNumber(shipment.getTrackingNumber())
+                        .timestamp(LocalDateTime.now())
+                        .build();
+
+                messagingTemplate.convertAndSend("/topic/orders/" + order.getId(), wsMsg);
+                if (order.getDjangoOrderId() != null && !order.getDjangoOrderId().equals(order.getId())) {
+                    messagingTemplate.convertAndSend("/topic/orders/" + order.getDjangoOrderId(), wsMsg);
+                }
+                messagingTemplate.convertAndSend("/topic/shipments/" + shipment.getId(), wsMsg);
+                messagingTemplate.convertAndSend("/topic/fulfillment/activity", wsMsg);
+                messagingTemplate.convertAndSend("/topic/fulfillment/analytics", wsMsg);
+            } catch (Exception ex) {
+                log.warn("Failed to broadcast STOMP delivery update for order #{}: {}", order.getId(), ex.getMessage());
+            }
+        }
+
         log.info("Delivery OTP verified successfully for Order #{} on Shipment #{}.", order.getId(), shipment.getShipmentNumber());
 
         return DeliveryOtpResponse.builder()
@@ -470,7 +499,6 @@ public class DeliveryOtpService {
                 .status(shipment.getStatus().name())
                 .expiresInSeconds((int) entry.getRemainingSeconds())
                 .message("Active Delivery PIN pending verification. Remaining time: " + entry.getRemainingSeconds() + "s")
-                .plainOtpForDev(entry.getPlainOtpForDev())
                 .verified(false)
                 .generatedAt(entry.getGeneratedAt())
                 .build();

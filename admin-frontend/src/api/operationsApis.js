@@ -406,49 +406,70 @@ export const returnsApi = {
 
   approveReturn: async (id, note = '') => {
     try {
-      const res = await apiRequest(`/admin/returns/${id}/approve/`, {
-        method: 'POST',
-        body: { note }
-      });
-      return res.return || res.data || res;
-    } catch {
       const res = await apiRequest(`/order-ops/returns/${id}/approve`, {
         method: 'POST',
         body: { note }
       });
       return res.data || res;
+    } catch (orderOpsErr) {
+      if (orderOpsErr.message?.includes('not found')) {
+        try {
+          const res = await apiRequest(`/orders/returns/${id}/approve/`, {
+            method: 'POST',
+            body: { note }
+          });
+          return res.return || res.data || res;
+        } catch {
+          throw new Error(`Return request #${id} no longer exists or was already resolved.`);
+        }
+      }
+      throw orderOpsErr;
     }
   },
 
   rejectReturn: async (id, rejectionReason) => {
     try {
-      const res = await apiRequest(`/admin/returns/${id}/reject/`, {
-        method: 'POST',
-        body: { rejection_reason: rejectionReason, rejectionReason }
-      });
-      return res.return || res.data || res;
-    } catch {
       const res = await apiRequest(`/order-ops/returns/${id}/reject`, {
         method: 'POST',
         body: { rejectionReason }
       });
       return res.data || res;
+    } catch (orderOpsErr) {
+      if (orderOpsErr.message?.includes('not found')) {
+        try {
+          const res = await apiRequest(`/orders/returns/${id}/reject/`, {
+            method: 'POST',
+            body: { rejection_reason: rejectionReason, rejectionReason }
+          });
+          return res.return || res.data || res;
+        } catch {
+          throw new Error(`Return request #${id} no longer exists or was already resolved.`);
+        }
+      }
+      throw orderOpsErr;
     }
   },
 
   receiveReturn: async (id, note = '') => {
     try {
-      const res = await apiRequest(`/admin/returns/${id}/receive/`, {
-        method: 'POST',
-        body: { note }
-      });
-      return res.return || res.data || res;
-    } catch {
       const res = await apiRequest(`/order-ops/returns/${id}/receive`, {
         method: 'POST',
         body: { note }
       });
       return res.data || res;
+    } catch (orderOpsErr) {
+      if (orderOpsErr.message?.includes('not found')) {
+        try {
+          const res = await apiRequest(`/orders/returns/${id}/receive/`, {
+            method: 'POST',
+            body: { note }
+          });
+          return res.return || res.data || res;
+        } catch {
+          throw new Error(`Return request #${id} no longer exists or was already resolved.`);
+        }
+      }
+      throw orderOpsErr;
     }
   }
 };

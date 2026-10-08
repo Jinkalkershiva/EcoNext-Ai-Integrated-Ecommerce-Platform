@@ -81,6 +81,9 @@ public class OperationalOrder {
     @Column(name = "django_order_id")
     private Long djangoOrderId;
 
+    @Column(name = "order_number", length = 64)
+    private String orderNumber;
+
     @Column(name = "total_weight_kg", precision = 10, scale = 3)
     @Builder.Default
     private BigDecimal totalWeightKg = new BigDecimal("1.500");
@@ -112,6 +115,9 @@ public class OperationalOrder {
     private LocalDateTime updatedAt;
 
     public String getOrderReferenceNumber() {
+        if (orderNumber != null && !orderNumber.isBlank()) {
+            return orderNumber;
+        }
         if (djangoOrderId != null) {
             return "ORD-" + djangoOrderId;
         }

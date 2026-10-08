@@ -99,7 +99,7 @@ export const PaymentsPage = () => {
         <div>
           <div className="font-bold mono-text text-primary flex items-center gap-1">
             <Package size={13} className="text-muted" />
-            <span>#{row.order_reference_number || `ORD-${String(row.order_id || row.id).padStart(5, '0')}`}</span>
+            <span>#{row.order_number || row.order_reference_number || `ORD-${String(row.order_id || row.id).padStart(5, '0')}`}</span>
           </div>
           <div className="text-xs text-muted flex items-center gap-1 mt-0.5">
             <Calendar size={11} />
@@ -424,7 +424,7 @@ export const PaymentsPage = () => {
               <div className="flex justify-between py-1 border-b border-[var(--border-subtle)]">
                 <span className="text-muted">Order Reference:</span>
                 <span className="font-mono font-bold text-primary">
-                  #{selectedPayment.order_reference_number || `ORD-${String(selectedPayment.order_id || selectedPayment.id).padStart(5, '0')}`}
+                  #{selectedPayment.order_number || selectedPayment.order_reference_number || `ORD-${String(selectedPayment.order_id || selectedPayment.id).padStart(5, '0')}`}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-[var(--border-subtle)]">

@@ -58,7 +58,7 @@ const normalizeOrder = (o) => {
   if (rawStatus === 'CONFIRMED' || rawStatus === 'PAYMENT_CONFIRMED' || rawStatus === 'ORDER_ACCEPTED') currentStatus = 'ORDER_CONFIRMED';
   else if (rawStatus === 'PENDING') currentStatus = 'ORDER_PLACED';
 
-  const refNumber = o.order_reference_number || o.orderReferenceNumber || `ORD-${String(o.id).padStart(5, '0')}`;
+  const refNumber = o.order_number || o.order_reference_number || o.orderReferenceNumber || `ORD-${String(o.id).padStart(5, '0')}`;
   const custName = o.customer_name || o.customerName || o.recipient_name || o.recipientName || (o.user ? `${o.user.first_name || ''} ${o.user.last_name || ''}`.trim() : '') || 'Valued Customer';
   const custEmail = o.customer_email || o.customerEmail || o.email || (o.user?.email || '');
   const custPhone = o.customer_phone || o.customerPhone || o.phone || '';

@@ -139,6 +139,11 @@ public class DjangoOrderSyncService {
                 orderStatus = OrderStatus.valueOf(statusStr.toUpperCase());
             } catch (Exception ignored) {}
 
+            String orderNumber = (String) orderMap.get("order_number");
+            if (orderNumber == null || orderNumber.isBlank()) {
+                orderNumber = (String) orderMap.get("order_reference_number");
+            }
+
             OperationalOrder order = OperationalOrder.builder()
                     .customerId(userId)
                     .customerUsername(username)
@@ -154,6 +159,7 @@ public class DjangoOrderSyncService {
                     .carrierName(carrierName)
                     .trackingNumber(trackingNumber)
                     .djangoOrderId(id)
+                    .orderNumber(orderNumber)
                     .items(new ArrayList<>())
                     .build();
 

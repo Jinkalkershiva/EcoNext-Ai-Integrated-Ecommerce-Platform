@@ -637,11 +637,14 @@ def admin_orders_list(request):
 @permission_classes([IsAdminOrInternalService])
 def admin_order_detail(request, pk):
     """
-    Retrieve single order by ID with complete details, items, payment, timeline, and history.
+    Retrieve single order by ID or order_number with complete details, items, payment, timeline, and history.
     """
-    try:
-        order = Order.objects.select_related('user').prefetch_related('items__product', 'status_history').get(pk=pk)
-    except Order.DoesNotExist:
+    pk_str = str(pk).strip()
+    qs = Order.objects.select_related('user').prefetch_related('items__product', 'status_history')
+    order = qs.filter(order_number__iexact=pk_str).first()
+    if not order and pk_str.isdigit():
+        order = qs.filter(pk=int(pk_str)).first()
+    if not order:
         return Response({'status': 'error', 'message': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
     return Response({'status': 'success', 'order': OrderSerializer(order).data, 'data': OrderSerializer(order).data})
 
@@ -653,9 +656,11 @@ def admin_order_status_update(request, order_id):
     Update order status with lifecycle validation, carrier/tracking attribution,
     audit history recording, customer email/SMS notifications, and event streaming.
     """
-    try:
-        order = Order.objects.get(pk=order_id)
-    except Order.DoesNotExist:
+    order_str = str(order_id).strip()
+    order = Order.objects.filter(order_number__iexact=order_str).first()
+    if not order and order_str.isdigit():
+        order = Order.objects.filter(pk=int(order_str)).first()
+    if not order:
         return Response({'status': 'error', 'message': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
         
     req_data = request.data if isinstance(request.data, dict) else {}

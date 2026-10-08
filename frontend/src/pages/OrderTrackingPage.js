@@ -68,12 +68,7 @@ export const OrderTrackingPage = () => {
   const [liveLocation, setLiveLocation] = useState(null);
   const [lastLiveEvent, setLastLiveEvent] = useState(null);
 
-  // Delivery OTP Verification States
-  const [deliveryOtp, setDeliveryOtp] = useState('');
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [otpSuccess, setOtpSuccess] = useState(null);
-  const [otpError, setOtpError] = useState(null);
-  const [otpResent, setOtpResent] = useState(false);
+
 
   // Cancellation Modal States
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -237,6 +232,14 @@ export const OrderTrackingPage = () => {
             tracking_timeline: updatedTimeline
           };
         });
+
+        setOrders((prevOrders) =>
+          prevOrders.map((ord) =>
+            String(ord.id) === String(data.orderId) || (data.orderId && matchesOrderId(ord, data.orderId))
+              ? { ...ord, status: newStatus }
+              : ord
+          )
+        );
       }
 
       if (data.eventType === 'SHIPMENT_LOCATION_UPDATED' || (data.latitude && data.longitude)) {
@@ -339,67 +342,6 @@ export const OrderTrackingPage = () => {
         } catch (ignored) {}
       }
       setError(`No order found matching "${searchQuery}".`);
-    }
-  };
-
-  // Delivery OTP Verification Handler
-  const handleVerifyDeliveryOtp = async (e) => {
-    e?.preventDefault();
-    if (!deliveryOtp.trim()) {
-      setOtpError('Please enter the 6-digit delivery PIN.');
-      return;
-    }
-    setOtpLoading(true);
-    setOtpError(null);
-    setOtpSuccess(null);
-    try {
-      const res = await apiService.verifyOrderDeliveryOtp(selectedOrder.id, deliveryOtp.trim());
-      const successMsg = res?.message || 'Delivery PIN verified successfully! Order marked as DELIVERED.';
-      setOtpSuccess(successMsg);
-      setDeliveryOtp('');
-
-      setSelectedOrder((prev) => {
-        if (!prev) return prev;
-        const updatedTimeline = (prev.tracking_timeline || []).map((step) => ({
-          ...step,
-          state: 'completed',
-          timestamp: step.step === 'DELIVERED' ? new Date().toISOString() : step.timestamp
-        }));
-
-        return {
-          ...prev,
-          status: 'DELIVERED',
-          tracking_timeline: updatedTimeline
-        };
-      });
-
-      setOrders((prevOrders) =>
-        prevOrders.map((ord) =>
-          ord.id === selectedOrder.id ? { ...ord, status: 'DELIVERED' } : ord
-        )
-      );
-    } catch (err) {
-      const msg = err?.data?.message || err?.message || 'Invalid or expired Delivery PIN. Please try again.';
-      setOtpError(msg);
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  // Delivery OTP Resend Handler
-  const handleResendDeliveryOtp = async () => {
-    setOtpLoading(true);
-    setOtpError(null);
-    try {
-      await apiService.sendOrderDeliveryOtp(selectedOrder.id);
-      setOtpResent(true);
-      setOtpSuccess('A fresh 6-digit Delivery PIN has been sent to your email.');
-      setTimeout(() => setOtpResent(false), 30000);
-    } catch (err) {
-      const msg = err?.data?.message || err?.message || 'Failed to resend Delivery PIN. Please try again.';
-      setOtpError(msg);
-    } finally {
-      setOtpLoading(false);
     }
   };
 
@@ -992,7 +934,7 @@ export const OrderTrackingPage = () => {
               </div>
             )}
 
-            {/* Interactive Delivery PIN / OTP Verification Widget */}
+            {/* Secure Delivery PIN Informational Banner (Customer receives PIN, delivery partner verifies) */}
             {isOutForDelivery && (
               <div
                 style={{
@@ -1004,41 +946,22 @@ export const OrderTrackingPage = () => {
                   marginBottom: '1.5rem'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                    <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#059669', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <KeyRound size={20} />
-                    </div>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#064e3b' }}>
-                        Secure Delivery PIN Verification
-                      </h4>
-                      <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.8rem', color: '#047857' }}>
-                        Your package is Out for Delivery! Enter the 6-digit PIN sent to your email to confirm package handover.
-                      </p>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+                  <div style={{ width: '42px', height: '42px', borderRadius: '50%', backgroundColor: '#059669', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <KeyRound size={22} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#064e3b' }}>
+                      Secure Delivery PIN Dispatched
+                    </h4>
+                    <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.86rem', color: '#047857', lineHeight: 1.5 }}>
+                      Your order is <strong>Out for Delivery</strong>! Your confidential 6-digit delivery PIN has been dispatched to your registered email ({selectedOrder.email || selectedOrder.customer_email || 'address on file'}).
+                    </p>
+                    <div style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', backgroundColor: 'rgba(5, 150, 105, 0.08)', borderRadius: '8px', border: '1px solid rgba(5, 150, 105, 0.25)', fontSize: '0.82rem', color: '#065f46' }}>
+                      <strong>Handover Instructions:</strong> Please tell this 6-digit PIN directly to the delivery partner when they arrive at your door. The delivery partner will enter the PIN into their verification terminal to confirm contactless handover.
                     </div>
                   </div>
                 </div>
-
-                {otpSuccess && <div style={{ color: '#059669', fontSize: '0.85rem', marginBottom: '8px' }}>{otpSuccess}</div>}
-                {otpError && <div style={{ color: '#dc2626', fontSize: '0.85rem', marginBottom: '8px' }}>{otpError}</div>}
-
-                <form onSubmit={handleVerifyDeliveryOtp} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    placeholder="6-digit PIN"
-                    value={deliveryOtp}
-                    onChange={(e) => setDeliveryOtp(e.target.value.replace(/[^0-9]/g, ''))}
-                    style={{ padding: '8px 12px', fontSize: '1.1rem', letterSpacing: '3px', textAlign: 'center', borderRadius: '6px', border: '1px solid #10b981', width: '160px', fontWeight: 700 }}
-                  />
-                  <Button type="submit" variant="primary" size="md" disabled={otpLoading || deliveryOtp.length !== 6}>
-                    {otpLoading ? 'Verifying...' : 'Confirm Handover'}
-                  </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={handleResendDeliveryOtp} disabled={otpResent || otpLoading}>
-                    {otpResent ? 'Code Resent' : 'Resend PIN'}
-                  </Button>
-                </form>
               </div>
             )}
 

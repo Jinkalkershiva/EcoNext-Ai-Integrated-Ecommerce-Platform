@@ -30,6 +30,8 @@ public class OrderResponse {
     private String carrierName;
     private String trackingNumber;
     private Long djangoOrderId;
+    private String orderNumber;
+    private String orderReferenceNumber;
     private BigDecimal totalWeightKg;
     private BigDecimal totalVolumeM3;
     private LocalDateTime deliveredAt;

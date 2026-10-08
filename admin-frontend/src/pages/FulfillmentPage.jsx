@@ -487,12 +487,27 @@ export const FulfillmentPage = () => {
 
     client.onConnect(() => {
       setWsConnected(true);
-      client.subscribe('/topic/fulfillment/activity', () => {
+      client.subscribe('/topic/fulfillment/activity', (data) => {
         loadShipments(false);
         loadOrdersAwaiting();
         loadContainers();
         loadDrivers();
         loadSummary();
+
+        // If tracking modal is open and event matches selected shipment, update live coordinates
+        if (data && (data.latitude || data.longitude)) {
+          setSelectedShipment(prev => {
+            if (prev && String(prev.id) === String(data.shipmentId)) {
+              return {
+                ...prev,
+                currentLatitude: data.latitude || prev.currentLatitude,
+                currentLongitude: data.longitude || prev.currentLongitude,
+                lastLocationUpdate: data.timestamp || new Date().toISOString()
+              };
+            }
+            return prev;
+          });
+        }
       });
       client.subscribe('/topic/fulfillment/analytics', () => {
         loadSummary();
@@ -989,6 +1004,10 @@ export const FulfillmentPage = () => {
 
   // Open Delivery OTP Modal
   const handleOpenOtpModal = async (shipment) => {
+    if (shipment.status === 'DELIVERED') {
+      setError(`Shipment #${shipment.shipmentNumber} is already DELIVERED and verified.`);
+      return;
+    }
     setOtpTargetShipment(shipment);
     setEnteredOtp('');
     setOtpError('');
@@ -1143,23 +1162,27 @@ export const FulfillmentPage = () => {
               </span>
             ))
           ) : orderIds.length > 0 ? (
-            orderIds.map((id, idx) => (
-              <span
-                key={idx}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  backgroundColor: 'rgba(5, 150, 105, 0.1)',
-                  color: '#059669',
-                  fontSize: '0.72rem',
-                  fontWeight: 600
-                }}
-              >
-                #ORD-{id}
-              </span>
-            ))
+            orderIds.map((id, idx) => {
+              const matchedOrder = ordersAwaiting.find(o => o.id === id);
+              const displayNum = matchedOrder?.order_number || matchedOrder?.order_reference_number || (String(id).startsWith('ORD-') ? id : `ORD-${id}`);
+              return (
+                <span
+                  key={idx}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    backgroundColor: 'rgba(5, 150, 105, 0.1)',
+                    color: '#059669',
+                    fontSize: '0.72rem',
+                    fontWeight: 600
+                  }}
+                >
+                  #{displayNum}
+                </span>
+              );
+            })
           ) : (
             <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>No orders assigned</span>
           )}
@@ -1375,6 +1398,12 @@ export const FulfillmentPage = () => {
                   <actionConfig.icon size={11} />
                   {actionConfig.label}
                 </button>
+              )}
+
+              {row.status === 'DELIVERED' && (
+                <span style={{ fontSize: '0.74rem', color: '#059669', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                  <CheckCircle2 size={12} /> Delivery Verified
+                </span>
               )}
             </div>
 
@@ -1897,7 +1926,7 @@ export const FulfillmentPage = () => {
                   render: (row) => (
                     <div>
                       <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
-                        #{row.order_reference_number || `ORD-${row.id}`}
+                        #{row.order_number || row.order_reference_number || `ORD-${row.id}`}
                       </div>
                       <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                         {row.created_at ? new Date(row.created_at).toLocaleDateString() : 'Recent Order'}
@@ -2420,7 +2449,7 @@ export const FulfillmentPage = () => {
                       #RET-{row.id}
                     </div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                      Order: #{row.order_id || row.orderId}
+                      Order: #{row.order_reference_number || row.order_number || row.order_id || row.orderId}
                     </div>
                   </div>
                 )
@@ -2644,7 +2673,10 @@ export const FulfillmentPage = () => {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ padding: '10px 12px', backgroundColor: 'var(--background)', borderRadius: '6px', fontSize: '0.82rem' }}>
-              <div><strong>Orders Selected:</strong> {selectedOrderIds.map(id => `#ORD-${id}`).join(', ')}</div>
+              <div><strong>Orders Selected:</strong> {selectedOrderIds.map(id => {
+                const match = ordersAwaiting.find(o => o.id === id);
+                return `#${match?.order_number || match?.order_reference_number || (String(id).startsWith('ORD-') ? id : `ORD-${id}`)}`;
+              }).join(', ')}</div>
               <div><strong>Total Weight:</strong> {selectedOrdersData.totalWeight} kg • <strong>Total Volume:</strong> {selectedOrdersData.totalVolume} m³</div>
               <div><strong>Destination:</strong> {selectedOrdersData.primaryDestination}</div>
             </div>
@@ -2805,21 +2837,25 @@ export const FulfillmentPage = () => {
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 {createShipmentForm.targetOrderIds.length > 0 ? (
-                  createShipmentForm.targetOrderIds.map(id => (
-                    <span
-                      key={id}
-                      style={{
-                        padding: '2px 8px',
-                        backgroundColor: '#059669',
-                        color: '#fff',
-                        borderRadius: '4px',
-                        fontSize: '0.74rem',
-                        fontWeight: 600
-                      }}
-                    >
-                      #ORD-{id}
-                    </span>
-                  ))
+                  createShipmentForm.targetOrderIds.map(id => {
+                    const match = ordersAwaiting.find(o => o.id === id);
+                    const displayNum = match?.order_number || match?.order_reference_number || (String(id).startsWith('ORD-') ? id : `ORD-${id}`);
+                    return (
+                      <span
+                        key={id}
+                        style={{
+                          padding: '2px 8px',
+                          backgroundColor: '#059669',
+                          color: '#fff',
+                          borderRadius: '4px',
+                          fontSize: '0.74rem',
+                          fontWeight: 600
+                        }}
+                      >
+                        #{displayNum}
+                      </span>
+                    );
+                  })
                 ) : (
                   <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                     Empty order pool (will create an open shipment buffer for future assignment)
@@ -3244,6 +3280,79 @@ export const FulfillmentPage = () => {
           maxWidth="640px"
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Telemetry & GPS Stream Snapshot */}
+            <div style={{ padding: '12px', backgroundColor: 'var(--background)', borderRadius: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>Real-Time Vehicle GPS Telemetry</div>
+                {selectedShipment.currentLatitude && selectedShipment.currentLongitude ? (
+                  <span style={{ fontSize: '0.74rem', color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Radio size={12} /> Live Signal Active
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>GPS location pending dispatch</span>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '10px' }}>
+                <div style={{ padding: '8px', backgroundColor: 'var(--surface)', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Latitude</div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {selectedShipment.currentLatitude ? Number(selectedShipment.currentLatitude).toFixed(4) + '° N' : 'Pending'}
+                  </div>
+                </div>
+                <div style={{ padding: '8px', backgroundColor: 'var(--surface)', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Longitude</div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {selectedShipment.currentLongitude ? Number(selectedShipment.currentLongitude).toFixed(4) + '° E' : 'Pending'}
+                  </div>
+                </div>
+                <div style={{ padding: '8px', backgroundColor: 'var(--surface)', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Carrier & Vehicle</div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {selectedShipment.vehicleNumber || selectedShipment.carrierName || 'EcoExpress EV'}
+                  </div>
+                </div>
+                <div style={{ padding: '8px', backgroundColor: 'var(--surface)', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Last Updated</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-primary)' }}>
+                    {selectedShipment.lastLocationUpdate ? new Date(selectedShipment.lastLocationUpdate).toLocaleTimeString() : 'At Dispatch'}
+                  </div>
+                </div>
+              </div>
+
+              {selectedShipment.currentLatitude && selectedShipment.currentLongitude ? (
+                <div style={{ width: '100%', height: '180px', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                  <iframe
+                    title="Live Shipment GPS Location"
+                    width="100%"
+                    height="100%"
+                    frameBorder="0"
+                    scrolling="no"
+                    marginHeight="0"
+                    marginWidth="0"
+                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${Number(selectedShipment.currentLongitude) - 0.04}%2C${Number(selectedShipment.currentLatitude) - 0.04}%2C${Number(selectedShipment.currentLongitude) + 0.04}%2C${Number(selectedShipment.currentLatitude) + 0.04}&layer=mapnik&marker=${selectedShipment.currentLatitude}%2C${selectedShipment.currentLongitude}`}
+                    style={{ border: 0 }}
+                  />
+                  <div style={{ position: 'absolute', bottom: '6px', right: '6px', backgroundColor: 'rgba(255,255,255,0.9)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.68rem' }}>
+                    <a
+                      href={`https://www.openstreetmap.org/?mlat=${selectedShipment.currentLatitude}&mlon=${selectedShipment.currentLongitude}#map=14/${selectedShipment.currentLatitude}/${selectedShipment.currentLongitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                    >
+                      <ExternalLink size={10} /> View Full Map
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: '16px', textAlign: 'center', backgroundColor: 'var(--surface)', borderRadius: '6px', border: '1px dashed var(--border)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  <MapPin size={24} style={{ margin: '0 auto 6px auto', color: 'var(--text-muted)' }} />
+                  <div>GPS telemetry activates when the carrier vehicle departs the warehouse hub.</div>
+                  <div style={{ fontSize: '0.74rem', marginTop: '4px' }}>Route corridor: {selectedShipment.route || `${selectedShipment.origin} → ${selectedShipment.destination}`}</div>
+                </div>
+              )}
+            </div>
+
             {/* Capacity Snapshot */}
             <div style={{ padding: '12px', backgroundColor: 'var(--background)', borderRadius: '6px' }}>
               <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '8px' }}>Shipment Capacity Utilization</div>

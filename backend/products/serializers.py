@@ -338,6 +338,7 @@ class OrderSerializer(serializers.ModelSerializer):
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
     shipments = ShipmentSerializer(many=True, read_only=True)
     returns = OrderReturnSerializer(many=True, read_only=True)
+    order_number = serializers.CharField(read_only=True)
     order_reference_number = serializers.CharField(read_only=True)
     canonical_status = serializers.CharField(read_only=True)
     customer_name = serializers.SerializerMethodField()
@@ -357,7 +358,7 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            'id', 'user', 'order_reference_number', 'status', 'canonical_status',
+            'id', 'user', 'order_number', 'order_reference_number', 'status', 'canonical_status',
             'total_price', 'recipient_name', 'phone', 'email', 'customer_name',
             'customer_email', 'shipping_address', 'city', 'state', 'zipcode',
             'country', 'payment_method', 'payment_status', 'razorpay_order_id',

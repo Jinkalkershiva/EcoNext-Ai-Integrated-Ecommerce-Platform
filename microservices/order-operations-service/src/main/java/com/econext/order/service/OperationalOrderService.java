@@ -431,6 +431,8 @@ public class OperationalOrderService {
                 .carrierName(order.getCarrierName())
                 .trackingNumber(order.getTrackingNumber())
                 .djangoOrderId(order.getDjangoOrderId())
+                .orderNumber(order.getOrderNumber())
+                .orderReferenceNumber(order.getOrderReferenceNumber())
                 .totalWeightKg(order.resolveWeight())
                 .totalVolumeM3(order.resolveVolume())
                 .deliveredAt(order.getDeliveredAt())
