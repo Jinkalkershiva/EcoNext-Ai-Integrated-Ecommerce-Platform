@@ -13,7 +13,7 @@
 | **API Gateway Ingress** | `http://127.0.0.1:8080` | Reverse proxy | Primary ingress for frontends and external callers |
 | **Django Core Backend** | `http://127.0.0.1:8000` | Superuser: `ADMIN_USERNAME=<configured locally>` | Catalog, ML engine, Gemini Copilot |
 | **Order Operations Service** | `http://127.0.0.1:8084` | Bearer Token auth | Fulfillment, shipments, drivers, delivery OTP |
-| **Admin & Staff Service** | `http://127.0.0.1:8081` | Staff SSOT | Administrative authentication & RBAC/PBAC |
+| **Admin & Staff Service** | `http://127.0.0.1:8085` | Staff SSOT | Administrative authentication & RBAC/PBAC |
 | **Customer Storefront UI** | `http://localhost:5173` | React 19 / Vite | Customer e-commerce experience |
 | **Admin Operations Portal** | `http://localhost:5174` | React 19 / Vite | Logistics, fleet GPS, order management |
 | **MySQL 8.0 Server** | `localhost:3306` | User: `root` / `MYSQL_PASSWORD=<configured locally>` | Relational multi-schema database cluster |

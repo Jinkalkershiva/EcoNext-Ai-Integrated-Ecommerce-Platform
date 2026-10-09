@@ -30,7 +30,7 @@ The EcoNext platform utilizes a hybrid polyglot architecture combining high-thro
           ▼                   ▼                   ▼                   ▼                   ▼
 ┌──────────────────┐ ┌──────────────────┐ ┌───────────────┐ ┌──────────────────┐ ┌──────────────────┐
 │ admin-staff      │ │ order-operations │ │ payment       │ │ cart             │ │ Django Backend   │
-│ service (8081)   │ │ service (8084)   │ │ service (8085)│ │ service (8083)   │ │ Core (8000)      │
+│ service (8085)   │ │ service (8084)   │ │ service (8087)│ │ service (8083)   │ │ Core (8000)      │
 │ • Staff SSOT     │ │ • Order Machine  │ │ • Razorpay    │ │ • Fast Cart      │ │ • Product Catalog│
 │ • 8-Role RBAC    │ │ • Shipments      │ │ • HMAC-SHA256 │ │ • Redis Session  │ │ • ML Price Pred  │
 │ • Staff Auditing │ │ • Containers     │ │ • Webhooks    │ │ • Item Merging   │ │ • Visual Search  │
@@ -58,9 +58,9 @@ The EcoNext platform utilizes a hybrid polyglot architecture combining high-thro
                                             │
                                             ▼
                     ┌───────────────────────────────────────────────┐
-                    │  notification-service (8086) / STOMP WS       │
+                    │  notification-service (8089) / STOMP WS       │
                     │   • Email Notification Engine (SMTP)          │
-                    │   • Real-Time WebSocket Telemetry             │
+                    │   • Real-Time WebSocket Telemetry (8084)      │
                     └───────────────────────────────────────────────┘
 ```
 
@@ -72,15 +72,15 @@ The EcoNext platform utilizes a hybrid polyglot architecture combining high-thro
 | :--- | :--- | :--- | :--- | :--- |
 | **`api-gateway`** | Spring Boot / Cloud Gateway | `8080` | None | Unified ingress, route predicate evaluation, CORS deduplication, WebSocket forwarding |
 | **`backend` (Django)** | Python 3.11 / Django 5.1 | `8000` | `econext` | Product catalog, pricing, ML engine (CLIP/Linear Regression), Copilot, user addresses |
-| **`admin-staff-service`** | Java 21 / Spring Boot 3.3.4 | `8081` | `econext_auth_db` | Authoritative SSOT for administrative governance, 8 operational roles, forensic audit log |
+| **`admin-staff-service`** | Java 21 / Spring Boot 3.3.4 | `8085` | `econext_auth_db` | Authoritative SSOT for administrative governance, staff RBAC/PBAC, forensic audit log |
 | **`catalog-ops-service`** | Java 21 / Spring Boot 3.3.4 | `8082` | `econext_product_db` | Inventory mutations, stock reservations, product taxonomy sync |
 | **`cart-service`** | Java 21 / Spring Boot 3.3.4 | `8083` | `econext_cart_db` | High-throughput distributed cart management, user session merges |
 | **`order-operations-service`**| Java 21 / Spring Boot 3.3.4 | `8084` | `econext_order_db` | Order lifecycle state machine, open shipments, trucks, drivers, corridor audits, delivery OTP |
-| **`payment-service`** | Java 21 / Spring Boot 3.3.4 | `8085` | `econext_payment_db` | Razorpay order generation, cryptographic HMAC signature verification, refund triggers |
-| **`notification-service`** | Java 21 / Spring Boot 3.3.4 | `8086` | `econext_notification_db`| Kafka event consumption, HTML email dispatch, delivery PIN notices |
-| **`data-import-service`** | Java 21 / Spring Boot 3.3.4 | `8087` | `econext_analytics_db` | High-speed CSV/Excel parsing, bulk product ingestion, schema validation |
-| **`frontend` (Storefront)**| React 19 / Vite 6 | `5173` | None (Client) | Customer web application, responsive e-commerce storefront, order tracking |
-| **`admin-frontend`** | React 19 / Vite 6 | `5174` | None (Client) | Administrative and operations dashboard, fulfillment GPS control room, RBAC manager |
+| **`payment-service`** | Java 21 / Spring Boot 3.3.4 | `8087` | `econext_payment_db` | Razorpay order generation, cryptographic HMAC signature verification, refund triggers |
+| **`notification-service`** | Java 21 / Spring Boot 3.3.4 | `8089` | `econext_notification_db`| Kafka event consumption, HTML email dispatch, delivery PIN notices |
+| **`data-import-service`** | Java 21 / Spring Boot 3.3.4 | `8086` | `econext_analytics_db` | High-speed CSV/Excel parsing, bulk product ingestion, batch analysis |
+| **`frontend` (Storefront)**| React 19 / Vite 6 | `5173` (or `5073`) | None (Client) | Customer web application, responsive e-commerce storefront, order tracking |
+| **`admin-frontend`** | React 19 / Vite 6 | `5174` (or `5074`) | None (Client) | Administrative and operations dashboard, fulfillment GPS control room, RBAC manager |
 | **MySQL 8.0 Cluster** | MySQL Server 8.0 | `3306` | Multi-Schema | Persistent domain-isolated relational data store |
 | **Redis 7 Cache** | Redis 7.2 Alpine | `6379` | Ephemeral / Cache | Distributed cache, OTP ephemeral store, token blacklist |
 | **Apache Kafka Broker** | Confluent Kafka 7.6 (KRaft) | `9092` | Event Logs | Distributed event streaming broker operating in KRaft mode |
@@ -93,16 +93,18 @@ Routing in `api-gateway` (`application.yml`) is evaluated sequentially using str
 
 ```yaml
 routes:
-  - id: auth-service-route        # Order 1: /api/auth/** -> admin-staff-service (8081)
-  - id: product-service-route     # Order 2: /api/products/**, /api/categories/** -> Django (8000)
+  - id: auth-service-route        # Order 1: /api/auth/** -> auth-service (8081)
+  - id: product-service-route     # Order 2: /api/products/**, /api/categories/**, /api/kids/** -> Django (8000)
   - id: cart-service-route        # Order 3: /api/cart/** -> cart-service (8083)
   - id: order-service-route       # Order 4: /api/orders/** -> Django (8000)
-  - id: payment-service-route     # Order 6: /api/payments/** -> payment-service (8085)
-  - id: ai-copilot-route          # Order 8: /api/copilot/**, /api/chat/** -> Django (8000)
-  - id: admin-staff-service-route # Order 9: /api/admin/**, /api/staff/** -> admin-staff-service (8081)
-  - id: catalog-ops-service-route # Order 10: /api/catalog-ops/** -> catalog-operations-service (8082)
+  - id: personalization-service   # Order 5: /api/personalization/** -> (8086)
+  - id: payment-service-route     # Order 6: /api/payments/** -> payment-service (8087)
+  - id: notification-service      # Order 7: /api/notifications/** -> notification-service (8089)
+  - id: ai-copilot-route          # Order 8: /api/copilot/**, /api/chat/**, /api/ai/** -> Django (8000)
+  - id: admin-staff-service-route # Order 9: /api/admin/auth/**, /api/admin/staff/**, /api/staff/**, /api/admin/roles/**, /api/admin/permissions/**, /api/admin/audit/** -> admin-staff-service (8085)
+  - id: catalog-ops-service-route # Order 10: /api/catalog-ops/**, /api/inventory-ops/** -> catalog-operations-service (8082)
   - id: order-ops-service-route   # Order 11: /api/order-ops/** -> order-operations-service (8084)
-  - id: data-import-analysis      # Order 12: /api/import/** -> data-import-analysis-service (8087)
+  - id: data-import-analysis      # Order 12: /api/import/**, /api/analytics/** -> data-import-analysis-service (8086)
   - id: ws-tracking-route         # Order 13: /ws-tracking/** -> order-operations-service (8084)
   - id: django-fallback-route     # Order 10000: /api/** -> Django (8000) [Fallback Ingress]
 ```
@@ -114,13 +116,13 @@ routes:
 The project implements the strict **Database-per-Service** design pattern. Direct cross-database joins across bounded contexts are strictly prohibited. Inter-service data sharing occurs exclusively via asynchronous Kafka events or REST API calls.
 
 ### Schema Stratification (`docker/init-databases.sql`):
-1. **`econext`**: Owned by Django backend. Contains `products_product`, `products_category`, `auth_user`, `accounts_userprofile`, `order_service_order`, `order_service_orderitem`, `ml_engine_pricehistory`.
-2. **`econext_auth_db`**: Owned by `admin-staff-service`. Contains `staff_members`, `roles`, `permissions`, `staff_role_mappings`, `role_permission_mappings`, `staff_audit_logs`.
-3. **`econext_order_db`**: Owned by `order-operations-service`. Contains `operational_orders`, `operational_order_items`, `shipments`, `shipment_items`, `containers`, `logistics_drivers`, `shipment_events`, `logistics_tracking_events`, `route_exception_audits`, `delivery_verification_audits`.
-4. **`econext_payment_db`**: Owned by `payment-service`. Contains `payment_transactions`, `razorpay_orders`, `refund_records`.
-5. **`econext_cart_db`**: Owned by `cart-service`. Contains `cart_headers`, `cart_line_items`.
-6. **`econext_notification_db`**: Owned by `notification-service`. Contains `notification_logs`, `email_delivery_audits`.
-7. **`econext_analytics_db`**: Owned by `data-import-analysis-service`. Contains `batch_import_jobs`, `import_error_logs`.
+1. **`econext`**: Owned by Django backend. Contains `products_product`, `products_category`, `products_productvariant`, `auth_user`, `accounts_userprofile`, `accounts_useraddress`, `order_service_order`, `order_service_orderitem`, `order_service_orderreturn`, `order_service_shipment`, `refund_transactions`, `shop_cart_cart`, `shop_cart_cartitem`.
+2. **`econext_auth_db`**: Owned by `admin-staff-service` and `auth-service`. Contains `admin_staff_members`, `admin_roles`, `admin_role_permissions`, `admin_staff_permissions`, `admin_audit_logs`, `users`.
+3. **`econext_order_db`**: Owned by `order-operations-service`. Contains `operational_orders`, `operational_order_items`, `order_return_requests`, `shipments`, `shipment_items`, `containers`, `logistics_drivers`, `shipment_events`, `logistics_tracking_events`, `route_exception_audits`, `delivery_verification_audits`.
+4. **`econext_payment_db`**: Owned by `payment-service`. Contains `payment_transactions`, `refund_transactions`.
+5. **`econext_cart_db`**: Owned by `cart-service`. Contains `carts`, `cart_items`.
+6. **`econext_notification_db`**: Owned by `notification-service`. Contains `notifications`.
+7. **`econext_analytics_db`**: Owned by `data-import-analysis-service`. Contains `operational_import_jobs`.
 
 ---
 
