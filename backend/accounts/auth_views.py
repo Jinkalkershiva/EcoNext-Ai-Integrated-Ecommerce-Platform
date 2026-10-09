@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from accounts.authentication import DualJWTAuthentication
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.views.decorators.http import require_http_methods
@@ -310,13 +311,17 @@ def admin_login_view(request):
     refresh = RefreshToken.for_user(user)
     full_name = f"{user.first_name} {user.last_name}".strip() or user.username
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    assigned_role = profile.preferences.get('role', 'ROLE_ADMIN' if user.is_superuser else 'INVENTORY_MANAGER')
+    assigned_role = profile.preferences.get('role', 'ROLE_SUPER_ADMIN' if user.username == 'Jinkalker_Shiva' else ('ROLE_ADMIN' if user.is_superuser else 'INVENTORY_MANAGER'))
     assigned_roles = profile.preferences.get('roles', [assigned_role])
     user_status = profile.preferences.get('status', 'ACTIVE')
     if user_status == 'SUSPENDED':
         return Response({'status': 'error', 'message': 'Account is suspended'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    if user.is_superuser or assigned_role == 'ROLE_ADMIN':
+    if is_super_admin(user):
+        role = 'ROLE_SUPER_ADMIN'
+        roles = ['ROLE_SUPER_ADMIN']
+        permissions = get_role_permissions('ROLE_SUPER_ADMIN')
+    elif assigned_role in ['ROLE_ADMIN', 'ADMIN'] or user.is_superuser:
         role = 'ROLE_ADMIN'
         roles = ['ROLE_ADMIN']
         permissions = get_role_permissions('ROLE_ADMIN')
@@ -333,6 +338,7 @@ def admin_login_view(request):
         'name': full_name,
         'role': role,
         'roles': roles,
+        'isSuperAdmin': is_super_admin(user),
         'permissions': permissions,
         'accessToken': str(refresh.access_token),
         'refreshToken': str(refresh),
@@ -349,7 +355,7 @@ def admin_login_view(request):
 
 
 @api_view(['GET'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_me_view(request):
     """
@@ -358,10 +364,14 @@ def admin_me_view(request):
     user = request.user
     full_name = f"{user.first_name} {user.last_name}".strip() or user.username
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    assigned_role = profile.preferences.get('role', 'ROLE_ADMIN' if user.is_superuser else 'INVENTORY_MANAGER')
+    assigned_role = profile.preferences.get('role', 'ROLE_SUPER_ADMIN' if user.username == 'Jinkalker_Shiva' else ('ROLE_ADMIN' if user.is_superuser else 'INVENTORY_MANAGER'))
     assigned_roles = profile.preferences.get('roles', [assigned_role])
 
-    if user.is_superuser or assigned_role == 'ROLE_ADMIN':
+    if is_super_admin(user):
+        role = 'ROLE_SUPER_ADMIN'
+        roles = ['ROLE_SUPER_ADMIN']
+        permissions = get_role_permissions('ROLE_SUPER_ADMIN')
+    elif assigned_role in ['ROLE_ADMIN', 'ADMIN'] or user.is_superuser:
         role = 'ROLE_ADMIN'
         roles = ['ROLE_ADMIN']
         permissions = get_role_permissions('ROLE_ADMIN')
@@ -378,6 +388,7 @@ def admin_me_view(request):
         'name': full_name,
         'role': role,
         'roles': roles,
+        'isSuperAdmin': is_super_admin(user),
         'permissions': permissions
     }
     return Response({
@@ -391,6 +402,7 @@ def admin_me_view(request):
 def admin_refresh_view(request):
     """
     Refreshes staff access token using refresh token.
+    Supports standard SimpleJWT refresh tokens with rotation and Spring microservice refresh tokens.
     """
     refresh_token = request.data.get('refreshToken') or request.data.get('refresh')
     if not refresh_token:
@@ -399,116 +411,448 @@ def admin_refresh_view(request):
             'message': 'Refresh token is required'
         }, status=status.HTTP_400_BAD_REQUEST)
         
+    # 1. Try SimpleJWT RefreshToken
     try:
         token = RefreshToken(refresh_token)
+        new_access = str(token.access_token)
+        from rest_framework_simplejwt.settings import api_settings
+        new_refresh = str(token)
+        if api_settings.ROTATE_REFRESH_TOKENS:
+            if api_settings.BLACKLIST_AFTER_ROTATION:
+                try:
+                    token.blacklist()
+                except AttributeError:
+                    pass
+            token.set_jti()
+            token.set_exp()
+            token.set_iat()
+            new_refresh = str(token)
         return Response({
             'status': 'success',
             'data': {
-                'accessToken': str(token.access_token)
+                'accessToken': new_access,
+                'refreshToken': new_refresh,
+                'access': new_access,
+                'refresh': new_refresh
             }
         }, status=status.HTTP_200_OK)
     except Exception:
-        return Response({
-            'status': 'error',
-            'message': 'Invalid or expired refresh token'
-        }, status=status.HTTP_401_UNAUTHORIZED)
+        pass
+
+    # 2. Try Spring Boot microservice refresh token
+    import base64
+    import os
+    import jwt
+    from django.conf import settings
+    spring_secret = os.getenv('JWT_SECRET') or os.getenv('JWT_SECRET_KEY') or getattr(settings, 'JWT_SECRET', '404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970')
+    keys_to_try = []
+    if len(spring_secret.encode('utf-8')) >= 32:
+        keys_to_try.append(spring_secret.encode('utf-8'))
+    try:
+        b64_decoded = base64.b64decode(spring_secret)
+        if len(b64_decoded) >= 32:
+            keys_to_try.append(b64_decoded)
+    except Exception:
+        pass
+
+    for key in keys_to_try:
+        try:
+            payload = jwt.decode(
+                str(refresh_token),
+                key,
+                algorithms=['HS256', 'HS384', 'HS512'],
+                options={'verify_aud': False}
+            )
+            sub = payload.get('sub') or payload.get('username')
+            user = User.objects.filter(id=sub).first() if str(sub).isdigit() else User.objects.filter(username__iexact=str(sub)).first()
+            if not user:
+                user = User.objects.filter(email__iexact=str(sub)).first()
+            if user:
+                user_refresh = RefreshToken.for_user(user)
+                new_access = str(user_refresh.access_token)
+                new_refresh = str(user_refresh)
+                return Response({
+                    'status': 'success',
+                    'data': {
+                        'accessToken': new_access,
+                        'refreshToken': new_refresh,
+                        'access': new_access,
+                        'refresh': new_refresh
+                    }
+                }, status=status.HTTP_200_OK)
+        except Exception:
+            continue
+
+    return Response({
+        'status': 'error',
+        'message': 'Invalid or expired refresh token'
+    }, status=status.HTTP_401_UNAUTHORIZED)
 
 
 SYSTEM_ROLES_CATALOG = [
     {
+        'id': '0',
+        'name': 'ROLE_SUPER_ADMIN',
+        'roleName': 'ROLE_SUPER_ADMIN',
+        'displayName': 'Super Admin (Platform Owner)',
+        'department': 'Platform Governance',
+        'description': 'Master Platform Owner with unrestricted governance, staff administration, and operational oversight',
+        'isSystemRole': True,
+        'permissions': [
+            'SYSTEM_ADMIN_GOVERNANCE', 'ROLE_PREVIEW',
+            'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'CATALOG_DELETE',
+            'INVENTORY_CREATE', 'INVENTORY_READ', 'INVENTORY_UPDATE', 'INVENTORY_ADJUST',
+            'ORDER_READ', 'ORDER_UPDATE', 'ORDER_PROCESS', 'ORDER_STATUS_UPDATE',
+            'SHIPMENT_READ', 'SHIPMENT_UPDATE', 'SHIPMENT_DISPATCH',
+            'RETURN_READ', 'RETURN_APPROVE', 'RETURN_INSPECT', 'RETURN_PROCESS',
+            'FINANCE_READ', 'FINANCE_MANAGE', 'REFUND_PROCESS',
+            'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS', 'DATA_EXPORT', 'DATA_ANALYSIS',
+            'STAFF_CREATE', 'STAFF_READ', 'STAFF_UPDATE', 'STAFF_DISABLE', 'STAFF_MANAGE',
+            'AUDIT_READ', 'DATABASE_QUERY_READ',
+            'DRIVER_TASK_READ', 'DRIVER_STATUS_UPDATE',
+            'NOTIFICATION_READ', 'NOTIFICATION_MANAGE'
+        ]
+    },
+    {
         'id': '1',
         'name': 'ROLE_ADMIN',
         'roleName': 'ROLE_ADMIN',
-        'description': 'Full System Administrator with unrestricted access',
+        'displayName': 'Store Administrator',
+        'department': 'Administration',
+        'description': 'Full System Administrator with operational access (cannot modify Super Admin accounts)',
         'isSystemRole': True,
         'permissions': [
             'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'CATALOG_DELETE',
             'INVENTORY_CREATE', 'INVENTORY_READ', 'INVENTORY_UPDATE', 'INVENTORY_ADJUST',
             'ORDER_READ', 'ORDER_UPDATE', 'ORDER_PROCESS', 'ORDER_STATUS_UPDATE',
+            'SHIPMENT_READ', 'SHIPMENT_UPDATE', 'SHIPMENT_DISPATCH',
+            'RETURN_READ', 'RETURN_APPROVE', 'RETURN_INSPECT', 'RETURN_PROCESS',
+            'FINANCE_READ', 'FINANCE_MANAGE', 'REFUND_PROCESS',
             'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS', 'DATA_EXPORT', 'DATA_ANALYSIS',
             'STAFF_CREATE', 'STAFF_READ', 'STAFF_UPDATE', 'STAFF_DISABLE',
-            'AUDIT_READ', 'DATABASE_QUERY_READ'
+            'AUDIT_READ', 'DATABASE_QUERY_READ',
+            'NOTIFICATION_READ', 'NOTIFICATION_MANAGE'
         ]
     },
     {
         'id': '2',
+        'name': 'ROLE_WAREHOUSE',
+        'roleName': 'ROLE_WAREHOUSE',
+        'displayName': 'Warehouse Staff',
+        'department': 'Inventory/Warehouse',
+        'description': 'Inbound receiving, physical return inspection, inventory stock management and replenishment',
+        'isSystemRole': True,
+        'permissions': [
+            'INVENTORY_CREATE', 'INVENTORY_READ', 'INVENTORY_UPDATE', 'INVENTORY_ADJUST',
+            'CATALOG_READ', 'ORDER_READ', 'RETURN_READ', 'RETURN_INSPECT', 'RETURN_RECEIVE'
+        ]
+    },
+    {
+        'id': '3',
+        'name': 'ROLE_ORDER_MANAGER',
+        'roleName': 'ROLE_ORDER_MANAGER',
+        'displayName': 'Order Manager',
+        'department': 'Order Management',
+        'description': 'Customer orders supervision, lifecycle state transitions and tracking inquiries',
+        'isSystemRole': True,
+        'permissions': [
+            'ORDER_READ', 'ORDER_UPDATE', 'ORDER_PROCESS', 'ORDER_STATUS_UPDATE',
+            'CATALOG_READ', 'CUSTOMER_READ'
+        ]
+    },
+    {
+        'id': '4',
+        'name': 'ROLE_FULFILLMENT',
+        'roleName': 'ROLE_FULFILLMENT',
+        'displayName': 'Fulfillment / Operations Staff',
+        'department': 'Fulfillment/Logistics',
+        'description': 'Forward shipment dispatch, packing, reverse pickup scheduling, carrier & fleet assignments',
+        'isSystemRole': True,
+        'permissions': [
+            'ORDER_READ', 'ORDER_PROCESS', 'ORDER_STATUS_UPDATE',
+            'SHIPMENT_READ', 'SHIPMENT_UPDATE', 'SHIPMENT_DISPATCH',
+            'RETURN_READ', 'RETURN_SCHEDULE_PICKUP', 'CATALOG_READ'
+        ]
+    },
+    {
+        'id': '5',
+        'name': 'ROLE_FINANCE',
+        'roleName': 'ROLE_FINANCE',
+        'displayName': 'Finance / Payments Staff',
+        'department': 'Finance/Payments',
+        'description': 'Payment ledger reconciliation, refund processing & retry, COD offline payouts, financial analytics',
+        'isSystemRole': True,
+        'permissions': [
+            'FINANCE_READ', 'FINANCE_MANAGE', 'REFUND_PROCESS', 'ORDER_READ', 'RETURN_READ',
+            'DATA_ANALYSIS', 'DATA_EXPORT'
+        ]
+    },
+    {
+        'id': '6',
+        'name': 'ROLE_SUPPORT',
+        'roleName': 'ROLE_SUPPORT',
+        'displayName': 'Customer Support Staff',
+        'department': 'Customer Support',
+        'description': 'Customer service, order tracking inquiry, return request review and assistance',
+        'isSystemRole': True,
+        'permissions': [
+            'ORDER_READ', 'RETURN_READ', 'CUSTOMER_READ', 'CATALOG_READ'
+        ]
+    },
+    {
+        'id': '7',
+        'name': 'ROLE_DRIVER',
+        'roleName': 'ROLE_DRIVER',
+        'displayName': 'Logistics Fleet Driver',
+        'department': 'Driver/Fleet',
+        'description': 'Field delivery & reverse pickup driver (isolated strictly to assigned stops & status updates)',
+        'isSystemRole': True,
+        'permissions': [
+            'DRIVER_TASK_READ', 'DRIVER_STATUS_UPDATE'
+        ]
+    },
+    {
+        'id': '8',
+        'name': 'ROLE_NOTIFICATIONS',
+        'roleName': 'ROLE_NOTIFICATIONS',
+        'displayName': 'Communications & Notifications Staff',
+        'department': 'Notifications/Communications',
+        'description': 'Customer Email/SMS notification logs, dispatch monitoring, and delivery alert telemetry',
+        'isSystemRole': True,
+        'permissions': [
+            'NOTIFICATION_READ', 'NOTIFICATION_MANAGE', 'ORDER_READ', 'CUSTOMER_READ'
+        ]
+    },
+    # Preserved legacy operational aliases
+    {
+        'id': '9',
         'name': 'INVENTORY_MANAGER',
         'roleName': 'INVENTORY_MANAGER',
+        'displayName': 'Inventory Manager (Legacy)',
+        'department': 'Inventory/Warehouse',
         'description': 'Manages stock inventory, adjustments, thresholds, and low-stock alerts',
-        'isSystemRole': True,
+        'isSystemRole': False,
         'permissions': [
             'INVENTORY_CREATE', 'INVENTORY_READ', 'INVENTORY_UPDATE', 'INVENTORY_ADJUST',
             'CATALOG_READ', 'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS', 'DATA_EXPORT'
         ]
     },
     {
-        'id': '3',
+        'id': '10',
         'name': 'CATALOG_MANAGER',
         'roleName': 'CATALOG_MANAGER',
+        'displayName': 'Catalog Manager (Legacy)',
+        'department': 'Inventory/Warehouse',
         'description': 'Manages products, categories, pricing, attributes, and catalog data entry',
-        'isSystemRole': True,
+        'isSystemRole': False,
         'permissions': [
             'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'CATALOG_DELETE',
             'INVENTORY_READ', 'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS', 'DATA_EXPORT'
         ]
     },
     {
-        'id': '4',
+        'id': '11',
         'name': 'ORDER_MANAGER',
         'roleName': 'ORDER_MANAGER',
+        'displayName': 'Order Manager (Legacy)',
+        'department': 'Order Management',
         'description': 'Supervises order processing, lifecycle states, cancellations, and logistics',
-        'isSystemRole': True,
+        'isSystemRole': False,
         'permissions': [
             'ORDER_READ', 'ORDER_UPDATE', 'ORDER_PROCESS', 'ORDER_STATUS_UPDATE',
             'CATALOG_READ', 'INVENTORY_READ'
         ]
     },
     {
-        'id': '5',
+        'id': '12',
         'name': 'ORDER_PROCESSING_STAFF',
         'roleName': 'ORDER_PROCESSING_STAFF',
+        'displayName': 'Order Processing Staff (Legacy)',
+        'department': 'Fulfillment/Logistics',
         'description': 'Handles daily picking, packing, and shipment dispatch transitions',
-        'isSystemRole': True,
+        'isSystemRole': False,
         'permissions': [
             'ORDER_READ', 'ORDER_PROCESS', 'ORDER_STATUS_UPDATE', 'CATALOG_READ'
         ]
     },
     {
-        'id': '6',
+        'id': '13',
         'name': 'DATA_ANALYST',
         'roleName': 'DATA_ANALYST',
+        'displayName': 'Data Analyst (Legacy)',
+        'department': 'Administration',
         'description': 'Accesses reports, operational analytics, sales aggregations, and data exports',
-        'isSystemRole': True,
+        'isSystemRole': False,
         'permissions': [
             'DATA_ANALYSIS', 'DATA_EXPORT', 'CATALOG_READ', 'INVENTORY_READ', 'ORDER_READ', 'AUDIT_READ', 'DATABASE_QUERY_READ'
         ]
     },
     {
-        'id': '7',
+        'id': '14',
         'name': 'DATA_ENTRY_STAFF',
         'roleName': 'DATA_ENTRY_STAFF',
+        'displayName': 'Data Entry Staff (Legacy)',
+        'department': 'Inventory/Warehouse',
         'description': 'Performs manual product creation and batch CSV/Excel data entry',
-        'isSystemRole': True,
+        'isSystemRole': False,
         'permissions': [
             'CATALOG_CREATE', 'CATALOG_READ', 'CATALOG_UPDATE', 'DATA_IMPORT', 'BULK_IMPORT_PRODUCTS'
         ]
     },
     {
-        'id': '8',
+        'id': '15',
         'name': 'DELIVERY_STAFF',
         'roleName': 'DELIVERY_STAFF',
+        'displayName': 'Delivery Staff (Legacy)',
+        'department': 'Driver/Fleet',
         'description': 'Field and dispatch logistics updates (Out for delivery, Delivered)',
-        'isSystemRole': True,
+        'isSystemRole': False,
         'permissions': [
-            'ORDER_READ', 'ORDER_STATUS_UPDATE'
+            'DRIVER_TASK_READ', 'DRIVER_STATUS_UPDATE', 'ORDER_READ', 'ORDER_STATUS_UPDATE'
         ]
     }
 ]
 
+OPERATIONAL_DEPARTMENTS = [
+    {
+        'id': 'dept_admin',
+        'name': 'Administration',
+        'displayName': 'Administration',
+        'description': 'Store operations and system-wide management',
+        'defaultRole': 'ROLE_ADMIN',
+        'allowedRoles': ['ROLE_ADMIN', 'ADMIN']
+    },
+    {
+        'id': 'dept_warehouse',
+        'name': 'Inventory/Warehouse',
+        'displayName': 'Inventory / Warehouse',
+        'description': 'Inbound QA, warehouse receiving, return inspection and stock replenishment',
+        'defaultRole': 'ROLE_WAREHOUSE',
+        'allowedRoles': ['ROLE_WAREHOUSE', 'INVENTORY_MANAGER', 'CATALOG_MANAGER', 'DATA_ENTRY_STAFF']
+    },
+    {
+        'id': 'dept_order',
+        'name': 'Order Management',
+        'displayName': 'Order Management',
+        'description': 'Customer orders supervision, lifecycle state transitions and tracking inquiries',
+        'defaultRole': 'ROLE_ORDER_MANAGER',
+        'allowedRoles': ['ROLE_ORDER_MANAGER', 'ORDER_MANAGER']
+    },
+    {
+        'id': 'dept_fulfillment',
+        'name': 'Fulfillment/Logistics',
+        'displayName': 'Fulfillment & Logistics',
+        'description': 'Packing, forward dispatch, reverse pickup scheduling, and carrier assignment',
+        'defaultRole': 'ROLE_FULFILLMENT',
+        'allowedRoles': ['ROLE_FULFILLMENT', 'ORDER_PROCESSING_STAFF']
+    },
+    {
+        'id': 'dept_driver',
+        'name': 'Driver/Fleet',
+        'displayName': 'Driver & Fleet Logistics',
+        'description': 'Last-mile customer deliveries and reverse return pickups',
+        'defaultRole': 'ROLE_DRIVER',
+        'allowedRoles': ['ROLE_DRIVER', 'DELIVERY_STAFF']
+    },
+    {
+        'id': 'dept_finance',
+        'name': 'Finance/Payments',
+        'displayName': 'Finance & Payments',
+        'description': 'Payment ledger reconciliation, refund processing, offline COD payouts',
+        'defaultRole': 'ROLE_FINANCE',
+        'allowedRoles': ['ROLE_FINANCE', 'DATA_ANALYST']
+    },
+    {
+        'id': 'dept_support',
+        'name': 'Customer Support',
+        'displayName': 'Customer Support',
+        'description': 'Customer claims review, return requests assistance, and order inquiry management',
+        'defaultRole': 'ROLE_SUPPORT',
+        'allowedRoles': ['ROLE_SUPPORT', 'CUSTOMER_SUPPORT']
+    },
+    {
+        'id': 'dept_notifications',
+        'name': 'Notifications/Communications',
+        'displayName': 'Notifications & Communications',
+        'description': 'Customer email/SMS dispatch monitoring, delivery alerts, and communication logs',
+        'defaultRole': 'ROLE_NOTIFICATIONS',
+        'allowedRoles': ['ROLE_NOTIFICATIONS']
+    },
+    {
+        'id': 'dept_governance',
+        'name': 'Platform Governance',
+        'displayName': 'Platform Governance (Platform Owner)',
+        'description': 'Master system governance, staff directory administration, audit trails',
+        'defaultRole': 'ROLE_SUPER_ADMIN',
+        'allowedRoles': ['ROLE_SUPER_ADMIN', 'SUPER_ADMIN']
+    }
+]
+
+DEFAULT_ROLE_DEPARTMENTS = {
+    'ROLE_SUPER_ADMIN': 'Platform Governance',
+    'SUPER_ADMIN': 'Platform Governance',
+    'ROLE_ADMIN': 'Administration',
+    'ADMIN': 'Administration',
+    'ROLE_WAREHOUSE': 'Inventory/Warehouse',
+    'INVENTORY_MANAGER': 'Inventory/Warehouse',
+    'ROLE_ORDER_MANAGER': 'Order Management',
+    'ORDER_MANAGER': 'Order Management',
+    'ROLE_FULFILLMENT': 'Fulfillment/Logistics',
+    'ORDER_PROCESSING_STAFF': 'Fulfillment/Logistics',
+    'ROLE_DRIVER': 'Driver/Fleet',
+    'DELIVERY_STAFF': 'Driver/Fleet',
+    'ROLE_FINANCE': 'Finance/Payments',
+    'DATA_ANALYST': 'Finance/Payments',
+    'ROLE_SUPPORT': 'Customer Support',
+    'CUSTOMER_SUPPORT': 'Customer Support',
+    'ROLE_NOTIFICATIONS': 'Notifications/Communications',
+    'CATALOG_MANAGER': 'Inventory/Warehouse',
+    'DATA_ENTRY_STAFF': 'Inventory/Warehouse'
+}
+
+
+def is_super_admin(user):
+    """
+    Returns True if user is the designated platform owner Super Admin.
+    Strictly isolated: only Jinkalker_Shiva or accounts specifically granted ROLE_SUPER_ADMIN qualify.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.username == 'Jinkalker_Shiva':
+        return True
+    profile = getattr(user, 'profile', None)
+    if profile and isinstance(profile.preferences, dict):
+        role = profile.preferences.get('role', '')
+        roles = profile.preferences.get('roles', [])
+        if role == 'ROLE_SUPER_ADMIN' or 'ROLE_SUPER_ADMIN' in roles:
+            return True
+    return False
+
 
 def get_role_permissions(role_name):
+    # Normalize aliases
+    norm = role_name.upper() if role_name else ''
+    if norm in ['SUPER_ADMIN', 'SUPERADMIN']:
+        norm = 'ROLE_SUPER_ADMIN'
+    elif norm in ['ADMIN', 'OPERATOR']:
+        norm = 'ROLE_ADMIN'
+    elif norm in ['WAREHOUSE', 'WAREHOUSE_STAFF']:
+        norm = 'ROLE_WAREHOUSE'
+    elif norm in ['ORDER_MANAGER', 'ORDER_MANAGEMENT', 'ROLE_ORDER_MANAGEMENT']:
+        norm = 'ROLE_ORDER_MANAGER'
+    elif norm in ['FULFILLMENT', 'FULFILLMENT_STAFF', 'LOGISTICS']:
+        norm = 'ROLE_FULFILLMENT'
+    elif norm in ['FINANCE', 'FINANCE_STAFF', 'PAYMENTS']:
+        norm = 'ROLE_FINANCE'
+    elif norm in ['SUPPORT', 'SUPPORT_STAFF', 'CUSTOMER_SUPPORT']:
+        norm = 'ROLE_SUPPORT'
+    elif norm in ['DRIVER', 'DRIVER_STAFF', 'COURIER']:
+        norm = 'ROLE_DRIVER'
+    elif norm in ['NOTIFICATION', 'NOTIFICATIONS', 'COMMUNICATIONS', 'ROLE_COMMUNICATIONS']:
+        norm = 'ROLE_NOTIFICATIONS'
+
     for r in SYSTEM_ROLES_CATALOG:
-        if r['name'] == role_name or r['roleName'] == role_name:
+        if r['name'] == norm or r['roleName'] == norm or r['name'] == role_name:
             return r['permissions']
     return ['ORDER_READ', 'CATALOG_READ']
 
@@ -516,24 +860,27 @@ def get_role_permissions(role_name):
 def is_admin_or_has_perm(user, perm):
     if not user or not user.is_authenticated:
         return False
-    if user.is_superuser:
+    if perm == 'SYSTEM_ADMIN_GOVERNANCE':
+        return is_super_admin(user)
+    if is_super_admin(user):
         return True
     profile = getattr(user, 'profile', None)
-    if profile and isinstance(profile.preferences, dict):
+    if profile and isinstance(profile.preferences, dict) and profile.preferences.get('role'):
         role = profile.preferences.get('role', '')
-        if role == 'ROLE_ADMIN':
-            return True
         roles = profile.preferences.get('roles', [role])
-        if 'ROLE_ADMIN' in roles:
+        if role in ['ROLE_SUPER_ADMIN', 'ROLE_ADMIN'] or 'ROLE_SUPER_ADMIN' in roles or 'ROLE_ADMIN' in roles:
             return True
         user_perms = get_role_permissions(role)
         if perm in user_perms:
             return True
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
     return False
 
 
 @api_view(['GET', 'POST'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_staff_list_create(request):
     """
@@ -545,13 +892,21 @@ def admin_staff_list_create(request):
     from django.contrib.auth.hashers import make_password
 
     if request.method == 'GET':
+        if not is_admin_or_has_perm(request.user, 'STAFF_READ'):
+            return Response({'status': 'error', 'message': 'Access denied: You do not have permission to view the staff directory.'}, status=status.HTTP_403_FORBIDDEN)
+
         staff_users = User.objects.filter(is_staff=True).order_by('-date_joined')
         results = []
         for u in staff_users:
             profile, _ = UserProfile.objects.get_or_create(user=u)
-            role_name = profile.preferences.get('role', 'ROLE_ADMIN' if u.is_superuser else 'INVENTORY_MANAGER')
+            user_is_super = is_super_admin(u)
+            default_role = 'ROLE_SUPER_ADMIN' if user_is_super else ('ROLE_ADMIN' if u.is_superuser else 'INVENTORY_MANAGER')
+            role_name = profile.preferences.get('role', default_role)
+            if user_is_super:
+                role_name = 'ROLE_SUPER_ADMIN'
             roles = profile.preferences.get('roles', [role_name])
             user_status = profile.preferences.get('status', 'ACTIVE')
+            department = profile.preferences.get('department') or DEFAULT_ROLE_DEPARTMENTS.get(role_name, 'Administration')
             full_name = f"{u.first_name} {u.last_name}".strip() or u.username
             results.append({
                 'id': u.id,
@@ -560,8 +915,10 @@ def admin_staff_list_create(request):
                 'username': u.username,
                 'email': u.email,
                 'phone': profile.phone or '',
+                'department': department,
                 'roleName': role_name,
                 'roles': roles,
+                'isSuperAdmin': user_is_super,
                 'status': user_status,
                 'effectivePermissions': get_role_permissions(role_name),
                 'mustChangePassword': profile.preferences.get('mustChangePassword', False),
@@ -581,9 +938,21 @@ def admin_staff_list_create(request):
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
         role_name = (data.get('roleName') or (data.get('roles', ['INVENTORY_MANAGER'])[0] if isinstance(data.get('roles'), list) and data.get('roles') else 'INVENTORY_MANAGER')).strip().upper()
+        department = data.get('department', '').strip()
+        if not department:
+            department = DEFAULT_ROLE_DEPARTMENTS.get(role_name, 'Administration')
+        status_val = data.get('status', 'ACTIVE').strip().upper()
+        if status_val not in ['ACTIVE', 'SUSPENDED']:
+            status_val = 'ACTIVE'
+
+        if role_name == 'ROLE_SUPER_ADMIN' and not is_super_admin(request.user):
+            return Response({'status': 'error', 'message': 'Access denied: Only the Super Admin can provision another Super Admin.'}, status=status.HTTP_403_FORBIDDEN)
 
         if not username or not email or not password:
             return Response({'status': 'error', 'message': 'Username, corporate email, and temporary password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(password) < 8:
+            return Response({'status': 'error', 'message': 'Temporary password must be at least 8 characters long.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if User.objects.filter(username__iexact=username).exists():
             return Response({'status': 'error', 'message': f"Username '{username}' is already taken"}, status=status.HTTP_400_BAD_REQUEST)
@@ -607,7 +976,8 @@ def admin_staff_list_create(request):
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.preferences['role'] = role_name
         profile.preferences['roles'] = [role_name]
-        profile.preferences['status'] = 'ACTIVE'
+        profile.preferences['department'] = department
+        profile.preferences['status'] = status_val
         profile.save()
 
         response_data = {
@@ -617,9 +987,11 @@ def admin_staff_list_create(request):
             'username': user.username,
             'email': user.email,
             'phone': '',
+            'department': department,
             'roleName': role_name,
             'roles': [role_name],
-            'status': 'ACTIVE',
+            'isSuperAdmin': is_super_admin(user),
+            'status': status_val,
             'effectivePermissions': get_role_permissions(role_name),
             'mustChangePassword': False,
             'createdAt': user.date_joined.isoformat(),
@@ -629,13 +1001,13 @@ def admin_staff_list_create(request):
 
         return Response({
             'status': 'success',
-            'message': f"Staff account '{username}' provisioned successfully",
+            'message': f"Staff account '{username}' provisioned successfully in {department}",
             'data': response_data
         }, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_staff_detail(request, pk):
     """
@@ -647,12 +1019,20 @@ def admin_staff_detail(request, pk):
         return Response({'status': 'error', 'message': 'Staff member not found'}, status=status.HTTP_404_NOT_FOUND)
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    role_name = profile.preferences.get('role', 'ROLE_ADMIN' if user.is_superuser else 'INVENTORY_MANAGER')
+    user_is_super = is_super_admin(user)
+    default_role = 'ROLE_SUPER_ADMIN' if user_is_super else ('ROLE_ADMIN' if user.is_superuser else 'INVENTORY_MANAGER')
+    role_name = profile.preferences.get('role', default_role)
+    if user_is_super:
+        role_name = 'ROLE_SUPER_ADMIN'
     roles = profile.preferences.get('roles', [role_name])
     user_status = profile.preferences.get('status', 'ACTIVE')
+    department = profile.preferences.get('department') or DEFAULT_ROLE_DEPARTMENTS.get(role_name, 'Administration')
     full_name = f"{user.first_name} {user.last_name}".strip() or user.username
 
     if request.method == 'GET':
+        if not is_admin_or_has_perm(request.user, 'STAFF_READ'):
+            return Response({'status': 'error', 'message': 'Access denied: You do not have permission to view staff details.'}, status=status.HTTP_403_FORBIDDEN)
+
         return Response({
             'status': 'success',
             'data': {
@@ -662,8 +1042,10 @@ def admin_staff_detail(request, pk):
                 'username': user.username,
                 'email': user.email,
                 'phone': profile.phone or '',
+                'department': department,
                 'roleName': role_name,
                 'roles': roles,
+                'isSuperAdmin': user_is_super,
                 'status': user_status,
                 'effectivePermissions': get_role_permissions(role_name),
                 'mustChangePassword': profile.preferences.get('mustChangePassword', False),
@@ -677,7 +1059,15 @@ def admin_staff_detail(request, pk):
         if not is_admin_or_has_perm(request.user, 'STAFF_UPDATE'):
             return Response({'status': 'error', 'message': 'Access denied: Only administrators may update staff records.'}, status=status.HTTP_403_FORBIDDEN)
 
+        if user_is_super and not is_super_admin(request.user):
+            return Response({'status': 'error', 'message': 'Access denied: Regular administrators cannot modify the Super Admin account.'}, status=status.HTTP_403_FORBIDDEN)
+
         data = request.data
+        if 'roleName' in data or 'roles' in data:
+            requested_role = data.get('roleName') or (data.get('roles')[0] if isinstance(data.get('roles'), list) and data.get('roles') else role_name)
+            if requested_role == 'ROLE_SUPER_ADMIN' and not is_super_admin(request.user):
+                return Response({'status': 'error', 'message': 'Access denied: Only the Super Admin may assign the Super Admin role.'}, status=status.HTTP_403_FORBIDDEN)
+
         if 'name' in data or 'fullName' in data:
             name = (data.get('name') or data.get('fullName')).strip()
             name_parts = name.split(' ', 1)
@@ -692,15 +1082,22 @@ def admin_staff_detail(request, pk):
 
         if 'phone' in data:
             profile.phone = data['phone']
+        if 'department' in data:
+            profile.preferences['department'] = data['department'].strip()
         if 'roleName' in data or 'roles' in data:
             new_role = data.get('roleName') or (data.get('roles')[0] if isinstance(data.get('roles'), list) and data.get('roles') else role_name)
             profile.preferences['role'] = new_role
             profile.preferences['roles'] = data.get('roles') or [new_role]
+            if 'department' not in data and not profile.preferences.get('department'):
+                profile.preferences['department'] = DEFAULT_ROLE_DEPARTMENTS.get(new_role, 'Administration')
         if 'status' in data:
+            if user_is_super and data['status'] == 'SUSPENDED':
+                return Response({'status': 'error', 'message': 'The Super Admin account cannot be suspended or deactivated.'}, status=status.HTTP_400_BAD_REQUEST)
             profile.preferences['status'] = data['status']
         profile.save()
 
         updated_role = profile.preferences.get('role', role_name)
+        updated_dept = profile.preferences.get('department') or DEFAULT_ROLE_DEPARTMENTS.get(updated_role, 'Administration')
         updated_name = f"{user.first_name} {user.last_name}".strip() or user.username
         return Response({
             'status': 'success',
@@ -712,24 +1109,31 @@ def admin_staff_detail(request, pk):
                 'username': user.username,
                 'email': user.email,
                 'phone': profile.phone or '',
+                'department': updated_dept,
                 'roleName': updated_role,
                 'roles': profile.preferences.get('roles', [updated_role]),
+                'isSuperAdmin': user_is_super,
                 'status': profile.preferences.get('status', 'ACTIVE'),
                 'effectivePermissions': get_role_permissions(updated_role)
             }
         })
 
     elif request.method == 'DELETE':
-        if not (request.user.is_superuser or (getattr(request.user, 'profile', None) and request.user.profile.preferences.get('role') == 'ROLE_ADMIN')):
-            return Response({'status': 'error', 'message': 'Access denied: Only root administrators may delete staff records.'}, status=status.HTTP_403_FORBIDDEN)
+        if not (is_super_admin(request.user) or request.user.is_superuser or (getattr(request.user, 'profile', None) and request.user.profile.preferences.get('role') == 'ROLE_ADMIN')):
+            return Response({'status': 'error', 'message': 'Access denied: Only administrators may delete staff records.'}, status=status.HTTP_403_FORBIDDEN)
+        if user_is_super:
+            return Response({'status': 'error', 'message': 'The Super Admin account cannot be deleted.'}, status=status.HTTP_400_BAD_REQUEST)
         if user.username == 'admin':
             return Response({'status': 'error', 'message': 'Root admin account cannot be deleted'}, status=status.HTTP_400_BAD_REQUEST)
         user.delete()
-        return Response({'status': 'success', 'message': f"Staff member '{user.username}' deleted successfully"})
+        return Response({
+            'status': 'success',
+            'message': f"Staff member '{user.username}' deleted successfully"
+        })
 
 
 @api_view(['PATCH', 'POST'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_staff_status_update(request, pk):
     """
@@ -742,6 +1146,9 @@ def admin_staff_status_update(request, pk):
         user = User.objects.get(pk=pk, is_staff=True)
     except User.DoesNotExist:
         return Response({'status': 'error', 'message': 'Staff member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if is_super_admin(user):
+        return Response({'status': 'error', 'message': 'The Super Admin account cannot be suspended or deactivated.'}, status=status.HTTP_400_BAD_REQUEST)
 
     new_status = request.data.get('status', 'ACTIVE').upper()
     profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -761,13 +1168,14 @@ def admin_staff_status_update(request, pk):
             'email': user.email,
             'roleName': role_name,
             'roles': profile.preferences.get('roles', [role_name]),
+            'isSuperAdmin': False,
             'status': new_status
         }
     })
 
 
 @api_view(['POST'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_staff_reset_password(request, pk):
     """
@@ -780,6 +1188,9 @@ def admin_staff_reset_password(request, pk):
         user = User.objects.get(pk=pk, is_staff=True)
     except User.DoesNotExist:
         return Response({'status': 'error', 'message': 'Staff member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if is_super_admin(user) and not is_super_admin(request.user):
+        return Response({'status': 'error', 'message': 'Access denied: Regular administrators cannot reset password for the Super Admin account.'}, status=status.HTTP_403_FORBIDDEN)
 
     new_password = request.data.get('newPassword') or request.data.get('password')
     if not new_password or len(new_password) < 6:
@@ -795,7 +1206,7 @@ def admin_staff_reset_password(request, pk):
 
 
 @api_view(['GET'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_roles_list(request):
     """
@@ -809,7 +1220,7 @@ def admin_roles_list(request):
 
 
 @api_view(['GET'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_permissions_list(request):
     """
@@ -825,10 +1236,24 @@ def admin_permissions_list(request):
     })
 
 
+@api_view(['GET'])
+@authentication_classes([DualJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def admin_departments_list(request):
+    """
+    List all authorized operational departments and their mapped roles.
+    """
+    return Response({
+        'status': 'success',
+        'data': OPERATIONAL_DEPARTMENTS,
+        'count': len(OPERATIONAL_DEPARTMENTS)
+    })
+
+
 # ============ Customer Saved Delivery Addresses ============
 
 @api_view(['GET', 'POST'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def user_addresses_list_create(request):
     """List customer's saved delivery addresses or create a new one."""
@@ -889,7 +1314,7 @@ def user_addresses_list_create(request):
 
 
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def user_address_detail(request, pk):
     """Retrieve, update, or delete a saved delivery address (strictly scoped to authenticated user)."""
@@ -925,7 +1350,7 @@ def user_address_detail(request, pk):
 
 
 @api_view(['POST'])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([DualJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def user_address_set_default(request, pk):
     """Set a saved address as the default shipping address."""

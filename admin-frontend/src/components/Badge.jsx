@@ -30,10 +30,29 @@ export const StatusBadge = ({ status }) => {
 
 export const RoleBadge = ({ roleName }) => {
   if (!roleName) return null;
-  const isSuper = roleName === 'SUPER_ADMIN' || roleName === 'ADMIN';
+  const isSuper = roleName === 'SUPER_ADMIN' || roleName === 'ROLE_SUPER_ADMIN' || roleName === 'ADMIN' || roleName === 'ROLE_ADMIN';
   return (
     <span className={`badge ${isSuper ? 'badge-primary' : 'badge-neutral'}`}>
-      {roleName.replace(/_/g, ' ')}
+      {roleName.replace(/^ROLE_/, '').replace(/_/g, ' ')}
+    </span>
+  );
+};
+
+export const DepartmentBadge = ({ department }) => {
+  if (!department) return null;
+  const dept = String(department).trim();
+  let variant = 'info';
+  if (dept.includes('Governance')) variant = 'warning';
+  else if (dept.includes('Admin')) variant = 'primary';
+  else if (dept.includes('Warehouse') || dept.includes('Inventory')) variant = 'success';
+  else if (dept.includes('Fulfillment') || dept.includes('Fleet') || dept.includes('Driver')) variant = 'info';
+  else if (dept.includes('Finance') || dept.includes('Payment')) variant = 'secondary';
+  else if (dept.includes('Support')) variant = 'neutral';
+  else if (dept.includes('Notification') || dept.includes('Communication')) variant = 'primary';
+
+  return (
+    <span className={`badge badge-${variant} text-[11px] font-medium py-0.5 px-2`}>
+      {dept}
     </span>
   );
 };

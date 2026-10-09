@@ -65,15 +65,79 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const [previewRole, setPreviewRole] = useState(null);
+
   const logout = () => {
     authApi.logout();
     setUser(null);
+    setPreviewRole(null);
+  };
+
+  const isSuperAdmin = () => {
+    if (!user) return false;
+    return (
+      user.role === 'ROLE_SUPER_ADMIN' ||
+      user.roles?.includes('ROLE_SUPER_ADMIN') ||
+      user.username === 'Jinkalker_Shiva' ||
+      user.isSuperAdmin === true
+    );
+  };
+
+  const isAdmin = () => {
+    if (!user) return false;
+    const effectiveRole = previewRole || user.role;
+    if (previewRole && !['ROLE_SUPER_ADMIN', 'ROLE_ADMIN'].includes(previewRole)) {
+      return false;
+    }
+    return (
+      isSuperAdmin() ||
+      effectiveRole === 'ROLE_ADMIN' ||
+      effectiveRole === 'ADMIN' ||
+      user.roles?.includes('ROLE_ADMIN') ||
+      user.roles?.includes('ADMIN')
+    );
   };
 
   const hasPermission = (perm) => {
     if (!user) return false;
-    if (user.role === 'ROLE_ADMIN' || user.role === 'ADMIN' || user.roles?.includes('ROLE_ADMIN') || user.roles?.includes('ADMIN')) {
+    const effectiveRole = (previewRole || user.role || user.roles?.[0] || '').toUpperCase();
+
+    // If acting as super admin, grant all permissions
+    if (!previewRole && isSuperAdmin()) return true;
+    if (effectiveRole === 'ROLE_SUPER_ADMIN') return true;
+
+    // Regular admin
+    if (effectiveRole === 'ROLE_ADMIN' || effectiveRole === 'ADMIN') {
       return true;
+    }
+
+    // Role-specific mapping
+    if (effectiveRole.includes('DRIVER')) {
+      return ['DRIVER_TASK_READ', 'DRIVER_STATUS_UPDATE'].includes(perm);
+    }
+
+    if (effectiveRole.includes('WAREHOUSE')) {
+      return ['INVENTORY_VIEW', 'CATALOG_VIEW', 'ORDER_VIEW', 'RETURN_INSPECT', 'RETURN_RECEIVE'].includes(perm);
+    }
+
+    if (effectiveRole.includes('FULFILLMENT')) {
+      return ['ORDER_VIEW', 'CATALOG_VIEW', 'SHIPMENT_VIEW', 'RETURN_SCHEDULE_PICKUP'].includes(perm);
+    }
+
+    if (effectiveRole.includes('ORDER')) {
+      return ['ORDER_VIEW', 'CATALOG_VIEW', 'CUSTOMER_VIEW'].includes(perm);
+    }
+
+    if (effectiveRole.includes('FINANCE')) {
+      return ['ANALYTICS_VIEW', 'ORDER_VIEW', 'FINANCE_VIEW', 'REFUND_VIEW'].includes(perm);
+    }
+
+    if (effectiveRole.includes('SUPPORT')) {
+      return ['ORDER_VIEW', 'CATALOG_VIEW', 'STAFF_VIEW', 'CUSTOMER_VIEW'].includes(perm);
+    }
+
+    if (effectiveRole.includes('NOTIFICATION') || effectiveRole.includes('COMMUNICATION')) {
+      return ['ORDER_VIEW', 'CUSTOMER_VIEW'].includes(perm);
     }
 
     const userPerms = Array.isArray(user.permissions)
@@ -100,27 +164,44 @@ export const AuthProvider = ({ children }) => {
     }
 
     // Role-based fallbacks for standard operational roles
-    const userRole = (user.role || user.roles?.[0] || '').toUpperCase();
-    if (userRole.includes('INVENTORY') && (perm.includes('INVENTORY') || perm === 'CATALOG_VIEW' || perm === 'IMPORT_RUN')) return true;
-    if (userRole.includes('CATALOG') && (perm.includes('CATALOG') || perm === 'INVENTORY_VIEW' || perm === 'IMPORT_RUN')) return true;
-    if (userRole.includes('ORDER') && (perm.includes('ORDER') || perm === 'CATALOG_VIEW')) return true;
-    if (userRole.includes('DELIVERY') && perm.includes('ORDER')) return true;
-    if (userRole.includes('ANALYST') && (perm.includes('ANALYTICS') || perm.includes('AUDIT') || perm.includes('DATA'))) return true;
-    if (userRole.includes('DATA_ENTRY') && (perm.includes('CATALOG') || perm === 'IMPORT_RUN')) return true;
+    if (effectiveRole.includes('INVENTORY') && (perm.includes('INVENTORY') || perm === 'CATALOG_VIEW' || perm === 'IMPORT_RUN')) return true;
+    if (effectiveRole.includes('CATALOG') && (perm.includes('CATALOG') || perm === 'INVENTORY_VIEW' || perm === 'IMPORT_RUN')) return true;
+    if (effectiveRole.includes('ORDER') && (perm.includes('ORDER') || perm === 'CATALOG_VIEW')) return true;
+    if (effectiveRole.includes('DELIVERY') && (perm.includes('ORDER') || perm.includes('DRIVER'))) return true;
+    if (effectiveRole.includes('ANALYST') && (perm.includes('ANALYTICS') || perm.includes('AUDIT') || perm.includes('DATA'))) return true;
+    if (effectiveRole.includes('DATA_ENTRY') && (perm.includes('CATALOG') || perm === 'IMPORT_RUN')) return true;
 
     return false;
   };
 
-  const isAdmin = () => {
-    if (!user) return false;
-    return user.role === 'ROLE_ADMIN' || user.role === 'ADMIN' || user.roles?.includes('ROLE_ADMIN') || user.roles?.includes('ADMIN');
-  };
+  const exitPreview = () => setPreviewRole(null);
 
-  const staff = user;
+  // Compute effective staff user (including preview role if set)
+  const effectiveStaff = user ? {
+    ...user,
+    role: previewRole || user.role,
+    roles: previewRole ? [previewRole] : user.roles
+  } : null;
+
+  const staff = effectiveStaff;
   const isAuthenticated = Boolean(user);
 
   return (
-    <AuthContext.Provider value={{ user, staff, isAuthenticated, loading, login, logout, hasPermission, isAdmin }}>
+    <AuthContext.Provider value={{
+      user: effectiveStaff,
+      realUser: user,
+      staff: effectiveStaff,
+      isAuthenticated,
+      loading,
+      login,
+      logout,
+      hasPermission,
+      isAdmin,
+      isSuperAdmin,
+      previewRole,
+      setPreviewRole,
+      exitPreview
+    }}>
       {children}
     </AuthContext.Provider>
   );

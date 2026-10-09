@@ -67,30 +67,41 @@ class DualJWTAuthentication(authentication.BaseAuthentication):
                     algorithms=['HS256', 'HS384', 'HS512'],
                     options={'verify_aud': False}
                 )
-                username = payload.get('username') or payload.get('sub')
-                if not username:
-                    continue
+                username = payload.get('username')
+                sub = payload.get('sub')
+                user = None
+                if username:
+                    user = User.objects.filter(username__iexact=str(username)).first()
+                    if not user:
+                        user = User.objects.filter(email__iexact=str(username)).first()
+                if not user and sub:
+                    if str(sub).isdigit():
+                        user = User.objects.filter(id=int(sub)).first()
+                    if not user:
+                        user = User.objects.filter(username__iexact=str(sub)).first()
+                    if not user:
+                        user = User.objects.filter(email__iexact=str(sub)).first()
 
-                user = User.objects.filter(username__iexact=username).first()
                 if not user:
-                    user = User.objects.filter(email__iexact=username).first()
-                if not user:
+                    target_identifier = username or sub
+                    if not target_identifier:
+                        continue
                     # Auto-provision staff user if valid admin/staff token
                     role = payload.get('role', '')
-                    is_admin_or_staff = any(r in ['ROLE_ADMIN', 'STAFF', 'ADMIN', 'INVENTORY_MANAGER', 'CATALOG_MANAGER', 'ORDER_MANAGER'] for r in [role] + payload.get('roles', []))
+                    is_admin_or_staff = any(r in ['ROLE_ADMIN', 'ROLE_SUPER_ADMIN', 'STAFF', 'ADMIN', 'INVENTORY_MANAGER', 'CATALOG_MANAGER', 'ORDER_MANAGER'] for r in [role] + payload.get('roles', []))
                     user, _ = User.objects.get_or_create(
-                        username=username,
+                        username=str(target_identifier),
                         defaults={
-                            'email': payload.get('email', f"{username}@econext.com"),
-                            'first_name': payload.get('name', username),
+                            'email': payload.get('email', f"{target_identifier}@econext.com"),
+                            'first_name': payload.get('name', str(target_identifier)),
                             'is_staff': is_admin_or_staff,
-                            'is_superuser': role == 'ROLE_ADMIN'
+                            'is_superuser': role in ['ROLE_ADMIN', 'ROLE_SUPER_ADMIN']
                         }
                     )
 
                 role = payload.get('role', '')
                 roles = payload.get('roles', [role] if role else [])
-                if any(r in ['ROLE_ADMIN', 'STAFF', 'ADMIN', 'INVENTORY_MANAGER', 'CATALOG_MANAGER', 'ORDER_MANAGER'] for r in roles):
+                if any(r in ['ROLE_ADMIN', 'ROLE_SUPER_ADMIN', 'STAFF', 'ADMIN', 'INVENTORY_MANAGER', 'CATALOG_MANAGER', 'ORDER_MANAGER'] for r in roles):
                     if not user.is_staff:
                         user.is_staff = True
                         user.save(update_fields=['is_staff'])

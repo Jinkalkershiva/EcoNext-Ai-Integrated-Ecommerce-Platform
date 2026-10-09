@@ -7,24 +7,133 @@ import {
   bulkImportApi as baseBulkImportApi
 } from './adminApis';
 
-// Re-export staff & role APIs
+// Re-export staff & role APIs with dual route fallback
 export const staffApi = {
   ...baseStaffApi,
+  getAllStaff: async () => {
+    try {
+      const res = await apiRequest('/admin/staff/');
+      return res.data || (Array.isArray(res) ? res : res?.content || []);
+    } catch {
+      const res = await apiRequest('/admin/staff');
+      return res.data || (Array.isArray(res) ? res : res?.content || []);
+    }
+  },
+  getStaffById: async (id) => {
+    try {
+      const res = await apiRequest(`/admin/staff/${id}/`);
+      return res.data || res;
+    } catch {
+      const res = await apiRequest(`/admin/staff/${id}`);
+      return res.data || res;
+    }
+  },
+  createStaff: async (staffData) => {
+    try {
+      const res = await apiRequest('/admin/staff/', {
+        method: 'POST',
+        body: staffData
+      });
+      return res.data || res;
+    } catch {
+      const res = await apiRequest('/admin/staff', {
+        method: 'POST',
+        body: staffData
+      });
+      return res.data || res;
+    }
+  },
+  updateStaff: async (id, staffData) => {
+    try {
+      const res = await apiRequest(`/admin/staff/${id}/`, {
+        method: 'PATCH',
+        body: staffData
+      });
+      return res.data || res;
+    } catch {
+      const res = await apiRequest(`/admin/staff/${id}`, {
+        method: 'PUT',
+        body: staffData
+      });
+      return res.data || res;
+    }
+  },
   updateStaffRoles: async (id, roles) => {
-    const res = await apiRequest(`/admin/staff/${id}`, {
-      method: 'PUT',
-      body: { roles }
-    });
-    return res.data || res;
+    try {
+      const res = await apiRequest(`/admin/staff/${id}/`, {
+        method: 'PATCH',
+        body: { roles, roleName: Array.isArray(roles) ? roles[0] : roles }
+      });
+      return res.data || res;
+    } catch {
+      const res = await apiRequest(`/admin/staff/${id}`, {
+        method: 'PUT',
+        body: { roles }
+      });
+      return res.data || res;
+    }
   },
   updateStaffStatus: async (id, status) => {
-    return baseStaffApi.updateStatus(id, status);
+    try {
+      const res = await apiRequest(`/admin/staff/${id}/status/`, {
+        method: 'PATCH',
+        body: { status }
+      });
+      return res.data || res;
+    } catch {
+      return baseStaffApi.updateStatus(id, status);
+    }
+  },
+  resetPassword: async (id, newPassword) => {
+    try {
+      const res = await apiRequest(`/admin/staff/${id}/reset-password/`, {
+        method: 'POST',
+        body: { newPassword, password: newPassword }
+      });
+      return res.data || res;
+    } catch {
+      return baseStaffApi.resetPassword(id, newPassword);
+    }
+  },
+  deleteStaff: async (id) => {
+    try {
+      const res = await apiRequest(`/admin/staff/${id}/`, {
+        method: 'DELETE'
+      });
+      return res.data || res;
+    } catch {
+      return baseStaffApi.deleteStaff(id);
+    }
+  }
+};
+
+export const departmentApi = {
+  getAllDepartments: async () => {
+    try {
+      const res = await apiRequest('/admin/departments/');
+      return res.data || (Array.isArray(res) ? res : []);
+    } catch {
+      try {
+        const res = await apiRequest('/admin/departments');
+        return res.data || (Array.isArray(res) ? res : []);
+      } catch {
+        return [];
+      }
+    }
   }
 };
 
 export const roleApi = {
   ...baseRolesApi,
-  getAllRoles: baseRolesApi.getAllRoles
+  getAllRoles: async () => {
+    try {
+      const res = await apiRequest('/admin/roles/');
+      return res.data || (Array.isArray(res) ? res : res?.content || []);
+    } catch {
+      const res = await apiRequest('/admin/roles');
+      return res.data || (Array.isArray(res) ? res : res?.content || []);
+    }
+  }
 };
 
 export const authApi = baseAuthApi;
@@ -397,79 +506,175 @@ export const returnsApi = {
 
   getReturnsByOrderId: async (orderId) => {
     try {
+      const res = await apiRequest(`/orders/${orderId}/returns/`);
+      return res.returns || res.data || [];
+    } catch {
       const res = await apiRequest(`/order-ops/orders/${orderId}/returns`);
       return res.data || res || [];
-    } catch {
-      return [];
     }
   },
 
   approveReturn: async (id, note = '') => {
     try {
-      const res = await apiRequest(`/order-ops/returns/${id}/approve`, {
+      const res = await apiRequest(`/admin/returns/${id}/approve/`, {
         method: 'POST',
         body: { note }
       });
-      return res.data || res;
-    } catch (orderOpsErr) {
-      if (orderOpsErr.message?.includes('not found')) {
+      return res.return_request || res.return || res.data || res;
+    } catch (adminErr) {
+      try {
+        const res = await apiRequest(`/orders/returns/${id}/approve/`, {
+          method: 'POST',
+          body: { note }
+        });
+        return res.return_request || res.return || res.data || res;
+      } catch (orderErr) {
         try {
-          const res = await apiRequest(`/orders/returns/${id}/approve/`, {
+          const res = await apiRequest(`/order-ops/returns/${id}/approve`, {
             method: 'POST',
             body: { note }
           });
-          return res.return || res.data || res;
+          return res.data || res;
         } catch {
-          throw new Error(`Return request #${id} no longer exists or was already resolved.`);
+          throw adminErr;
         }
       }
-      throw orderOpsErr;
     }
   },
 
   rejectReturn: async (id, rejectionReason) => {
     try {
-      const res = await apiRequest(`/order-ops/returns/${id}/reject`, {
+      const res = await apiRequest(`/admin/returns/${id}/reject/`, {
         method: 'POST',
-        body: { rejectionReason }
+        body: { rejection_reason: rejectionReason, rejectionReason }
       });
-      return res.data || res;
-    } catch (orderOpsErr) {
-      if (orderOpsErr.message?.includes('not found')) {
+      return res.return_request || res.return || res.data || res;
+    } catch (adminErr) {
+      try {
+        const res = await apiRequest(`/orders/returns/${id}/reject/`, {
+          method: 'POST',
+          body: { rejection_reason: rejectionReason, rejectionReason }
+        });
+        return res.return_request || res.return || res.data || res;
+      } catch (orderErr) {
         try {
-          const res = await apiRequest(`/orders/returns/${id}/reject/`, {
+          const res = await apiRequest(`/order-ops/returns/${id}/reject`, {
             method: 'POST',
-            body: { rejection_reason: rejectionReason, rejectionReason }
+            body: { rejectionReason }
           });
-          return res.return || res.data || res;
+          return res.data || res;
         } catch {
-          throw new Error(`Return request #${id} no longer exists or was already resolved.`);
+          throw adminErr;
         }
       }
-      throw orderOpsErr;
     }
   },
 
   receiveReturn: async (id, note = '') => {
     try {
-      const res = await apiRequest(`/order-ops/returns/${id}/receive`, {
+      const res = await apiRequest(`/admin/returns/${id}/receive/`, {
         method: 'POST',
         body: { note }
       });
-      return res.data || res;
-    } catch (orderOpsErr) {
-      if (orderOpsErr.message?.includes('not found')) {
+      return res.return_request || res.return || res.data || res;
+    } catch (adminErr) {
+      try {
+        const res = await apiRequest(`/orders/returns/${id}/receive/`, {
+          method: 'POST',
+          body: { note }
+        });
+        return res.return_request || res.return || res.data || res;
+      } catch (orderErr) {
         try {
-          const res = await apiRequest(`/orders/returns/${id}/receive/`, {
+          const res = await apiRequest(`/order-ops/returns/${id}/receive`, {
             method: 'POST',
             body: { note }
           });
-          return res.return || res.data || res;
+          return res.data || res;
         } catch {
-          throw new Error(`Return request #${id} no longer exists or was already resolved.`);
+          throw adminErr;
         }
       }
-      throw orderOpsErr;
+    }
+  },
+
+  schedulePickup: async (id, payload = {}) => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/schedule-pickup/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    } catch {
+      const res = await apiRequest(`/orders/returns/${id}/schedule-pickup/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    }
+  },
+
+  confirmPickup: async (id, payload = {}) => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/confirm-pickup/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    } catch {
+      const res = await apiRequest(`/orders/returns/${id}/confirm-pickup/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    }
+  },
+
+  updateTransit: async (id, payload = {}) => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/transit/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    } catch {
+      const res = await apiRequest(`/orders/returns/${id}/transit/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    }
+  },
+
+  inspectReturn: async (id, payload = {}) => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/inspect/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    } catch {
+      const res = await apiRequest(`/orders/returns/${id}/inspect/`, {
+        method: 'POST',
+        body: payload
+      });
+      return res.return_request || res.return || res.data || res;
+    }
+  },
+
+  cancelReturn: async (id, reason = '') => {
+    try {
+      const res = await apiRequest(`/admin/returns/${id}/cancel/`, {
+        method: 'POST',
+        body: { reason }
+      });
+      return res.return_request || res.return || res.data || res;
+    } catch (adminErr) {
+      const res = await apiRequest(`/orders/returns/${id}/cancel/`, {
+        method: 'POST',
+        body: { reason }
+      });
+      return res.return_request || res.return || res.data || res;
     }
   }
 };
@@ -529,6 +734,14 @@ export const paymentOpsApi = {
   retryRefund: async (refundId) => {
     const res = await apiRequest(`/payments/refunds/${refundId}/retry`, {
       method: 'POST'
+    });
+    return res.data || res;
+  },
+
+  recordCodPayout: async (refundId, payload = {}) => {
+    const res = await apiRequest(`/admin/refunds/${refundId}/payout/`, {
+      method: 'POST',
+      body: payload
     });
     return res.data || res;
   }
@@ -888,6 +1101,21 @@ export const fulfillmentApi = {
       const res = await apiRequest(`/order-ops/fulfillment-summary${query ? '?' + query : ''}`);
       return res.data || res;
     }
+  }
+};
+
+export const driverApi = {
+  getTasks: async () => {
+    const res = await apiRequest('/driver/tasks');
+    return res.data || res;
+  },
+
+  updateTaskStatus: async (taskId, payload = {}) => {
+    const res = await apiRequest(`/driver/tasks/${taskId}/status`, {
+      method: 'POST',
+      body: payload
+    });
+    return res.data || res;
   }
 };
 

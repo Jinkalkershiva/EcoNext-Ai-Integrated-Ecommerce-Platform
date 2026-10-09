@@ -19,11 +19,15 @@ import {
   Settings,
   Leaf,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Crown,
+  Eye,
+  X
 } from 'lucide-react';
 
 export const Sidebar = ({ isCollapsed, onToggle }) => {
-  const { staff, hasPermission, isAdmin } = useAuth();
+  const { staff, hasPermission, isAdmin, isSuperAdmin, previewRole, exitPreview } = useAuth();
+  const isDriver = staff?.role === 'ROLE_DRIVER' || staff?.roles?.includes('ROLE_DRIVER');
 
   const navItems = [
     {
@@ -129,8 +133,13 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
 
   // Filter nav items and only show section headers if at least one item underneath is visible
   const visibleNavItems = navItems.filter((item, index, array) => {
+    // If user is Driver, isolate strictly to Dashboard and Settings
+    if (isDriver && !['Dashboard', 'Settings & Theme'].includes(item.label) && !item.section) {
+      return false;
+    }
+
     if (item.section) {
-      if (isCollapsed) return false;
+      if (isCollapsed || isDriver) return false;
       for (let i = index + 1; i < array.length; i++) {
         if (array[i].section) break;
         if (array[i].visible) return true;
@@ -149,8 +158,15 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
           </div>
           {!isCollapsed && (
             <div className="logo-text">
-              <span className="logo-title">EcoNext Ops</span>
-              <span className="logo-subtitle">Admin & Staff Portal</span>
+              <span className="logo-title flex items-center gap-1.5">
+                EcoNext Ops
+                {isSuperAdmin() && !previewRole && (
+                  <Crown size={14} className="text-amber-500 fill-amber-500 inline" title="Platform Owner (Super Admin)" />
+                )}
+              </span>
+              <span className="logo-subtitle">
+                {isSuperAdmin() && !previewRole ? 'Platform Owner Console' : 'Staff Operational Portal'}
+              </span>
             </div>
           )}
         </div>
@@ -164,6 +180,23 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
         </button>
       </div>
 
+      {/* Role Preview Emulation Banner */}
+      {!isCollapsed && previewRole && (
+        <div className="mx-2 mb-2 p-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1 truncate">
+            <Eye size={12} className="flex-shrink-0" />
+            <span className="truncate">Preview: <strong>{previewRole.replace('ROLE_', '')}</strong></span>
+          </div>
+          <button
+            onClick={exitPreview}
+            className="btn btn-ghost btn-xs p-0.5 text-amber-600 hover:text-amber-800 dark:text-amber-400"
+            title="Exit Role Preview"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       <div className="sidebar-nav">
         {visibleNavItems.map((item, idx) => {
           if (item.section) {
@@ -175,6 +208,7 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
           }
 
           const IconComponent = item.icon;
+          const displayLabel = (item.label === 'Dashboard' && isDriver) ? 'My Delivery Tasks' : item.label;
 
           return (
             <NavLink
@@ -183,12 +217,12 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
               className={({ isActive }) =>
                 `nav-item ${isActive ? 'active' : ''}`
               }
-              title={isCollapsed ? item.label : undefined}
+              title={isCollapsed ? displayLabel : undefined}
             >
               <span className="nav-icon">
                 <IconComponent size={18} />
               </span>
-              {!isCollapsed && <span className="nav-label">{item.label}</span>}
+              {!isCollapsed && <span className="nav-label">{displayLabel}</span>}
             </NavLink>
           );
         })}
@@ -196,16 +230,28 @@ export const Sidebar = ({ isCollapsed, onToggle }) => {
 
       <div className="sidebar-footer">
         {!isCollapsed && staff && (
-          <div className="staff-pill">
-            <div className="staff-avatar">
-              {staff.fullName ? staff.fullName.charAt(0).toUpperCase() : (staff.username ? staff.username.charAt(0).toUpperCase() : 'S')}
+          <div className={`staff-pill ${isSuperAdmin() && !previewRole ? 'border border-amber-500/30 bg-amber-500/5' : ''}`}>
+            <div className={`staff-avatar ${isSuperAdmin() && !previewRole ? 'bg-amber-500 text-white font-bold' : ''}`}>
+              {isSuperAdmin() && !previewRole ? (
+                <Crown size={14} className="fill-white" />
+              ) : (
+                staff.fullName ? staff.fullName.charAt(0).toUpperCase() : (staff.username ? staff.username.charAt(0).toUpperCase() : 'S')
+              )}
             </div>
             <div className="staff-info">
-              <span className="staff-name">{staff.fullName || staff.username}</span>
-              <span className="staff-role">
-                {staff.roles && staff.roles.length > 0
-                  ? staff.roles[0].replace('ROLE_', '')
-                  : 'STAFF'}
+              <span className="staff-name flex items-center gap-1">
+                {staff.fullName || staff.username}
+              </span>
+              <span className="staff-role font-mono text-[10px]">
+                {previewRole ? (
+                  <span className="text-amber-600 dark:text-amber-400">EMULATING {previewRole.replace('ROLE_', '')}</span>
+                ) : isSuperAdmin() ? (
+                  <span className="text-amber-600 dark:text-amber-400 font-bold">SUPER ADMIN</span>
+                ) : (
+                  staff.roles && staff.roles.length > 0
+                    ? staff.roles[0].replace('ROLE_', '')
+                    : 'STAFF'
+                )}
               </span>
             </div>
           </div>
